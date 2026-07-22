@@ -15,3 +15,4 @@ pretrained_encoder.pth
 results/
 raw/
 data/
+model/

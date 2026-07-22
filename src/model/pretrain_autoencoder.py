@@ -74,7 +74,7 @@ class SeismicAutoencoder(nn.Module):
 # --- 3. TRAINING EXECUTION ---
 if __name__ == "__main__":
     # Settings
-    DATA_DIR = "data/24012020_M6.8_Sivrice__Elazig_/2020_01_24"
+    DATA_DIR = "data"
     BATCH_SIZE = 64
     EPOCHS = 30
     LEARNING_RATE = 1e-3
@@ -123,8 +123,8 @@ if __name__ == "__main__":
     print("\nPre-training complete!")
     
     # Save the FULL autoencoder (optional, for visualization later)
-    torch.save(autoencoder.state_dict(), "full_autoencoder.pth")
+    torch.save(autoencoder.state_dict(), "model/full_autoencoder.pth")
     
     # Save ONLY THE ENCODER (this is what you need for the CNN-LSTM step)
-    torch.save(autoencoder.encoder.state_dict(), "pretrained_encoder.pth")
+    torch.save(autoencoder.encoder.state_dict(), "model/pretrained_encoder.pth")
     print("Saved 'pretrained_encoder.pth' for the forecasting model.")

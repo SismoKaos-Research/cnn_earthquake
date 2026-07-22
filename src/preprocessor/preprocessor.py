@@ -193,68 +193,99 @@ def run_mseed_preprocessing():
     print("AŞAMA 1: MSEED ÖN İŞLEME (GAP, FİLTRE, DOWNSAMPLE)")
     print("=" * 50)
 
-    if not settings.MSEED_INPUT_FILE.exists():
-        print(f"[ATLANDI] MSEED dosyası bulunamadı: {settings.MSEED_INPUT_FILE}")
+    if not settings.MSEED_INPUT_DIR.exists():
+        print(f"[ATLANDI] MSEED dizini bulunamadı: {settings.MSEED_INPUT_DIR}")
         return False
+
+    # 1. Directory Parsing Logic
+    # Find all .mseed and .miniseed files recursively in the directory
+    mseed_files = list(settings.MSEED_INPUT_DIR.rglob("*.mseed"))
+    mseed_files.extend(list(settings.MSEED_INPUT_DIR.rglob("*.miniseed")))
+
+    if not mseed_files:
+        print(f"[UYARI] {settings.MSEED_INPUT_DIR} içinde MSEED dosyası bulunamadı.")
+        return False
+
+    print(f"[INFO] Toplam {len(mseed_files)} adet MSEED dosyası bulundu. İşlem başlıyor...")
 
     processing_start_time = datetime.now()
     
-    # Log Setup
+    # Master Log Setup
     log_dir = settings.DATA_ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     gap_log_path = log_dir / f"gap_report_{processing_start_time.strftime('%Y%m%d_%H%M%S')}.txt"
 
     if settings.SAVE_REPORT:
         with open(gap_log_path, "w", encoding="utf-8") as glog:
-            glog.write(f"GAP RAPORU — Dosya: {settings.MSEED_INPUT_FILE.name}\n")
-            glog.write(f"Hedef FS: {settings.Fs} Hz | Bandpass: {settings.FREQMIN}–{settings.FREQMAX} Hz | Gap Eşiği: {settings.GAP_THRESHOLD} sn\n\n")
+            glog.write(f"TOPLU GAP RAPORU — Başlangıç: {processing_start_time}\n")
+            glog.write(f"Hedef FS: {settings.Fs} Hz | Bandpass: {settings.FREQMIN}–{settings.FREQMAX} Hz | Gap Eşiği: {settings.GAP_THRESHOLD} sn\n")
+            glog.write("=" * 60 + "\n\n")
 
-    print(f"[INFO] Dosya okunuyor: {settings.MSEED_INPUT_FILE}")
-    st_full = read(str(settings.MSEED_INPUT_FILE))
+    total_files_created_all = 0
 
-    for tr_raw in st_full:
-        if tr_raw.data.dtype != np.float64:
-            tr_raw.data = tr_raw.data.astype(np.float64)
+    # 2. Iterate over all discovered files
+    for file_idx, mseed_file in enumerate(mseed_files, 1):
+        print(f"\n[INFO] [{file_idx}/{len(mseed_files)}] Dosya okunuyor: {mseed_file.name}")
+        
+        if settings.SAVE_REPORT:
+            with open(gap_log_path, "a", encoding="utf-8") as glog:
+                glog.write(f"--- Dosya: {mseed_file.name} ---\n")
 
-    real_fs = st_full[0].stats.sampling_rate
-    real_decimation_factor = max(1, int(real_fs / settings.Fs))
-
-    st_full = _manage_gaps(st_full)
-
-    file_date = parse_file_date(settings.MSEED_INPUT_FILE, st_full)
-    day_start = UTCDateTime(file_date.year, file_date.month, file_date.day, 0, 0, 0)
-    day_end = day_start + 86400
-    num_windows = int((day_end - day_start) / settings.PREPROCESS_WINDOW_SEC)
-    
-    min_seg_len = max(20, int(3.0 / settings.FREQMIN * real_fs))
-    total_files_created = 0
-
-    for window_idx in range(num_windows):
-        window_start_utc = day_start + (window_idx * settings.PREPROCESS_WINDOW_SEC)
-        window_end_utc = window_start_utc + settings.PREPROCESS_WINDOW_SEC
-        st_window = st_full.copy().slice(starttime=window_start_utc, endtime=window_end_utc)
-
-        if len(st_window) == 0 or len(st_window[0].data) < 100:
+        try:
+            st_full = read(str(mseed_file))
+        except Exception as e:
+            print(f"[HATA] {mseed_file.name} okunamadı: {e}")
             continue
 
-        st_proc = st_window.copy()
-        win_nan_map = {}
-        for wtr in st_proc:
-            wd = np.ma.filled(wtr.data.astype(float), np.nan) if np.ma.is_masked(wtr.data) else np.array(wtr.data, dtype=float)
-            wnan = np.isnan(wd)
-            if wnan.any():
-                win_nan_map[wtr.id] = wnan
-            wtr.data = wd
+        for tr_raw in st_full:
+            if tr_raw.data.dtype != np.float64:
+                tr_raw.data = tr_raw.data.astype(np.float64)
 
-        st_decimated = st_proc.copy()
+        real_fs = st_full[0].stats.sampling_rate
+        real_decimation_factor = max(1, int(real_fs / settings.Fs))
+
+        # Handle Gaps
+        st_full = _manage_gaps(st_full)
+
+        file_date = parse_file_date(mseed_file, st_full)
+        day_start = UTCDateTime(file_date.year, file_date.month, file_date.day, 0, 0, 0)
+        day_end = day_start + 86400
+        num_windows = int((day_end - day_start) / settings.PREPROCESS_WINDOW_SEC)
         
-        for wtr in st_proc:
-            res_tr = st_decimated.select(id=wtr.id)[0]
-            _process_trace(wtr, res_tr, win_nan_map, real_decimation_factor, min_seg_len)
+        min_seg_len = max(20, int(3.0 / settings.FREQMIN * real_fs))
+        total_files_created = 0
 
-        total_files_created += _save_window_to_ml_array(st_decimated, window_start_utc)
+        for window_idx in range(num_windows):
+            window_start_utc = day_start + (window_idx * settings.PREPROCESS_WINDOW_SEC)
+            window_end_utc = window_start_utc + settings.PREPROCESS_WINDOW_SEC
+            st_window = st_full.copy().slice(starttime=window_start_utc, endtime=window_end_utc)
 
-    print(f"[INFO] Ön işleme tamamlandı. Toplam {total_files_created} NPY dosyası {settings.DATA_ROOT} içine oluşturuldu.")
+            if len(st_window) == 0 or len(st_window[0].data) < 100:
+                continue
+
+            st_proc = st_window.copy()
+            win_nan_map = {}
+            for wtr in st_proc:
+                wd = np.ma.filled(wtr.data.astype(float), np.nan) if np.ma.is_masked(wtr.data) else np.array(wtr.data, dtype=float)
+                wnan = np.isnan(wd)
+                if wnan.any():
+                    win_nan_map[wtr.id] = wnan
+                wtr.data = wd
+
+            st_decimated = st_proc.copy()
+            
+            for wtr in st_proc:
+                res_tr = st_decimated.select(id=wtr.id)[0]
+                _process_trace(wtr, res_tr, win_nan_map, real_decimation_factor, min_seg_len)
+
+            total_files_created += _save_window_to_ml_array(st_decimated, window_start_utc)
+
+        total_files_created_all += total_files_created
+        print(f"[INFO] {mseed_file.name} tamamlandı. ({total_files_created} NPY oluşturuldu)")
+
+    print("\n" + "=" * 50)
+    print(f"[BAŞARILI] Tüm ön işleme tamamlandı. Toplam {total_files_created_all} NPY dosyası {settings.DATA_ROOT} içine oluşturuldu.")
+    print("=" * 50)
     return True
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ class Settings:
     PRINT_LINE: bool = False
 
     # Dynamic parameters
-    MSEED_INPUT_FILE: Path = field(init=False)
+    MSEED_INPUT_DIR: Path = field(init=False)
     DATA_ROOT: Path = field(init=False)
     OUTPUT_ROOT: Path = field(init=False)
     
@@ -46,8 +46,8 @@ class Settings:
 
     def __post_init__(self):
         # dis how u do it if its frozen dataclass
-        object.__setattr__(self, 'MSEED_INPUT_FILE', self.SCRIPT_DIR / "raw" / self.STATION / self.EARTHQUAKE_NAME / self.RAW_FILE_NAME)
-        object.__setattr__(self, 'DATA_ROOT', self.SCRIPT_DIR / "data" / self.EARTHQUAKE_NAME)
+        object.__setattr__(self, 'MSEED_INPUT_DIR', self.SCRIPT_DIR / "raw")
+        object.__setattr__(self, 'DATA_ROOT', self.SCRIPT_DIR / "data" )
         object.__setattr__(self, 'OUTPUT_ROOT', self.SCRIPT_DIR / 'results' / self.STATION)
         
         self.OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
