@@ -81,24 +81,43 @@ def to_uint8(mat: np.ndarray) -> np.ndarray:
 
 def select_three_traces(stream):
     """
-    Pick exactly 3 traces from stream.
-    Strategy:
-      1) If exactly 3 traces, use them.
-      2) Else choose first 3 after sorting by id.
+    Pick exactly 3 orthogonal traces (Z, N, E or Z, 1, 2) from stream.
+    Explicitly orders them as Z, N, E to map deterministically to R, G, B.
     """
     if len(stream) < 3:
         raise ValueError(f"Need at least 3 traces, got {len(stream)}")
-    st = stream.copy().sort(keys=["network", "station", "location", "channel"])
-    return st[:3]
+    
+    # Attempt to grab components explicitly based on the last character of the channel name
+    try:
+        tr_z = stream.select(component="Z")[0]
+        tr_n = stream.select(component="N") or stream.select(component="1")
+        tr_n = tr_n[0]
+        tr_e = stream.select(component="E") or stream.select(component="2")
+        tr_e = tr_e[0]
+    except IndexError:
+        # Fallback to sorting if explicit components are missing
+        print("Warning: Standard Z, N, E components not found. Falling back to sort.")
+        st = stream.copy().sort(keys=["network", "station", "location", "channel"])
+        return st[:3]
+        
+    return [tr_z, tr_n, tr_e]
 
 
-def align_trim_resample(traces, target_fs=None):
+def align_trim_window(traces, target_fs=100.0, window_seconds=60.0, freqmin=1.0, freqmax=45.0):
     """
-    Align 3 traces to common time window and sampling rate.
-    - Trim to overlapping interval.
-    - Resample to target_fs if provided; else to minimum fs among traces.
+    Align 3 traces, clean, resample, and enforce a STRICT window length.
+    Raises ValueError if the overlapping signal is shorter than window_seconds.
     """
-    # Common overlap
+    # 1. Clean the signal before trimming to avoid edge artifacts
+    for tr in traces:
+        tr.detrend("linear")
+        tr.detrend("demean")
+        tr.taper(max_percentage=0.05, type="hann")
+        
+        if tr.stats.sampling_rate / 2 > freqmax:
+            tr.filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True)
+
+    # 2. Common overlap
     start = max(tr.stats.starttime for tr in traces)
     end = min(tr.stats.endtime for tr in traces)
     if end <= start:
@@ -109,22 +128,24 @@ def align_trim_resample(traces, target_fs=None):
         t = tr.copy().trim(starttime=start, endtime=end, pad=False)
         aligned.append(t)
 
-    # Choose sampling rate
-    if target_fs is None:
-        target_fs = min(tr.stats.sampling_rate for tr in aligned)
-
-    # Resample all to target_fs
+    # 3. Resample all to target_fs
     out = []
     for tr in aligned:
         tc = tr.copy()
         if abs(tc.stats.sampling_rate - target_fs) > 1e-6:
-            tc.resample(target_fs)
+            tc.interpolate(sampling_rate=target_fs, method="lanczos", a=20)
         out.append(tc)
 
-    # Ensure equal length after resample
+    # 4. Enforce STRICT sample length
+    target_samples = int(target_fs * window_seconds)
     min_len = min(len(tr.data) for tr in out)
+    
+    if min_len < target_samples:
+        raise ValueError(f"Signal too short: {min_len} samples. Require {target_samples}.")
+
+    # Slice down to the exact target length so every image is identical
     for tr in out:
-        tr.data = tr.data[:min_len]
+        tr.data = tr.data[:target_samples]
 
     return out
 
@@ -133,14 +154,15 @@ def mseed_3ch_to_ram_rgb(
     mseed_path: str,
     out_png: str,
     d: int = 64,
-    target_fs: float = None
+    target_fs: float = None,
+    window_seconds: float = 60.0,
 ):
     """
     Convert 3-channel MiniSEED to 3-band (RGB) 8-bit image using RAM transform.
     """
     st = read(mseed_path)
     traces = select_three_traces(st)
-    traces = align_trim_resample(traces, target_fs=target_fs)
+    traces = align_trim_window(traces, target_fs=target_fs, window_seconds=window_seconds)
 
     # RAM per channel
     ram_u8_channels = []
@@ -168,9 +190,6 @@ def mseed_3ch_to_ram_rgb(
 
 
 if __name__ == "__main__":
-    # Example usage:
-    # python ram_mseed_to_rgb.py
-    # (edit paths below)
     mseed_path = "input.mseed"
     out_png = "ram_rgb.png"
 
@@ -180,5 +199,5 @@ if __name__ == "__main__":
         mseed_path=mseed_path,
         out_png=out_png,
         d=64,
-        target_fs=None,  # e.g., 100.0 to force 100 Hz
+        target_fs=100.0,  # e.g., 100.0 to force 100 Hz
     )

@@ -29,7 +29,7 @@ def iter_mseed_files(input_path: str | Path) -> List[Path]:
     return files
 
 
-def run_preprocessing(input_path: str, output_dir: str, d: int = 64):
+def run_preprocessing(input_path: str, output_dir: str, d: int = 64, target_fs: float = 100.0):
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -40,6 +40,21 @@ def run_preprocessing(input_path: str, output_dir: str, d: int = 64):
         try:
             print(f"Processing: {fp}")
             out_png = out / f"{fp.stem}_ram.png"
-            mseed_3ch_to_ram_rgb(str(fp.absolute()), str(out_png), d=d)
+            
+            mseed_3ch_to_ram_rgb(
+                mseed_path=str(fp.absolute()), 
+                out_png=str(out_png), 
+                d=d, 
+                target_fs=target_fs
+            )
         except Exception as e:
             print(f"[WARN] Failed {fp}: {e}")
+
+
+if __name__ == "__main__":
+    run_preprocessing(
+        input_path="raw/",      
+        output_dir="data/",
+        d=64,
+        target_fs=100.0, # Now controlled safely from main
+    )
