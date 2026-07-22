@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+full_autoencoder.pth
+pretrained_encoder.pth
+
+# Virtual environments
+.venv
+
+results/
+raw/
+data/
