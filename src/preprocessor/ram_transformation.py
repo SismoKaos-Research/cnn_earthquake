@@ -7,7 +7,19 @@ from PIL import Image
 
 
 def standardize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    """z-score standardization."""
+    """
+    Applies z-score standardization to a 1D numerical array.
+    
+    Centers the data around a mean of 0 and a standard deviation of 1. 
+    Prevents division by zero in cases of flatlined signals.
+
+    Args:
+        x (np.ndarray): The 1D input array (e.g., raw trace data).
+        eps (float, optional): A small epsilon value to prevent division by zero. Defaults to 1e-12.
+
+    Returns:
+        np.ndarray: The standardized 1D array of type np.float64.
+    """
     x = np.asarray(x, dtype=np.float64)
     mu = np.mean(x)
     sigma = np.std(x)
@@ -18,9 +30,18 @@ def standardize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 def reshape_to_d_by_n(x: np.ndarray, d: int) -> np.ndarray:
     """
-    Rearrange 1D standardized series into matrix M of shape (d, n), n=ceil(m/d),
-    filling column-wise as in RAM paper.
-    If m is not divisible by d, wrap-around fill.
+    Rearranges a 1D standardized series into a 2D matrix filled column-wise.
+    
+    If the length of the array is not perfectly divisible by `d`, the function 
+    wraps around to the beginning of the array to fill the remaining slots.
+
+    Args:
+        x (np.ndarray): The 1D standardized time-series array.
+        d (int): The number of rows for the target matrix. Controls the local 
+                 feature vector size.
+
+    Returns:
+        np.ndarray: A 2D matrix of shape (d, n) where n = ceil(len(x) / d).
     """
     m = len(x)
     n = int(np.ceil(m / d))
@@ -38,8 +59,21 @@ def reshape_to_d_by_n(x: np.ndarray, d: int) -> np.ndarray:
 
 def ram_matrix(x: np.ndarray, d: int, eps: float = 1e-12) -> np.ndarray:
     """
-    Compute Relative Angle Matrix (RAM) from 1D signal.
-    Returns R of shape (n, n), where n=ceil(m/d).
+    Computes the Relative Angle Matrix (RAM) from a 1D signal.
+    
+    Transforms a 1D time-series into a 2D spatial representation by calculating 
+    the cosine angle differences between local feature vectors (columns) and the 
+    central feature vector (mean of all columns).
+
+    Args:
+        x (np.ndarray): The raw 1D input signal.
+        d (int): The row dimension used for intermediate reshaping. 
+                 Larger d results in a smaller output image, and vice versa.
+        eps (float, optional): Epsilon for numerical stability. Defaults to 1e-12.
+
+    Returns:
+        np.ndarray: A square 2D Relative Angle Matrix of shape (n, n), 
+                    where n = ceil(len(x) / d).
     """
     x_std = standardize(x, eps=eps)
     M = reshape_to_d_by_n(x_std, d=d)  # M = [X1, X2, ..., Xn], Xi is each column
@@ -71,7 +105,16 @@ def ram_matrix(x: np.ndarray, d: int, eps: float = 1e-12) -> np.ndarray:
 
 def to_uint8(mat: np.ndarray) -> np.ndarray:
     """
-    Min-max normalize matrix to [0,255] uint8.
+    Min-max normalizes a 2D float matrix into an 8-bit unsigned integer matrix.
+    
+    Converts mathematical matrices into a format suitable for standard RGB image 
+    generation (pixel values between 0 and 255).
+
+    Args:
+        mat (np.ndarray): The 2D float matrix (e.g., the output of ram_matrix).
+
+    Returns:
+        np.ndarray: The normalized matrix with dtype np.uint8.
     """
     mat = np.asarray(mat, dtype=np.float64)
     mn, mx = np.min(mat), np.max(mat)
@@ -84,15 +127,26 @@ def to_uint8(mat: np.ndarray) -> np.ndarray:
 
 def select_traces(stream):
     """
-    Pick at least 1 and up to 3 orthogonal traces (Z, N, E or Z, 1, 2) from stream.
-    Explicitly orders them as Z, N, E to map deterministically to R, G, B when available.
-    """
+    Safely selects between 1 and 3 orthogonal traces from an ObsPy Stream.
+    
+    Attempts to explicitly grab components Z, N (or 1), and E (or 2) based on 
+    the last character of the channel name. Avoids IndexErrors if a specific 
+    component is offline or missing.
+
+    Args:
+        stream (obspy.core.Stream): The raw input stream containing seismic traces.
+
+    Raises:
+        ValueError: If the stream contains zero traces.
+
+    Returns:
+        list: A list of obspy.core.Trace objects (length 1 to 3).
+    """ 
     if len(stream) < 1:
         raise ValueError(f"Need at least 1 trace, got {len(stream)}")
     
     selected_traces = []
     
-    # Attempt to grab components explicitly based on the last character of the channel name
     st_z = stream.select(component="Z")
     if st_z:
         selected_traces.append(st_z[0])
@@ -105,11 +159,9 @@ def select_traces(stream):
     if st_e:
         selected_traces.append(st_e[0])
         
-    # Fallback to sorting if absolutely no standard components were found
     if not selected_traces:
         print("Warning: Standard Z, N, E (or 1, 2) components not found. Falling back to sort.")
         st = stream.copy().sort(keys=["network", "station", "location", "channel"])
-        # Return up to the first 3 available traces
         return st[:3]
         
     return selected_traces
@@ -118,19 +170,32 @@ def select_traces(stream):
 
 def process_and_window_traces(traces, target_fs=100.0, window_seconds=60.0, overlap=0.5, freqmin=1.0, freqmax=45.0):
     """
-    Clean, resample, and chunk traces into sliding windows of STRICT length.
-    Traces are processed independently (no alignment). Every bit of signal is captured.
+    Cleans, resamples, and chunks traces into sliding windows of strict lengths.
     
-    Parameters:
-    - overlap: Float (0.0 to <1.0) representing the fraction of the window that overlaps (e.g., 0.5 for 50%).
-    
+    Traces are processed independently without time-alignment constraints. The 
+    function ensures that no signal is left unprocessed by zero-padding the 
+    final chunk if it falls short of the target sample length.
+
+    Args:
+        traces (list): List of obspy.core.Trace objects.
+        target_fs (float, optional): The target sampling rate in Hz. Defaults to 100.0.
+        window_seconds (float, optional): The duration of each windowed chunk. Defaults to 60.0.
+        overlap (float, optional): Fraction of the window to overlap (0.0 to <1.0). Defaults to 0.5 (50%).
+        freqmin (float, optional): Lower bound for bandpass filter. Defaults to 1.0.
+        freqmax (float, optional): Upper bound for bandpass filter. Defaults to 45.0.
+
+    Raises:
+        ValueError: If the overlap parameter requires a step size smaller than 1 sample.
+
     Returns:
-    - A list of lists. Each inner list contains the windowed traces for one of the original input traces.
+        list of lists: A nested list where each inner list contains the windowed 
+                       sub-traces for one of the original input traces.
+                       Example: [[Z_win1, Z_win2], [N_win1, N_win2]]
     """
     windowed_traces_by_component = []
     
     for tr in traces:
-        # 1. Clean the signal before trimming
+        # Clean the signal before trimming
         tc = tr.copy()
         tc.detrend("linear")
         tc.detrend("demean")
@@ -139,11 +204,11 @@ def process_and_window_traces(traces, target_fs=100.0, window_seconds=60.0, over
         if tc.stats.sampling_rate / 2 > freqmax:
             tc.filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True)
 
-        # 2. Resample to target_fs
+        # Resample to target_fs
         if abs(tc.stats.sampling_rate - target_fs) > 1e-6:
             tc.interpolate(sampling_rate=target_fs, method="lanczos", a=20)
 
-        # 3. Windowing constraints
+        # Windowing constraints
         target_samples = int(target_fs * window_seconds)
         step_samples = int(target_samples * (1.0 - overlap))
         
@@ -159,7 +224,7 @@ def process_and_window_traces(traces, target_fs=100.0, window_seconds=60.0, over
         else:
             n_windows = math.ceil((n_samples - target_samples) / step_samples) + 1
 
-        # 4. Slide window across the individual trace
+        # Slide window across the individual trace
         trace_windows = []
         for i in range(n_windows):
             start_idx = i * step_samples
@@ -194,8 +259,24 @@ def mseed_to_ram_rgb(
     overlap: float = 0.5
 ):
     """
-    Convert up to 3-channel MiniSEED to multiple 3-band (RGB) 8-bit images using RAM transform.
-    Handles sliding windows and missing/unaligned channels by zero-padding.
+    Converts an up-to-3-channel MiniSEED file into multiple RGB RAM images.
+    
+    Generates an image for each sliding window step. Ensures consistent channel-to-color 
+    mapping (Red=Z, Green=N/1, Blue=E/2). Missing channels or exhausted windows 
+    are dynamically zero-padded (rendered as black pixels) to strictly maintain 
+    an (H, W, 3) image shape.
+
+    Args:
+        mseed_path (str): Filepath to the input .mseed file.
+        out_png (str): Base filepath for the output image. Will be appended with 
+                       sequential window IDs (e.g., base_win000.png).
+        d (int, optional): RAM matrix dimension controller. Defaults to 64.
+        target_fs (float, optional): Target sampling rate. Defaults to 100.0.
+        window_seconds (float, optional): Length of each data chunk. Defaults to 60.0.
+        overlap (float, optional): Sliding window overlap fraction. Defaults to 0.5.
+
+    Raises:
+        RuntimeError: If no valid traces exist to calculate a base matrix shape.
     """
     st = read(mseed_path)
     
@@ -250,7 +331,7 @@ def mseed_to_ram_rgb(
         valid_shape = None
         current_traces = [None, None, None]
         
-        # 1. First pass: Process available traces to find the RAM matrix shape
+        # First pass: Process available traces to find the RAM matrix shape
         for i in range(3):
             if rgb_window_slots[i] is not None and w_idx < len(rgb_window_slots[i]):
                 tr = rgb_window_slots[i][w_idx]
@@ -266,12 +347,12 @@ def mseed_to_ram_rgb(
                 # Placeholder, will be replaced with zeros once we know the shape
                 ram_u8_channels.append(None)
                 
-        # 2. Second pass: Pad missing or exhausted channels with zeros
+        # Second pass: Pad missing or exhausted channels with zeros
         for i in range(3):
             if ram_u8_channels[i] is None:
                 ram_u8_channels[i] = np.zeros(valid_shape, dtype=np.uint8)
                 
-        # 3. Stack and save
+        # Stack and save
         rgb = np.stack(ram_u8_channels, axis=-1)  # (H, W, 3)
         img = Image.fromarray(rgb, mode="RGB")
         
@@ -279,7 +360,7 @@ def mseed_to_ram_rgb(
         out_filename = f"{base_name}_win{w_idx:03d}{ext}"
         img.save(out_filename)
         
-        # 4. Print stats for this specific image
+        # Print stats for this specific image
         print(f"\n--- Saved {out_filename} ---")
         for i in range(3):
             tr = current_traces[i]
