@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Iterable, List
 
-from src.preprocessor.ram_transformation import mseed_3ch_to_ram_rgb
+from src.preprocessor.ram_transformation import mseed_to_ram_rgb
 
 
 def iter_mseed_files(input_path: str | Path) -> List[Path]:
@@ -29,7 +29,14 @@ def iter_mseed_files(input_path: str | Path) -> List[Path]:
     return files
 
 
-def run_preprocessing(input_path: str, output_dir: str, d: int = 64, target_fs: float = 100.0):
+def run_preprocessing(
+    input_path: str, 
+    output_dir: str, 
+    d: int = 64, 
+    target_fs: float = 100.0,
+    window_seconds: float = 60.0,
+    overlap: float = 0.5
+):
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -39,13 +46,16 @@ def run_preprocessing(input_path: str, output_dir: str, d: int = 64, target_fs: 
     for fp in mseed_files:
         try:
             print(f"Processing: {fp}")
+            
             out_png = out / f"{fp.stem}_ram.png"
             
-            mseed_3ch_to_ram_rgb(
+            mseed_to_ram_rgb(
                 mseed_path=str(fp.absolute()), 
                 out_png=str(out_png), 
                 d=d, 
-                target_fs=target_fs
+                target_fs=target_fs,
+                window_seconds=window_seconds,
+                overlap=overlap
             )
         except Exception as e:
             print(f"[WARN] Failed {fp}: {e}")
@@ -56,5 +66,7 @@ if __name__ == "__main__":
         input_path="raw/",      
         output_dir="data/",
         d=64,
-        target_fs=100.0, # Now controlled safely from main
+        target_fs=100.0,
+        window_seconds=200.0,
+        overlap=0.75
     )

@@ -1,3 +1,6 @@
+import math
+import os
+
 import numpy as np
 from obspy import read
 from PIL import Image
@@ -79,114 +82,211 @@ def to_uint8(mat: np.ndarray) -> np.ndarray:
     return out
 
 
-def select_three_traces(stream):
+def select_traces(stream):
     """
-    Pick exactly 3 orthogonal traces (Z, N, E or Z, 1, 2) from stream.
-    Explicitly orders them as Z, N, E to map deterministically to R, G, B.
+    Pick at least 1 and up to 3 orthogonal traces (Z, N, E or Z, 1, 2) from stream.
+    Explicitly orders them as Z, N, E to map deterministically to R, G, B when available.
     """
-    if len(stream) < 3:
-        raise ValueError(f"Need at least 3 traces, got {len(stream)}")
+    if len(stream) < 1:
+        raise ValueError(f"Need at least 1 trace, got {len(stream)}")
+    
+    selected_traces = []
     
     # Attempt to grab components explicitly based on the last character of the channel name
-    try:
-        tr_z = stream.select(component="Z")[0]
-        tr_n = stream.select(component="N") or stream.select(component="1")
-        tr_n = tr_n[0]
-        tr_e = stream.select(component="E") or stream.select(component="2")
-        tr_e = tr_e[0]
-    except IndexError:
-        # Fallback to sorting if explicit components are missing
-        print("Warning: Standard Z, N, E components not found. Falling back to sort.")
+    st_z = stream.select(component="Z")
+    if st_z:
+        selected_traces.append(st_z[0])
+        
+    st_n = stream.select(component="N") or stream.select(component="1")
+    if st_n:
+        selected_traces.append(st_n[0])
+        
+    st_e = stream.select(component="E") or stream.select(component="2")
+    if st_e:
+        selected_traces.append(st_e[0])
+        
+    # Fallback to sorting if absolutely no standard components were found
+    if not selected_traces:
+        print("Warning: Standard Z, N, E (or 1, 2) components not found. Falling back to sort.")
         st = stream.copy().sort(keys=["network", "station", "location", "channel"])
+        # Return up to the first 3 available traces
         return st[:3]
         
-    return [tr_z, tr_n, tr_e]
+    return selected_traces
 
 
-def align_trim_window(traces, target_fs=100.0, window_seconds=60.0, freqmin=1.0, freqmax=45.0):
+
+def process_and_window_traces(traces, target_fs=100.0, window_seconds=60.0, overlap=0.5, freqmin=1.0, freqmax=45.0):
     """
-    Align 3 traces, clean, resample, and enforce a STRICT window length.
-    Raises ValueError if the overlapping signal is shorter than window_seconds.
+    Clean, resample, and chunk traces into sliding windows of STRICT length.
+    Traces are processed independently (no alignment). Every bit of signal is captured.
+    
+    Parameters:
+    - overlap: Float (0.0 to <1.0) representing the fraction of the window that overlaps (e.g., 0.5 for 50%).
+    
+    Returns:
+    - A list of lists. Each inner list contains the windowed traces for one of the original input traces.
     """
-    # 1. Clean the signal before trimming to avoid edge artifacts
+    windowed_traces_by_component = []
+    
     for tr in traces:
-        tr.detrend("linear")
-        tr.detrend("demean")
-        tr.taper(max_percentage=0.05, type="hann")
-        
-        if tr.stats.sampling_rate / 2 > freqmax:
-            tr.filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True)
-
-    # 2. Common overlap
-    start = max(tr.stats.starttime for tr in traces)
-    end = min(tr.stats.endtime for tr in traces)
-    if end <= start:
-        raise ValueError("No overlapping time window among 3 traces.")
-
-    aligned = []
-    for tr in traces:
-        t = tr.copy().trim(starttime=start, endtime=end, pad=False)
-        aligned.append(t)
-
-    # 3. Resample all to target_fs
-    out = []
-    for tr in aligned:
+        # 1. Clean the signal before trimming
         tc = tr.copy()
+        tc.detrend("linear")
+        tc.detrend("demean")
+        tc.taper(max_percentage=0.05, type="hann")
+        
+        if tc.stats.sampling_rate / 2 > freqmax:
+            tc.filter("bandpass", freqmin=freqmin, freqmax=freqmax, zerophase=True)
+
+        # 2. Resample to target_fs
         if abs(tc.stats.sampling_rate - target_fs) > 1e-6:
             tc.interpolate(sampling_rate=target_fs, method="lanczos", a=20)
-        out.append(tc)
 
-    # 4. Enforce STRICT sample length
-    target_samples = int(target_fs * window_seconds)
-    min_len = min(len(tr.data) for tr in out)
-    
-    if min_len < target_samples:
-        raise ValueError(f"Signal too short: {min_len} samples. Require {target_samples}.")
+        # 3. Windowing constraints
+        target_samples = int(target_fs * window_seconds)
+        step_samples = int(target_samples * (1.0 - overlap))
+        
+        if step_samples < 1:
+            raise ValueError("Overlap fraction too high; step size must be at least 1 sample.")
+            
+        data = tc.data
+        n_samples = len(data)
+        
+        # Calculate how many windows are needed to cover the entire trace
+        if n_samples <= target_samples:
+            n_windows = 1
+        else:
+            n_windows = math.ceil((n_samples - target_samples) / step_samples) + 1
 
-    # Slice down to the exact target length so every image is identical
-    for tr in out:
-        tr.data = tr.data[:target_samples]
+        # 4. Slide window across the individual trace
+        trace_windows = []
+        for i in range(n_windows):
+            start_idx = i * step_samples
+            end_idx = start_idx + target_samples
+            
+            window_data = data[start_idx:end_idx]
+            
+            # Enforce STRICT sample length (Zero-pad the final window if it falls short)
+            if len(window_data) < target_samples:
+                pad_length = target_samples - len(window_data)
+                window_data = np.pad(window_data, (0, pad_length), mode='constant')
+            
+            # Create the sub-trace
+            win_tr = tc.copy()
+            win_tr.data = window_data
+            # Accurately update the start time for this specific window
+            win_tr.stats.starttime = tc.stats.starttime + (start_idx / target_fs)
+            
+            trace_windows.append(win_tr)
+            
+        windowed_traces_by_component.append(trace_windows)
 
-    return out
+    return windowed_traces_by_component
 
 
-def mseed_3ch_to_ram_rgb(
+def mseed_to_ram_rgb(
     mseed_path: str,
     out_png: str,
     d: int = 64,
-    target_fs: float = None,
+    target_fs: float = 100.0,
     window_seconds: float = 60.0,
+    overlap: float = 0.5
 ):
     """
-    Convert 3-channel MiniSEED to 3-band (RGB) 8-bit image using RAM transform.
+    Convert up to 3-channel MiniSEED to multiple 3-band (RGB) 8-bit images using RAM transform.
+    Handles sliding windows and missing/unaligned channels by zero-padding.
     """
     st = read(mseed_path)
-    traces = select_three_traces(st)
-    traces = align_trim_window(traces, target_fs=target_fs, window_seconds=window_seconds)
+    
+    traces = select_traces(st)
+    # traces_windowed is a list of lists: e.g., [ [Z_win1, Z_win2], [N_win1, N_win2] ]
+    traces_windowed = process_and_window_traces(
+        traces, target_fs=target_fs, window_seconds=window_seconds, overlap=overlap
+    )
 
-    # RAM per channel
-    ram_u8_channels = []
-    for tr in traces:
-        sig = tr.data.astype(np.float64)
-        R = ram_matrix(sig, d=d)
-        R_u8 = to_uint8(R)
-        ram_u8_channels.append(R_u8)
+    # Initialize 3 slots for R, G, B. Each slot will hold a LIST of windowed traces.
+    rgb_window_slots = [None, None, None]
+    
+    for tr_list in traces_windowed:
+        if not tr_list:
+            continue
+            
+        # Determine mapping based on the first window's channel code
+        comp = tr_list[0].stats.channel[-1].upper()
+        idx = -1
+        
+        if comp == 'Z':
+            idx = 0  # Red
+        elif comp in ['N', '1']:
+            idx = 1  # Green
+        elif comp in ['E', '2']:
+            idx = 2  # Blue
+            
+        # Place the entire list of windows into the correct slot
+        if idx != -1 and rgb_window_slots[idx] is None:
+            rgb_window_slots[idx] = tr_list
+        else:
+            for i in range(3):
+                if rgb_window_slots[i] is None:
+                    rgb_window_slots[i] = tr_list
+                    break
 
-    # Ensure same shape
-    h, w = ram_u8_channels[0].shape
-    for c in ram_u8_channels[1:]:
-        if c.shape != (h, w):
-            raise RuntimeError("RAM channel shapes differ; check preprocessing.")
+    # Find the maximum number of windows generated across any available channel
+    max_windows = 0
+    for slot in rgb_window_slots:
+        if slot is not None:
+            max_windows = max(max_windows, len(slot))
+            
+    if max_windows == 0:
+        raise RuntimeError("No valid traces were processed to generate an image.")
 
-    # Stack as RGB: channel order follows selected trace order
-    rgb = np.stack(ram_u8_channels, axis=-1)  # (H, W, 3), uint8
-    img = Image.fromarray(rgb, mode="RGB")
-    img.save(out_png)
+    base_name, ext = os.path.splitext(out_png)
+    band_names = ["Red (Z)", "Green (N/1)", "Blue (E/2)"]
 
-    print(f"Saved RGB RAM image: {out_png}")
-    for i, tr in enumerate(traces):
-        print(f"Band {i} <- {tr.id}, fs={tr.stats.sampling_rate}, n={len(tr.data)}")
-    print(f"Image shape: {rgb.shape}")
+    # Generate an image for each window index
+    for w_idx in range(max_windows):
+        ram_u8_channels = []
+        valid_shape = None
+        current_traces = [None, None, None]
+        
+        # 1. First pass: Process available traces to find the RAM matrix shape
+        for i in range(3):
+            if rgb_window_slots[i] is not None and w_idx < len(rgb_window_slots[i]):
+                tr = rgb_window_slots[i][w_idx]
+                current_traces[i] = tr
+                sig = tr.data.astype(np.float64)
+                R = ram_matrix(sig, d=d)
+                R_u8 = to_uint8(R)
+                ram_u8_channels.append(R_u8)
+                
+                if valid_shape is None:
+                    valid_shape = R_u8.shape
+            else:
+                # Placeholder, will be replaced with zeros once we know the shape
+                ram_u8_channels.append(None)
+                
+        # 2. Second pass: Pad missing or exhausted channels with zeros
+        for i in range(3):
+            if ram_u8_channels[i] is None:
+                ram_u8_channels[i] = np.zeros(valid_shape, dtype=np.uint8)
+                
+        # 3. Stack and save
+        rgb = np.stack(ram_u8_channels, axis=-1)  # (H, W, 3)
+        img = Image.fromarray(rgb, mode="RGB")
+        
+        # Append window index to the filename (e.g., ram_rgb_win000.png)
+        out_filename = f"{base_name}_win{w_idx:03d}{ext}"
+        img.save(out_filename)
+        
+        # 4. Print stats for this specific image
+        print(f"\n--- Saved {out_filename} ---")
+        for i in range(3):
+            tr = current_traces[i]
+            if tr is not None:
+                print(f"{band_names[i]} <- {tr.id} (Start: {tr.stats.starttime})")
+            else:
+                print(f"{band_names[i]} <- None (Zero-padded)")
 
 
 if __name__ == "__main__":
@@ -195,7 +295,7 @@ if __name__ == "__main__":
 
     # d controls local vector size and resulting image size n x n where n=ceil(m/d)
     # Larger d -> smaller n (smaller image), smaller d -> larger image.
-    mseed_3ch_to_ram_rgb(
+    mseed_to_ram_rgb(
         mseed_path=mseed_path,
         out_png=out_png,
         d=64,
