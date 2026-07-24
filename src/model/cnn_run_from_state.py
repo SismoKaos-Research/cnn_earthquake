@@ -1,13 +1,19 @@
-import argparse
 import os
 
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import classification_report, confusion_matrix
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+WEIGHTS_PATH = "trained_model/best_seismic_model.pth"
+DATA_DIR = "./dataset/test"              # ImageFolder root
+BATCH_SIZE = 64
+THRESHOLD = 0.5
+NUM_WORKERS = 4
+OUT_CSV = "trained_model/test_predictions.csv"
 
 class SeismicCNN(nn.Module):
     def __init__(self):
@@ -44,89 +50,107 @@ def build_transform():
     ])
 
 
-def run_inference(weights_path, data_dir, batch_size=64, threshold=0.5, num_workers=4, out_csv="predictions.csv"):
+def run_inference():
+    if not os.path.exists(WEIGHTS_PATH):
+        raise FileNotFoundError(f"Weights not found: {WEIGHTS_PATH}")
+    if not os.path.isdir(DATA_DIR):
+        raise NotADirectoryError(f"Data directory not found: {DATA_DIR}")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[INFO] Using device: {device}")
 
     transform = build_transform()
-    dataset = datasets.ImageFolder(data_dir, transform=transform)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    dataset = datasets.ImageFolder(DATA_DIR, transform=transform)
+    loader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,                   # IMPORTANT: keeps order aligned with dataset.samples
+        num_workers=NUM_WORKERS,
+        pin_memory=(device.type == "cuda")
+    )
 
-    # Reverse map class index -> class name
     idx_to_class = {v: k for k, v in dataset.class_to_idx.items()}
+    print(f"[INFO] Class mapping: {dataset.class_to_idx}")
+    print(f"[INFO] Total test images: {len(dataset)}")
 
-    # Load model
     model = SeismicCNN().to(device)
-    state = torch.load(weights_path, map_location=device)
+    state = torch.load(WEIGHTS_PATH, map_location=device)
     model.load_state_dict(state)
     model.eval()
 
     results = []
+    all_labels = []
+    all_preds = []
+
+    sample_ptr = 0  # tracks absolute sample index across batches
 
     with torch.no_grad():
-        for inputs, labels in loader:
+        for batch_idx, (inputs, labels) in enumerate(loader):
             inputs = inputs.to(device)
 
             with torch.amp.autocast(device_type='cuda', enabled=(device.type == 'cuda')):
                 logits = model(inputs)
 
-            probs = torch.sigmoid(logits).squeeze(1)  # shape [B]
-            preds = (probs >= threshold).long()
+            probs = torch.sigmoid(logits).squeeze(1)        # [B]
+            preds = (probs >= THRESHOLD).long().cpu()       # [B]
+            labels_cpu = labels.long().cpu()                # [B]
 
-            labels = labels.long()  # shape [B]
+            # accumulate for confusion matrix
+            all_labels.extend(labels_cpu.tolist())
+            all_preds.extend(preds.tolist())
 
-            for i in range(inputs.size(0)):
-                # dataset.samples gives (filepath, class_idx) in dataloader order when shuffle=False
-                sample_idx = len(results)
-                img_path, true_idx = dataset.samples[sample_idx]
-
+            # save per-image rows
+            batch_size_actual = inputs.size(0)
+            for i in range(batch_size_actual):
+                img_path, true_idx = dataset.samples[sample_ptr]
                 pred_idx = int(preds[i].item())
                 prob = float(probs[i].item())
-
-                # Predicted class name by predicted index:
-                pred_class_name = idx_to_class.get(pred_idx, str(pred_idx))
-                true_class_name = idx_to_class.get(int(true_idx), str(true_idx))
 
                 results.append({
                     "image_path": img_path,
                     "true_label_idx": int(true_idx),
-                    "true_label_name": true_class_name,
+                    "true_label_name": idx_to_class.get(int(true_idx), str(true_idx)),
                     "pred_label_idx": pred_idx,
-                    "pred_label_name": pred_class_name,
+                    "pred_label_name": idx_to_class.get(pred_idx, str(pred_idx)),
                     "prob_positive": prob
                 })
+                sample_ptr += 1
 
+            if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(loader):
+                print(f"[INFO] Processed batch {batch_idx + 1}/{len(loader)} "
+                      f"({sample_ptr}/{len(dataset)} images)")
+
+    # sanity check
+    if sample_ptr != len(dataset):
+        print(f"[WARN] Processed {sample_ptr} samples, expected {len(dataset)}")
+
+    # save CSV
     df = pd.DataFrame(results)
-    df.to_csv(out_csv, index=False)
-    print(f"[INFO] Saved predictions: {out_csv}")
+    df.to_csv(OUT_CSV, index=False)
+    print(f"[INFO] Saved predictions: {OUT_CSV}")
 
-    if len(df) > 0:
-        acc = (df["true_label_idx"] == df["pred_label_idx"]).mean()
-        print(f"[INFO] Accuracy on '{data_dir}': {acc * 100:.2f}%")
-        print(df.head(10).to_string(index=False))
+    # accuracy
+    acc = (df["true_label_idx"] == df["pred_label_idx"]).mean() if len(df) > 0 else 0.0
+    print(f"[INFO] Accuracy on '{DATA_DIR}': {acc * 100:.2f}%")
+
+    # confusion matrix
+    cm = confusion_matrix(all_labels, all_preds, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
+
+    print("\nConfusion Matrix [[TN, FP], [FN, TP]]:")
+    print(cm)
+    print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
+
+    print("\nClassification Report:")
+    print(classification_report(
+        all_labels,
+        all_preds,
+        labels=[0, 1],
+        target_names=[idx_to_class.get(0, "class_0"), idx_to_class.get(1, "class_1")],
+        digits=4,
+        zero_division=0
+    ))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run SeismicCNN inference on folder data (ImageFolder format).")
-    parser.add_argument("--weights", type=str, required=True, help="Path to trained model weights (.pth)")
-    parser.add_argument("--data_dir", type=str, required=True, help="Path to inference data root (ImageFolder structure)")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Decision threshold for binary classification")
-    parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers")
-    parser.add_argument("--out_csv", type=str, default="predictions.csv", help="Output CSV path")
-
-    args = parser.parse_args()
-
-    if not os.path.exists(args.weights):
-        raise FileNotFoundError(f"Weights not found: {args.weights}")
-    if not os.path.isdir(args.data_dir):
-        raise NotADirectoryError(f"Data directory not found: {args.data_dir}")
-
-    run_inference(
-        weights_path=args.weights,
-        data_dir=args.data_dir,
-        batch_size=args.batch_size,
-        threshold=args.threshold,
-        num_workers=args.num_workers,
-        out_csv=args.out_csv
-    )
+    run_inference()
