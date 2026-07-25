@@ -1,7 +1,8 @@
 import torch
 from cnn_train import SeismicCNN
-from sklearn.metrics import classification_report  # Added import
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import (brier_score_loss, classification_report,
+                             confusion_matrix, matthews_corrcoef,
+                             roc_auc_score)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -55,3 +56,19 @@ if cm.size == 4:
 
 print("\nClassification Report:")
 print(classification_report(all_labels, all_preds, digits=4))
+
+print("\n" + "="*30)
+print("ADVANCED METRICS")
+print("="*30)
+
+# ROC-AUC uses the probabilities, NOT the hard predictions
+auc_score = roc_auc_score(all_labels, all_probs)
+print(f"ROC-AUC Score: {auc_score:.4f}")
+
+# MCC uses the hard predictions
+mcc_score = matthews_corrcoef(all_labels, all_preds)
+print(f"Matthews Correlation Coefficient: {mcc_score:.4f}")
+
+# Brier Score uses probabilities
+brier_score = brier_score_loss(all_labels, all_probs)
+print(f"Brier Score Loss: {brier_score:.4f}")

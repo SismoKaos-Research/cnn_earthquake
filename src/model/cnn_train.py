@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (classification_report, confusion_matrix,
+                             matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -110,17 +111,21 @@ if __name__ == "__main__":
             
         avg_train_loss = running_train_loss / len(train_loader.dataset)
         
+        # VALIDATION PHASE
         model.eval() 
         running_val_loss = 0.0
         correct_preds = 0
         total_preds = 0
+        
+        val_all_labels = []
+        val_all_probs = []
+        val_all_preds = []
         
         with torch.no_grad(): 
             for inputs, labels in val_loader:
                 inputs = inputs.to(device)
                 labels = labels.float().unsqueeze(1).to(device)
                 
-                # Using autocast here speeds up validation too!
                 with torch.amp.autocast(device_type='cuda'):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
@@ -133,16 +138,28 @@ if __name__ == "__main__":
                 correct_preds += (preds == labels).sum().item()
                 total_preds += labels.size(0)
                 
+                val_all_labels.extend(labels.cpu().squeeze(1).tolist())
+                val_all_probs.extend(probs.cpu().squeeze(1).tolist())
+                val_all_preds.extend(preds.cpu().squeeze(1).tolist())
+                
         avg_val_loss = running_val_loss / len(val_loader.dataset)
+        val_accuracy = correct_preds / total_preds
+
+        # Calculate Advanced Metrics
+        try:
+            val_auc = roc_auc_score(val_all_labels, val_all_probs)
+            val_mcc = matthews_corrcoef(val_all_labels, val_all_preds)
+        except ValueError:
+            val_auc = 0.0
+            val_mcc = 0.0
 
         # Tell the scheduler to check the validation loss
         scheduler.step(avg_val_loss)
-        val_accuracy = correct_preds / total_preds
         
         print(f"Epoch {epoch+1}/{num_epochs}")
-        print(f"  Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+        print(f"  Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        print(f"  Val Acc: {val_accuracy:.4f} | Val AUC: {val_auc:.4f} | Val MCC: {val_mcc:.4f}")
 
-        # EARLY STOPPING & SAVE LOGIC
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             epochs_no_improve = 0
@@ -189,8 +206,8 @@ if __name__ == "__main__":
             correct_preds += (preds == labels).sum().item()
             total_preds += labels.size(0)
 
-            all_labels.extend(labels.cpu().squeeze().tolist())
-            all_preds.extend(preds.cpu().squeeze().tolist())
+            all_labels.extend(labels.cpu().squeeze(1).tolist())
+            all_preds.extend(preds.cpu().squeeze(1).tolist())
             
     test_accuracy = correct_preds / total_preds
     print(f"Final Test Accuracy: {test_accuracy * 100:.2f}%")
