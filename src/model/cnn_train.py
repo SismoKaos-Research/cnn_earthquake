@@ -11,53 +11,61 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
+class BinaryFocalLoss(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2.0):
+        super(BinaryFocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        # We use BCEWithLogitsLoss internally because it is numerically stable
+        self.bce_with_logits = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, inputs, targets):
+        # 1. Calculate standard cross entropy
+        bce_loss = self.bce_with_logits(inputs, targets)
+        
+        # 2. Convert logits to probabilities 
+        # (Math trick: since BCE = -log(pt), then pt = exp(-BCE))
+        pt = torch.exp(-bce_loss)
+        
+        # 3. Apply the focal loss formula
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * bce_loss
+        
+        return focal_loss.mean()
+
 # Model Definition
 class SeismicCNN(nn.Module):
     def __init__(self):
         super(SeismicCNN, self).__init__()
         
-        # Convolutional Block
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
         
-        # Spatial Reduction
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.adaptive_pool = nn.AdaptiveMaxPool2d((4, 4)) # Switched to MaxPool
         
-        # Adaptive pooling guarantees the output is exactly 4x4, regardless of 
-        # whether your input images are 94x94, 64x64, or 128x128.
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((4, 4))
+        self.dropout2d = nn.Dropout2d(0.3) 
+        self.dropout1d = nn.Dropout(0.5)
         
-        # Regularization
-        # We use a 30% dropout between layers to prevent spatial memorization
-        self.dropout2d = nn.Dropout2d(p=0.3) 
-        self.dropout1d = nn.Dropout(p=0.5)
-        
-        # Fully Connected Block
-        # 64 channels * 4 * 4 adaptive pool size = 1024 flat features
-        self.fc1 = nn.Linear(1024, 128)
-        self.fc2 = nn.Linear(128, 1) # Binary output
+        # 256 channels * 4 * 4 = 4096 features
+        self.fc1 = nn.Linear(4096, 512)
+        self.fc2 = nn.Linear(512, 1)
 
     def forward(self, x):
-        # Pass through Conv1 -> ReLU -> MaxPool
         x = self.pool(F.relu(self.conv1(x)))
-        
-        # Pass through Conv2 -> ReLU -> MaxPool -> Spatial Dropout
         x = self.pool(F.relu(self.conv2(x)))
         x = self.dropout2d(x)
         
-        # Pass through Conv3 -> ReLU -> Adaptive Pool
-        x = F.relu(self.conv3(x))
+        x = self.pool(F.relu(self.conv3(x)))
+        x = F.relu(self.conv4(x))
         x = self.adaptive_pool(x)
         
-        # Flatten the 2D matrices into a 1D array for the dense layers
         x = torch.flatten(x, 1)
         
-        # Pass through Dense -> ReLU -> Heavy Dropout -> Output
         x = F.relu(self.fc1(x))
         x = self.dropout1d(x)
         x = self.fc2(x)
-        
         return x
 
 if __name__ == "__main__":
@@ -75,9 +83,10 @@ if __name__ == "__main__":
     model = SeismicCNN().to(device)
     scaler = torch.amp.GradScaler('cuda')
 
-    criterion = nn.BCEWithLogitsLoss() 
+    criterion = BinaryFocalLoss(alpha=1.0, gamma=2.0)
+
     # Added weight_decay=1e-3 (You can tweak this between 1e-2 and 1e-4)
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
 
     # Drops learning rate by 50% if val loss doesn't improve for 3 epochs
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
