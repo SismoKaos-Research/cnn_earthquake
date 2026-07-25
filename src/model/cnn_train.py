@@ -11,14 +11,6 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-# Training Data
-train_dataset = datasets.ImageFolder('./dataset/train', transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
-
-# Validation Data
-val_dataset = datasets.ImageFolder('./dataset/val', transform=transform)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
-
 # Model Definition
 class SeismicCNN(nn.Module):
     def __init__(self):
@@ -70,6 +62,15 @@ class SeismicCNN(nn.Module):
 
 if __name__ == "__main__":
 # Initialization
+    # Training Data
+    train_dataset = datasets.ImageFolder('./dataset/train', transform=transform)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+
+    # Validation Data
+    val_dataset = datasets.ImageFolder('./dataset/val', transform=transform)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
+
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SeismicCNN().to(device)
     scaler = torch.amp.GradScaler('cuda')
