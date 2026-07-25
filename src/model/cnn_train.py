@@ -67,136 +67,140 @@ class SeismicCNN(nn.Module):
         
         return x
 
+if __name__ == "__main__":
 # Initialization
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = SeismicCNN().to(device)
-scaler = torch.amp.GradScaler('cuda')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = SeismicCNN().to(device)
+    scaler = torch.amp.GradScaler('cuda')
 
-criterion = nn.BCEWithLogitsLoss() 
-# Added weight_decay=1e-3 (You can tweak this between 1e-2 and 1e-4)
-optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    criterion = nn.BCEWithLogitsLoss() 
+    # Added weight_decay=1e-3 (You can tweak this between 1e-2 and 1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-# Drops learning rate by 50% if val loss doesn't improve for 3 epochs
-scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    # Drops learning rate by 50% if val loss doesn't improve for 3 epochs
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
-# The Training and Validation Loop
-num_epochs = 100
-patience = 7
-epochs_no_improve = 0
-best_val_loss = float('inf') # Track the best loss to know when to save
-save_path = "trained_model/best_seismic_model.pth"
+    # The Training and Validation Loop
+    num_epochs = 100
+    patience = 7
+    epochs_no_improve = 0
+    best_val_loss = float('inf') # Track the best loss to know when to save
+    save_path = "trained_model/best_seismic_model.pth"
 
-for epoch in range(num_epochs):
-    
-    model.train() 
-    running_train_loss = 0.0
-    
-    for inputs, labels in train_loader:
-        inputs, labels = inputs.to(device), labels.float().unsqueeze(1).to(device)
-        optimizer.zero_grad()
+    for epoch in range(num_epochs):
         
-        # Forward pass in mixed precision
-        with torch.amp.autocast(device_type='cuda'):
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-
-        # The backward pass and optimizer step!
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-
-        running_train_loss += loss.item() * inputs.size(0) 
+        model.train() 
+        running_train_loss = 0.0
         
-    avg_train_loss = running_train_loss / len(train_loader.dataset)
-    
-    model.eval() 
-    running_val_loss = 0.0
-    correct_preds = 0
-    total_preds = 0
-    
-    with torch.no_grad(): 
-        for inputs, labels in val_loader:
-            inputs = inputs.to(device)
-            labels = labels.float().unsqueeze(1).to(device)
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.float().unsqueeze(1).to(device)
+            optimizer.zero_grad()
             
-            # Using autocast here speeds up validation too!
+            # Forward pass in mixed precision
             with torch.amp.autocast(device_type='cuda'):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
+
+            # The backward pass and optimizer step!
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            running_train_loss += loss.item() * inputs.size(0) 
             
-            running_val_loss += loss.item() * inputs.size(0)
+        avg_train_loss = running_train_loss / len(train_loader.dataset)
+        
+        model.eval() 
+        running_val_loss = 0.0
+        correct_preds = 0
+        total_preds = 0
+        
+        with torch.no_grad(): 
+            for inputs, labels in val_loader:
+                inputs = inputs.to(device)
+                labels = labels.float().unsqueeze(1).to(device)
+                
+                # Using autocast here speeds up validation too!
+                with torch.amp.autocast(device_type='cuda'):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                
+                running_val_loss += loss.item() * inputs.size(0)
+                
+                probs = torch.sigmoid(outputs)
+                preds = torch.round(probs) 
+                
+                correct_preds += (preds == labels).sum().item()
+                total_preds += labels.size(0)
+                
+        avg_val_loss = running_val_loss / len(val_loader.dataset)
+
+        # Tell the scheduler to check the validation loss
+        scheduler.step(avg_val_loss)
+        val_accuracy = correct_preds / total_preds
+        
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"  Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+
+        # EARLY STOPPING & SAVE LOGIC
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            epochs_no_improve = 0
+            torch.save(model.state_dict(), save_path)
+            print(f"  => Best model saved to {save_path}!")
+        else:
+            epochs_no_improve += 1
+            print(f"  => No improvement for {epochs_no_improve} epoch(s).")
             
+        if epochs_no_improve >= patience:
+            print(f"\nEarly stopping triggered! Validation loss hasn't improved in {patience} epochs.")
+            print(f"The best weights from the run have been saved to {save_path}.")
+            break 
+    print(f"Saving full model at {save_path}...")
+    torch.save(model, "trained_model/full_model.pth")   
+
+    print("\nRunning Final Evaluation on Test Set...")
+
+    # Setup the Test Dataloader
+    test_dataset = datasets.ImageFolder('./dataset/test', transform=transform)
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=4, pin_memory=True)
+
+    # Load the BEST weights we saved during training
+    model.load_state_dict(torch.load(save_path))
+    model.eval() 
+
+    correct_preds = 0
+    total_preds = 0
+
+    all_labels = []
+    all_preds = []
+
+    with torch.no_grad(): 
+        for inputs, labels in test_loader:
+            inputs = inputs.to(device)
+            labels = labels.float().unsqueeze(1).to(device)
+            
+            with torch.amp.autocast(device_type='cuda'):
+                outputs = model(inputs)
+                
             probs = torch.sigmoid(outputs)
             preds = torch.round(probs) 
             
             correct_preds += (preds == labels).sum().item()
             total_preds += labels.size(0)
+
+            all_labels.extend(labels.cpu().squeeze().tolist())
+            all_preds.extend(preds.cpu().squeeze().tolist())
             
-    avg_val_loss = running_val_loss / len(val_loader.dataset)
+    test_accuracy = correct_preds / total_preds
+    print(f"Final Test Accuracy: {test_accuracy * 100:.2f}%")
+    cm = confusion_matrix(all_labels, all_preds)
+    tn, fp, fn, tp = cm.ravel()
 
-    # Tell the scheduler to check the validation loss
-    scheduler.step(avg_val_loss)
-    val_accuracy = correct_preds / total_preds
-    
-    print(f"Epoch {epoch+1}/{num_epochs}")
-    print(f"  Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Acc: {val_accuracy:.4f}")
+    print("\nConfusion Matrix:")
+    print(cm)
+    print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
 
-    # EARLY STOPPING & SAVE LOGIC
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        epochs_no_improve = 0
-        torch.save(model.state_dict(), save_path)
-        print(f"  => Best model saved to {save_path}!")
-    else:
-        epochs_no_improve += 1
-        print(f"  => No improvement for {epochs_no_improve} epoch(s).")
-        
-    if epochs_no_improve >= patience:
-        print(f"\nEarly stopping triggered! Validation loss hasn't improved in {patience} epochs.")
-        print(f"The best weights from the run have been saved to {save_path}.")
-        break 
-print(f"Saving full model at {save_path}...")
-torch.save(model, "trained_model/full_model.pth")   
-
-print("\nRunning Final Evaluation on Test Set...")
-
-# Setup the Test Dataloader
-test_dataset = datasets.ImageFolder('./dataset/test', transform=transform)
-test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=4, pin_memory=True)
-
-# Load the BEST weights we saved during training
-model.load_state_dict(torch.load(save_path))
-model.eval() 
-
-correct_preds = 0
-total_preds = 0
-
-all_labels = []
-all_preds = []
-
-with torch.no_grad(): 
-    for inputs, labels in test_loader:
-        inputs = inputs.to(device)
-        labels = labels.float().unsqueeze(1).to(device)
-        
-        with torch.amp.autocast(device_type='cuda'):
-            outputs = model(inputs)
-            
-        probs = torch.sigmoid(outputs)
-        preds = torch.round(probs) 
-        
-        correct_preds += (preds == labels).sum().item()
-        total_preds += labels.size(0)
-        
-test_accuracy = correct_preds / total_preds
-print(f"Final Test Accuracy: {test_accuracy * 100:.2f}%")
-cm = confusion_matrix(all_labels, all_preds)
-tn, fp, fn, tp = cm.ravel()
-
-print("\nConfusion Matrix:")
-print(cm)
-print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
-
-# Optional: detailed metrics
-print("\nClassification Report:")
-print(classification_report(all_labels, all_preds, digits=4))
+    # Optional: detailed metrics
+    print("\nClassification Report:")
+    print(classification_report(all_labels, all_preds, digits=4))
