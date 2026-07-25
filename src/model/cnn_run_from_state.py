@@ -2,9 +2,10 @@ import os
 
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from sklearn.metrics import classification_report, confusion_matrix
+from cnn_train import SeismicCNN
+from sklearn.metrics import (brier_score_loss, classification_report,
+                             confusion_matrix, matthews_corrcoef,
+                             roc_auc_score)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -15,40 +16,10 @@ THRESHOLD = 0.5
 NUM_WORKERS = 4
 OUT_CSV = "trained_model/test_predictions.csv"
 
-class SeismicCNN(nn.Module):
-    def __init__(self):
-        super(SeismicCNN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
-
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((4, 4))
-
-        self.dropout2d = nn.Dropout2d(p=0.3)
-        self.dropout1d = nn.Dropout(p=0.5)
-
-        self.fc1 = nn.Linear(1024, 128)
-        self.fc2 = nn.Linear(128, 1)
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.dropout2d(x)
-        x = F.relu(self.conv3(x))
-        x = self.adaptive_pool(x)
-        x = torch.flatten(x, 1)
-        x = F.relu(self.fc1(x))
-        x = self.dropout1d(x)
-        x = self.fc2(x)
-        return x
-
-
 def build_transform():
     return transforms.Compose([
         transforms.ToTensor(),
     ])
-
 
 def run_inference():
     if not os.path.exists(WEIGHTS_PATH):
@@ -64,7 +35,7 @@ def run_inference():
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        shuffle=False,                   # IMPORTANT: keeps order aligned with dataset.samples
+        shuffle=False,
         num_workers=NUM_WORKERS,
         pin_memory=(device.type == "cuda")
     )
@@ -74,13 +45,14 @@ def run_inference():
     print(f"[INFO] Total test images: {len(dataset)}")
 
     model = SeismicCNN().to(device)
-    state = torch.load(WEIGHTS_PATH, map_location=device)
+    state = torch.load(WEIGHTS_PATH, map_location=device, weights_only=True)
     model.load_state_dict(state)
     model.eval()
 
     results = []
     all_labels = []
     all_preds = []
+    all_probs = [] # Added to track probabilities for AUC/Brier metrics
 
     sample_ptr = 0  # tracks absolute sample index across batches
 
@@ -95,9 +67,10 @@ def run_inference():
             preds = (probs >= THRESHOLD).long().cpu()       # [B]
             labels_cpu = labels.long().cpu()                # [B]
 
-            # accumulate for confusion matrix
+            # accumulate for confusion matrix and advanced metrics
             all_labels.extend(labels_cpu.tolist())
             all_preds.extend(preds.tolist())
+            all_probs.extend(probs.cpu().tolist())
 
             # save per-image rows
             batch_size_actual = inputs.size(0)
@@ -151,6 +124,21 @@ def run_inference():
         zero_division=0
     ))
 
+    #ADVANCED METRICS
+    print("\n" + "="*30)
+    print("ADVANCED METRICS")
+    print("="*30)
+    
+    try:
+        auc_score = roc_auc_score(all_labels, all_probs)
+        mcc_score = matthews_corrcoef(all_labels, all_preds)
+        brier_score = brier_score_loss(all_labels, all_probs)
+        
+        print(f"ROC-AUC Score: {auc_score:.4f}")
+        print(f"Matthews Correlation Coefficient: {mcc_score:.4f}")
+        print(f"Brier Score Loss: {brier_score:.4f}")
+    except ValueError as e:
+        print(f"[WARN] Could not compute advanced metrics: {e}")
 
 if __name__ == "__main__":
     run_inference()
