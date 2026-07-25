@@ -17,6 +17,4 @@ raw/
 data/
 data-old/
 trained_model/
-dataset/
-dataset_old/
-dataset_train/
+dataset*/

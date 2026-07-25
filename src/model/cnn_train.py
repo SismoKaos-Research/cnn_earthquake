@@ -83,10 +83,11 @@ if __name__ == "__main__":
     model = SeismicCNN().to(device)
     scaler = torch.amp.GradScaler('cuda')
 
-    criterion = BinaryFocalLoss(alpha=1.0, gamma=2.0)
+    criterion = nn.BCEWithLogitsLoss()
+
 
     # Added weight_decay=1e-3 (You can tweak this between 1e-2 and 1e-4)
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
     # Drops learning rate by 50% if val loss doesn't improve for 3 epochs
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
