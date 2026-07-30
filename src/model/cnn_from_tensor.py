@@ -4,11 +4,10 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from cnn_train import ImprovedSeismicCNN
 from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
-
-from src.model.cnn_train import ImprovedSeismicCNN
 
 
 # CUSTOM TENSOR DATASET
@@ -44,7 +43,7 @@ class SeismicTensorDataset(Dataset):
 # MAIN TRAINING SCRIPT
 if __name__ == "__main__":
     # --- Configuration ---
-    DATA_ROOT = "./dataset_spectrogram_window_post_60s" 
+    DATA_ROOT = "./dataset" 
     BATCH_SIZE = 128
     NUM_EPOCHS = 100
     PATIENCE = 7
