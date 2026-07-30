@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 import torch
-from cnn_train import SeismicCNN
+from cnn_train import ImprovedSeismicCNN
 from sklearn.metrics import (brier_score_loss, classification_report,
                              confusion_matrix, matthews_corrcoef,
                              roc_auc_score)
@@ -44,7 +44,7 @@ def run_inference():
     print(f"[INFO] Class mapping: {dataset.class_to_idx}")
     print(f"[INFO] Total test images: {len(dataset)}")
 
-    model = SeismicCNN().to(device)
+    model = ImprovedSeismicCNN().to(device)
     state = torch.load(WEIGHTS_PATH, map_location=device, weights_only=True)
     model.load_state_dict(state)
     model.eval()

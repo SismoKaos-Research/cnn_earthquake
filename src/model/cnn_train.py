@@ -202,7 +202,7 @@ if __name__ == "__main__":
                 running_val_loss += loss.item() * inputs.size(0)
                 
                 probs = torch.sigmoid(outputs)
-                preds = (probs > 0.60).float() # Forces the model to be 60% sure
+                preds = (probs > 0.50).float() # Forces the model to be 60% sure
                 
                 correct_preds += (preds == labels).sum().item()
                 total_preds += labels.size(0)
