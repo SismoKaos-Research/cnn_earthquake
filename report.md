@@ -2,94 +2,582 @@
 
 _Independent side investigation — not a project deliverable. Written up because early results looked promising enough to be worth sharing._
 
+---
+
 ## 1. Motivation
 
-A recent paper proposes a "Relative Angle Matrix" (RAM) method for converting 1D bearing-vibration signals into 2D grayscale images for a CNN classifier, originally applied to mechanical fault diagnosis. Since seismic data is also fundamentally a time-series signal, and 3-component (Z/N/E) seismic stations naturally map onto a 3-channel image, this seemed like a plausible transfer target: **can the same RAM + CNN approach distinguish a real seismic event from ambient noise, directly from raw waveforms?**
+A recent paper (Wang & Zhao, _Applied Soft Computing_ 172, 2025) proposes a
+"Relative Angle Matrix" (RAM) method for converting 1D bearing-vibration
+signals into 2D images for a CNN classifier, originally applied to mechanical
+fault diagnosis. Seismic data is also a time series, and 3-component (Z/N/E)
+seismic stations map naturally onto a 3-channel image, so this seemed like a
+plausible transfer target: **can RAM + CNN separate a real seismic event from
+ambient noise, directly from raw waveforms?**
 
-This was explored independently, outside of assigned project tasks, using publicly available data (STEAD-style earthquake/noise HDF5 chunks and self-downloaded mseed data via FDSN), so there were no data-access or ethics constraints to navigate.
+Explored independently, outside assigned project tasks, on publicly available
+data (STEAD-style HDF5 chunks and self-downloaded FDSN mseed), so there were no
+data-access or ethics constraints to navigate.
 
-## 2. Method Overview
+The comparison target throughout is **classic STA/LTA**, the standard
+seismological trigger algorithm — the real baseline any new detection method
+has to beat, not an arbitrary strawman.
 
-### 2.1 RAM transform
+---
 
-For a 1D signal window of length _m_, samples are z-score standardized, reshaped into a `(d, n)` matrix (`d` derived from a fixed target resolution `n`, not fixed independently — see Section 5.1 for why this distinction mattered), and the cosine angle between each column vector and the mean column vector is computed. The resulting angle differences form an `n × n` matrix, rendered to grayscale.
+## 2. The RAM transform, formally
 
-### 2.2 Building 3-channel images
+### 2.1 Definition
 
-Each of the three seismic components (Z, N, E) is RAM-transformed independently and stacked as R/G/B channels into one RGB image per window. (Open question, parked for a future ablation: whether combining the three raw channels _before_ the RAM transform — e.g. via vector magnitude — might preserve inter-channel amplitude relationships better than transforming each channel independently. Not yet tested.)
+Given a window of $m$ samples $v = [v_1, \dots, v_m]$ from one component:
 
-### 2.3 CNN architecture
+**Step 1 — standardize.**
 
-A ResNet-style CNN with Squeeze-and-Excitation blocks, trained as a binary classifier (earthquake vs. noise) on the resulting RGB images.
+$$\mu = \frac{1}{m}\sum_i v_i, \qquad \sigma = \sqrt{\frac{1}{m}\sum_i (v_i-\mu)^2}, \qquad x_i = \frac{v_i - \mu}{\sigma}$$
 
-## 3. Dataset & Pipeline
+(with $\sigma \leftarrow \max(\sigma, \varepsilon)$, $\varepsilon = 10^{-12}$, to survive flatlined channels).
 
-- **Data sources:** STEAD-style HDF5 earthquake/noise chunks, and a self-built pipeline downloading raw mseed data via FDSN (obspy) for a broader Turkish-catalog dataset.
-- **Window lengths tested:** 60s, 6s, 3s (shorter windows chosen specifically to test how much detection latency could be reduced).
-- **Splits:** train/val/test, **70/15/15**.
+**Step 2 — reshape into local feature vectors.** For a target image resolution
+$n$ (`--target-n`), the column depth is derived as
 
-## 4. Baseline for comparison
+$$d = \max\left(2,\ \left\lceil m/n \right\rceil\right)$$
 
-**Classic STA/LTA** (short-term/long-term average ratio), the standard classical seismic trigger algorithm, was implemented as the point of comparison — chosen because it's the real, established baseline any new detection method should be measured against, not an arbitrary strawman.
+and $x$ is zero-padded (or truncated) to length $dn$ and reshaped column-wise
+into $M \in \mathbb{R}^{d \times n}$. Each column $X_i \in \mathbb{R}^d$ is a
+*local feature vector* — a contiguous $d$-sample segment of the window.
 
-Critically, STA/LTA was always evaluated on the **exact same test windows** (same file, same station, same window index) as the CNN, reconstructed directly from the raw mseed/HDF5 data — not a separately-sampled comparison set.
+**Step 3 — angles against the centroid.** With the central vector
+$\bar{X} = \frac{1}{n}\sum_{i=1}^{n} X_i$,
 
-## 5. The debugging journey (worth including — this is most of the actual rigor)
+$$\beta_i = \arccos\left(\frac{X_i \cdot \bar{X}}{\lVert X_i\rVert\,\lVert \bar{X}\rVert}\right) \in [0, \pi]$$
 
-Several serious methodological bugs were found and fixed before any result could be trusted. Listing them is useful context for how much an initial "good-looking" number can mislead:
+The cosine argument is clipped to $[-1,1]$ before `arccos` — floating-point
+error can push it marginally outside and produce `NaN` (a real failure mode the
+paper does not address).
 
-### 5.1 Fixed-resolution collapse at short windows
+**Step 4 — pairwise angle differences.**
 
-Early version used a fixed `d` (row count) for the RAM reshape regardless of window length. At short windows (e.g. 3s), this collapsed images down to as little as 3×3 pixels — destroying almost all spatial information. **Fix:** derive `d` from a fixed target output resolution instead, so every window length produces a consistently informative image.
+$$R_{ij} = \beta_j - \beta_i, \qquad R \in \mathbb{R}^{n \times n}$$
 
-### 5.2 Station-identity leakage
+**Step 5 — render to 8-bit.** Since each $\beta \in [0,\pi]$, we have
+$R_{ij} \in [-\pi, \pi]$ exactly, so a **fixed** affine map is used:
 
-Initial dataset splits were done by _event/file_, not by _station_. Since the same physical station records many different events, this let identical instruments appear in both train and test — meaning the model could partly be learning "which station is this" rather than genuine signal detection. **Fix:** rewrote the splitting logic to allocate whole _stations_ to a single split, guaranteeing test-time stations were never seen during training.
+$$P_{ij} = \text{round}\left(255 \cdot \frac{\text{clip}(R_{ij}, -\pi, \pi) + \pi}{2\pi}\right)$$
 
-### 5.3 Single-station dominance
+This fixed range matters: a per-image min–max normalization (as used in the
+deprecated `src/preprocessor/` path) rescales every window by its own extremes,
+destroying comparability *between* windows. Under the fixed map, a given pixel
+value means the same angle difference in every image in the dataset.
 
-Even after fixing splitting, one station's disproportionately large event count could single-handedly make up most of a split (both on the earthquake and, more severely, the noise side, where a single long trace can produce thousands of overlapping sliding windows). **Fix:** added a per-station window cap, tuned so val/test require genuine multi-station diversity to reach their target size, not just one or two big contributors.
+### 2.2 Structural properties (verified numerically)
 
-### 5.4 Silent manifest mislabeling
+These are properties of the transform itself, confirmed to machine precision.
+They are not incidental — they determine what a CNN can possibly learn from
+these images.
 
-A dataset manifest (used to align STA/LTA baseline comparisons with CNN test data) mislabeled earthquake-class entries as noise whenever a station legitimately belonged to both classes (common, since ~97% of earthquake stations also had matching noise recordings). **Fix:** the correct class label is now captured at the point of assignment, not reconstructed afterward from a lossy per-station lookup.
+**(a) The matrix is antisymmetric and rank-2.** In matrix form
+$R = \mathbf{1}\beta^\top - \beta\mathbf{1}^\top$, hence
 
-### 5.5 Origin-anchored short windows missed the actual arrival
+$$R^\top = -R, \qquad R_{ii} = 0, \qquad \operatorname{rank}(R) \le 2$$
 
-Short windows (3s/6s) were originally sliced starting at event _origin time_, not arrival time. For stations near the edge of the search radius, the P-wave arrival can land after the whole window ends — meaning a meaningful fraction of "earthquake" short windows contained no seismic signal at all, badly corrupting the label. **Fix:** re-derived arrival-anchored short windows directly from already-downloaded longer (60s) raw data, using a coarse STA/LTA pick to locate the approximate arrival — no redownload required.
+Measured: $\max|R + R^\top| = 0$, diagonal exactly $0$, and the SVD yields
+exactly two non-zero singular values (equal in magnitude), the rest $0$.
 
-### 5.6 Noise/earthquake station mismatch
+**(b) The image has $n-1$ degrees of freedom, not $n^2$.** Because $R$ is
+generated by the vector $\beta$ up to a global offset, the entire
+$64\times64 = 4096$-pixel channel is reconstructible from 63 numbers. Verified
+by recovering $\beta$ from the first column and rebuilding $R$: reconstruction
+error exactly $0$.
 
-Publicly-sourced noise data only overlapped with ~47% of earthquake-recording stations, meaning the model rarely saw both classes from the same instrument. **Fix:** built a targeted downloader that fetches noise directly from the same stations that recorded earthquakes, raising overlap to ~97%.
+> Practical consequence: a 64×64×3 RAM image (12,288 pixels) carries at most
+> **189 independent values**. The transform is a severe, lossy compression of
+> the 6,000-sample (60 s) or 600-sample (6 s) input, and the CNN's 2D spatial
+> processing is operating on a highly redundant embedding of a 1D signal.
 
-## 6. Results
+**(c) Every RAM image has the same mean pixel value.** Antisymmetry gives
+$\sum_{ij} R_{ij} = 0$, so the mean pixel is exactly the map's midpoint
+(127.5; measured 127.508 after integer rounding). The DC component of every
+image is constant by construction and carries zero information.
 
-### 6.1 60-second windows — clear, validated win over STA/LTA
+**(d) The transform is exactly scale-invariant, and shift-sensitive.** For any
+$c > 0$, scaling $x \to cx$ scales every $X_i$ and $\bar X$ by $c$, and the
+cosine ratio cancels it:
 
-| Metric                 | CNN                                              | STA/LTA    |
-| ---------------------- | ------------------------------------------------ | ---------- |
-| Accuracy               | _[insert final confirmed number from your logs]_ | _[insert]_ |
-| ROC-AUC                | _[insert]_                                       | _[insert]_ |
-| Recall (earthquake)    | _[insert]_                                       | _[insert]_ |
-| Precision (earthquake) | _[insert]_                                       | _[insert]_ |
+$$\frac{(cX_i)\cdot(c\bar X)}{\lVert cX_i\rVert \lVert c\bar X\rVert} = \frac{c^2 (X_i \cdot \bar X)}{c^2 \lVert X_i\rVert \lVert \bar X\rVert}$$
 
-Across multiple validated regenerations of the dataset (after all fixes in Section 5), the CNN consistently and substantially outperformed STA/LTA on AUC — a gap in the range of roughly **0.10–0.15 AUC points**, evaluated on a properly station-disjoint test set with no single station dominating either class. This is the headline result.
+Measured: $\max|\text{RAM}(x) - \text{RAM}(37.5x)| = 8.9\times10^{-16}$ —
+exact cancellation. A mean *shift*, by contrast, does not cancel
+($\max|\Delta R| = 1.31$ rad for a representative offset).
 
-### 6.2 6-second and 3-second windows — inconclusive, still in progress
+**Section 8.2 develops the consequence of (d), which is the single most
+important finding in this round of work.**
 
-At shorter windows, results were much closer to STA/LTA and, in some iterations, worse. Two distinct causes were identified and partially addressed (see 5.5, 5.6), and the most recent runs show meaningful improvement in recall after fixes — but station diversity on the noise side at short windows remains thin (as few as 2–4 distinct noise stations contributing to val/test even after capping), so these numbers should be treated as preliminary, not final.
+### 2.3 Why short windows are structurally disadvantaged
 
-**Working hypothesis for why short windows are structurally harder** (independently arrived at, worth stating as the current best explanation): STA/LTA's core advantage is a long-term running baseline (the LTA) — it always has _some_ memory of what "normal" looks like at that station. The current RAM pipeline standardizes each window purely against itself, with no memory of longer-term station behavior. At 60s, a window is long enough that this self-normalization is fairly stable; at 6s or 3s, it's a much smaller, noisier sample to self-normalize against. This gap should, in principle, grow as windows shrink — consistent with the observed pattern.
+The reshape ties image resolution against feature-vector length: with $n$ fixed
+at 64, the segment length $d = \lceil m/n \rceil$ collapses as the window
+shortens (all at 100 Hz):
 
-## 7. Proposed next steps
+| Window | samples $m$ | $d$ (samples/vector) | segment duration | zero-padding |
+|---|---|---|---|---|
+| 60 s | 6000 | 94 | 0.94 s | 0.3 % |
+| 10 s | 1000 | 16 | 0.16 s | 2.3 % |
+| 6 s | 600 | 10 | 0.10 s | 6.2 % |
+| 3 s | 300 | 5 | 0.05 s | 6.2 % |
 
-1. **Incorporate a long-term per-station noise baseline** into preprocessing (analogous to STA/LTA's LTA) rather than relying purely on per-window self-standardization. This directly targets the hypothesis in 6.2.
-2. **Tighten noise station diversity further** at short window lengths (lower per-station cap, or source additional noise stations) before drawing final conclusions about 6s/3s performance.
-3. **Ablation: per-channel RAM vs. combine-then-RAM.** Test whether combining Z/N/E into a single signal (e.g. vector magnitude) before the RAM transform, rather than transforming each channel independently, better preserves cross-channel amplitude information.
-4. **Held-out-station sanity check** at each window length, to further confirm generalization beyond the station-disjoint test split already in place.
+At 3 s, each $\beta_i$ is the angle between two **5-dimensional** vectors. The
+cosine similarity of short random vectors has high variance — the angles become
+dominated by sampling noise rather than by signal structure, and the resulting
+image is correspondingly noisy. This is a *geometric* limitation of the
+encoding, independent of model capacity or dataset size, and it applies equally
+to classification and regression.
 
-## 8. Caveats
+The tension has no clean resolution within the current design: raising $d$
+requires lowering $n$ (smaller image), and at 3 s even $n = 3$ would be needed
+to reach 60 s-equivalent segment lengths. Lowering `--target-n` was tried and
+landed in the same accuracy band as the other variants (Section 7.2).
 
-- This is a personal side project, not a project deliverable, and has not been reviewed by anyone else.
-- 60s results are well-validated; 6s/3s results are preliminary and still being iterated on.
-- Sample sizes, especially for noise-station diversity at short windows, are currently modest — worth keeping in mind when reading precision/recall to more than one significant figure.
+### 2.4 Three-channel composition
+
+Each component (Z, N/1, E/2) is RAM-transformed independently and stacked:
+**R = Z, G = N-ish, B = E-ish**. Selection is by component *role*, not
+alphabetical order, and stations lacking a usable vertical are dropped
+(Section 6, bug 13).
+
+Open question, parked: whether combining the three components *before* the
+transform (e.g. vector magnitude) would preserve inter-channel amplitude
+relationships better than transforming each independently. Given 2.2(d), any
+such variant is worth evaluating specifically for what it does to amplitude
+information.
+
+---
+
+## 3. Data processing pipeline
+
+Four stages, implemented in the `seismic_cli` package of the `data_downloader`
+repo (`core.py`, `anchor.py`, `eval_baseline.py`, `cli.py`).
+
+### 3.1 Acquisition (`src/download.py`)
+
+Per catalog event, stations within `SEARCH_RADIUS_DEG = 0.5°` (~55 km) are
+resolved via FDSN (KOERI), with lookups cached on a ~1.1 km coordinate grid so
+co-located events share one metadata query. All windows for an event are
+fetched in a single bulk request and sliced in memory.
+
+- **Earthquake windows:** 60 s from origin time.
+- **Noise windows:** 300 s slices at −3 h and −6 h relative to origin.
+- **Contamination check:** a noise window is discarded if *any* event in the
+  **unfiltered** catalog falls within $\pm 300$ s of it. Checking against the
+  filtered catalog would let sub-threshold quakes pass silently into the noise
+  class. The buffer is deliberately wide — coda from larger events rings on for
+  minutes.
+
+Note this check is purely temporal: an event 500 km away vetoes the window.
+That is over-conservative and discards noise data we are short of; adding a
+distance term is listed in Section 9.
+
+### 3.2 Arrival anchoring (`seismic-cli anchor-windows`)
+
+Short windows sliced from *origin time* can miss the P-arrival entirely at
+distant stations — at 6 s, an arrival later than 6 s after origin means the
+"earthquake" window contains no earthquake. Anchoring re-derives short windows
+from already-downloaded 60 s data (no redownload).
+
+The pick uses the classic STA/LTA characteristic function
+
+$$\text{CF}(k) = \frac{\frac{1}{n_{\text{STA}}}\sum_{j=k-n_{\text{STA}}+1}^{k} x_j^2}{\frac{1}{n_{\text{LTA}}}\sum_{j=k-n_{\text{LTA}}+1}^{k} x_j^2}$$
+
+with the first `trigger_onset` crossing of `trigger_on = 3.5` taken as the
+arrival sample $a$. The window is then cut as
+
+$$[\,a - f\cdot T,\ a - f\cdot T + T\,), \qquad f = \texttt{pre\_arrival\_fraction} = 0.2$$
+
+so 20 % of the window precedes the arrival (at 6 s: 1.2 s pre, 4.8 s post).
+
+Two correctness requirements, both of which were violated before this round
+(Section 6, bugs 6–7): the trace must be **detrended** before the CF is
+computed, and the pick should prefer the **vertical** component with fallback
+to horizontals. A `[PICK DIAGNOSTICS]` block now reports stations seen /
+skipped / picked on Z / picked via fallback / no pick, plus how close failures
+came to the trigger threshold.
+
+### 3.3 Dataset generation (`seismic-cli generate-dataset`)
+
+Per window, per channel: linear + constant detrend → 5 % Hann taper → 4th-order
+Butterworth bandpass (1–45 Hz, zero-phase `filtfilt`) → RAM transform → 8-bit
+render → stacked to RGB → PNG.
+
+The orchestration enforces five constraints that took several iterations to get
+right:
+
+**Station-disjoint splits, unified across classes.** Each station is assigned
+to exactly one of train/val/test, and *both* its earthquake and noise windows
+follow that assignment. With ~97 % of earthquake stations also contributing
+noise, allocating the two classes independently (the previous behavior) meant
+nearly every station could sit in train under one label and test under the
+other — see Section 6, bug 1.
+
+**Per-window station caps** (`--max-windows-per-station`). Enforced by
+assigning each (station, file) pair an evenly-spaced window quota, not by
+dropping whole files. Filenames retain the *original* window index $w$, so the
+sample range $[\,w s,\ w s + T)$ (with step $s = T(1-\text{overlap})$)
+remains recoverable for baseline reconstruction even after subsampling.
+
+**Maximum-size balanced mode** (`--max`). Assigns every usable station to the
+split with the largest relative deficit against ratio-proportional targets,
+then balances classes **per split** by trimming the surplus class with
+largest-remainder proportional rounding over per-file quotas. Without it,
+generation stops once global targets fill and silently discards every leftover
+station — costly exactly where station diversity is scarce.
+
+**Gap rejection.** Traces are merged *without* interpolation fill so gaps stay
+masked; gaps are then linearly filled for filtering while a boolean mask
+records which samples are synthetic. Any window whose worst channel exceeds
+5 % synthetic samples is rejected. Previously, `fill_value='interpolate'`
+turned telemetry gaps into linear ramps that entered training as real signal.
+
+**Per-station sampling rates.** Window sizing uses each station's own $f_s$
+(recorded in the manifest), rather than assuming the file's first trace's rate
+applies to all stations in it.
+
+Output is an `ImageFolder` tree plus `manifest.csv`
+(`split, class_name, station_key, file_path, filename, fs`) — one row per
+image, sufficient to reconstruct the exact source samples of any image.
+
+### 3.4 Baseline standardization (`--baseline`)
+
+Optionally, each channel is standardized against that station's long-term noise
+statistics $(\mu_{\text{sta}}, \sigma_{\text{sta}})$ — accumulated in a
+streaming pass over all noise files for that (station, component), requiring
+≥ 60 s of usable data — instead of the window's own $(\mu, \sigma)$. The intent
+was to give the pipeline the long-term memory that is STA/LTA's core advantage.
+
+**This does not work, for a structural reason established in Section 8.2.**
+
+---
+
+## 4. Model architecture
+
+`ImprovedSeismicCNN` (`src/model/cnn_train.py`): a ResNet-style CNN with
+Squeeze-and-Excitation blocks, binary output.
+
+### 4.1 Components
+
+**Residual block.** For input $u$:
+
+$$\text{ResBlock}(u) = \text{GELU}\Big(\text{SE}\big(\text{BN}_2(W_2 * \text{GELU}(\text{BN}_1(W_1 * u)))\big) + \mathcal{S}(u)\Big)$$
+
+with $3\times3$ convolutions, the first carrying the stride-2 downsample, and
+$\mathcal{S}$ the identity or a $1\times1$ projection when shape changes.
+
+**Squeeze-and-Excitation** (reduction $r = 16$), applied *before* the residual
+addition. Given $z \in \mathbb{R}^{H\times W\times C}$:
+
+$$s = \text{GAP}(z) \in \mathbb{R}^{C}, \qquad e = \sigma\big(W_b\,\text{ReLU}(W_a s)\big) \in (0,1)^C, \qquad \text{SE}(z)_c = e_c \cdot z_c$$
+
+i.e. a learned per-channel gain conditioned on global context. In this setting
+the three input channels are Z/N/E, so channel attention has a physical reading
+— it can learn to weight components differently (verticals typically carry the
+cleanest P-onset).
+
+**Head.** Global average pooling → `Dropout(p_1)` → `Linear(C_f, h)` → GELU →
+`Dropout(p_2)` → `Linear(h, 1)`, emitting a single logit.
+
+### 4.2 Dimensions and parameter budget (64×64×3 input, measured)
+
+| Stage | Output (C,H,W) | Params |
+|---|---|---|
+| `in_conv` (3→16) | (16, 64, 64) | 448 |
+| `layer1` (16→32, s2) | (32, 32, 32) | 14,656 |
+| `layer2` (32→64, s2) | (64, 16, 16) | 58,240 |
+| `layer3` (64→128, s2) | (128, 8, 8) | 232,192 |
+| `layer4` (128→256, s2) | (256, 4, 4) | 927,232 |
+| GAP → head (256→64→1) | (1,) | 16,513 |
+| **Total (long preset)** | | **1,249,297** |
+| **Total (short preset, 3 stages, head 32)** | | **309,713** |
+
+`layer4` alone is 74 % of the long configuration's parameters — which is why
+the short preset drops it, cutting the model by 4.0×.
+
+### 4.3 Training procedure
+
+Loss is `BCEWithLogitsLoss` on **label-smoothed** targets
+$\tilde{y} = 0.8y + 0.1$, which caps the confidence the model is rewarded for.
+Note this puts a floor on training loss: at the optimum, per-sample BCE is the
+binary entropy $H(0.1) \approx 0.325$ nats, so smoothed train loss is **not**
+directly comparable to unsmoothed validation loss. The script now logs an
+unsmoothed train-loss diagnostic alongside it specifically so the train/val gap
+can be read honestly (Section 6, bug 9).
+
+Optimizer AdamW; gradient-norm clipping at 1.0; mixed precision on CUDA.
+Checkpointing saves the best epoch by the monitored metric, and final test
+evaluation always loads that checkpoint.
+
+### 4.4 Window-length presets
+
+Short-window runs overfit the full network within ~10 epochs while 60 s runs do
+not. `--window-seconds` therefore selects a preset (≤ 12 s → `short`); any
+explicitly passed flag overrides its preset value, and omitting the flag
+reproduces the original configuration exactly.
+
+| | `long` (60 s) | `short` (≤ 12 s) | rationale |
+|---|---|---|---|
+| stages / head | 4 / 64 | 3 / 32 | 1.25 M → 0.31 M params |
+| dropout $p_1,p_2$ | 0.5, 0.3 | 0.6, 0.4 | stronger head regularization |
+| weight decay | 1e-2 | 3e-2 | ” |
+| RandomErasing | off | $p=0.25$ | the one label-safe augmentation available — flips/rotations would scramble the RAM matrix's temporal ordering, since axis position *is* time |
+| batch / lr | 128 / 1e-4 | 64 / 2e-4 | more updates per epoch on small data |
+| schedule | ReduceLROnPlateau | cosine anneal | plateau reacts too slowly when the peak arrives by epoch ~6 |
+| checkpoint metric | val loss | **val AUC** | val BCE degrades from calibration drift while ranking quality is still improving; loss-based selection can save a pre-peak model |
+
+---
+
+## 5. Baseline: STA/LTA on identical windows
+
+The baseline scores the same CF as Section 3.2, taking
+$\max_k \text{CF}(k)$ over each channel and the max across channels as the
+window's score. Two properties make the comparison fair:
+
+- **Exact-window reconstruction.** Windows are rebuilt from the raw mseed via
+  the manifest (same file, station, and window index), not resampled
+  independently.
+- **Window-adaptive parameters.** Fixed `sta=1.0 / lta=10.0` cannot even be
+  computed inside a 3 s or 6 s window. Parameters are now derived as
+  $\text{LTA} = \min(10,\ T/3)$ and $\text{STA} = \max(0.05,\ \text{LTA}/10)$,
+  reproducing the classic 1/10 exactly at 60 s and giving 0.2/2.0 at 6 s and
+  0.1/1.0 at 3 s.
+
+Reported metrics are **AUC** (threshold-free, the honest comparison against the
+CNN) plus accuracy/precision/recall at the Youden's-J threshold. That threshold
+is selected *on the evaluated split*, making it an oracle: those thresholded
+numbers are STA/LTA's **upper bound**, not a like-for-like comparison against
+the CNN's fixed 0.5 cutoff.
+
+---
+
+## 6. Corrections applied (the debugging record)
+
+Most of the actual rigor here is in what had to be fixed. Bugs 1–5 predate this
+round; 6–13 were found in a systematic audit of the whole repository.
+
+| # | Defect | Mechanism | Impact |
+|---|---|---|---|
+| 1 | **Cross-class station leakage** | Splits allocated independently per class; with ~97 % station overlap a station could be train-earthquake and test-noise | Model could exploit station identity; biased *against* measured test performance, worst where stations are few (short windows) |
+| 2 | **Station caps did nothing** | Cap applied at file granularity; a single 300 s noise file (~200 windows at 3 s) exceeded any smaller cap and was kept whole | Explains "only 2–4 distinct noise stations in val/test even after capping" |
+| 3 | **Fixed-resolution collapse** | Fixed reshape depth $d$ regardless of window length | 3 s windows collapsed to ~3×3 images; fixed by deriving $d$ from target resolution |
+| 4 | **Origin-anchored short windows** | Short windows cut from origin time, not arrival | A meaningful fraction of "earthquake" windows contained no signal |
+| 5 | **Noise/earthquake station mismatch** | Noise sourced independently of earthquake stations (~47 % overlap) | Model rarely saw both classes from one instrument; targeted downloader raised overlap to ~97 % |
+| 6 | **STA/LTA on raw counts (anchoring)** | `classic_sta_lta` computed on un-detrended MiniSEED counts; a large DC offset pins CF ≈ 1 | Verified: synthetic arrival with 10⁶-count offset gives max CF exactly 1.000 (no pick possible on *any* channel); detrended, it picks within 4 samples of truth |
+| 7 | **Arrival pick on a horizontal** | `sorted(traces)[0]` selects E before Z alphabetically, single attempt, no fallback | P-onsets are cleanest on Z; now Z-first with fallback through remaining channels |
+| 8 | **STA/LTA on raw counts (baseline eval)** | Same DC-offset defect in the *baseline scorer* | Baseline understated at high-offset stations; plausibly explains why measured STA/LTA AUC swung 0.78–0.98 between data pulls |
+| 9 | **Label-smoothing asymmetry** | Smoothing applied to train targets only; smoothed BCE floors at ~0.325 nats | Train/val loss curves not comparable in magnitude; val metrics were unaffected (they always used raw labels) |
+| 10 | **Threshold mismatch** | `cnn_from_tensor.py` validated at 0.60, tested at 0.50 | Val and test accuracy measured different decision rules |
+| 11 | **Gap interpolation as signal** | `merge(fill_value='interpolate')` fabricates linear ramps across telemetry gaps | Synthetic data trained on as real; now gap-masked and windows > 5 % synthetic are rejected |
+| 12 | **Single-rate assumption** | File's first trace's $f_s$ applied to every station in it | Wrong physical window duration for off-rate stations; now per-station |
+| 13 | **Alphabetical channel selection** | `sorted(keys)[:3]` could yield `['1','2','E']` — two horizontals, no vertical | Silent component mis-assignment; now role-based with vertical required |
+
+Two non-defects worth recording, since both were suspected: the RAM math itself
+transcribes the paper correctly (including guards the paper omits — $\varepsilon$
+on $\sigma$, clipping before `arccos`), and the manifest's window-index ↔ sample
+mapping is exact.
+
+---
+
+## 7. Results
+
+> **All numbers below predate the Section 6 bugs 6–13 fixes.** They are
+> reported for continuity, not as validated results. In particular every
+> STA/LTA figure was produced by the DC-offset-affected scorer, and every
+> short-window figure by the ineffective cap and cross-class split allocation.
+> The comparison needs re-running end-to-end before any of it is quotable.
+
+### 7.1 60-second windows
+
+| Metric | CNN | STA/LTA |
+|---|---|---|
+| Accuracy | 89.61 % | — |
+| Recall (earthquake) | 0.963 | — |
+| Precision (earthquake) | 0.817 | — |
+| ROC-AUC | — | 0.7777 |
+
+Test set 2,561 samples, station-disjoint. Across repeated dataset
+regenerations the CNN's margin over STA/LTA on AUC has held in the range of
+roughly 0.10–0.15 AUC points and, if anything, widened across data pulls. This
+is the headline result, and the one most likely to survive re-validation —
+though the baseline's own number is expected to *move* once bug 8 is fixed, so
+the margin must be re-measured rather than assumed.
+
+### 7.2 6-second windows
+
+Most recent run (853 test samples):
+
+```
+Accuracy 72.80 %
+              precision  recall  f1-score  support
+   noise         0.7203  0.7727    0.7456      440
+   earthquake    0.7375  0.6804    0.7078      413
+Confusion: TN=340  FP=100  FN=132  TP=281
+```
+
+Three pipeline-side variants — per-window standardization, per-station baseline
+standardization (74.88 % vs 77.99 % at the time, i.e. no improvement), and a
+smaller `--target-n` — all landed in a 72–78 % band with the same overfitting
+signature: validation AUC peaking around epoch 4–10, then flattening or
+degrading while training loss continued to fall.
+
+The convergence of three unrelated interventions on the same band is what
+motivated the model-side audit (Section 4.4) and, ultimately, the structural
+analysis in Section 8.
+
+At ~850 samples, binomial noise on accuracy is ≈ ±1.5 pp; differences under
+~3 pp between runs should not be read as real.
+
+---
+
+## 8. Analysis
+
+### 8.1 Why short windows lag: three compounding causes
+
+1. **Geometric (Section 2.3).** At 6 s the local feature vectors are 10 samples
+   long, at 3 s just 5. Cosine angles between very short vectors are
+   noise-dominated, so the encoding itself degrades — before any model sees it.
+2. **Statistical.** Short-window datasets have been small (~1.5–4 k samples)
+   and, until the cap fix, drawn from very few distinct noise stations. The
+   1.25 M-parameter network is heavily over-provisioned at that scale
+   (~300–800 params/sample), which matches the early-peak overfitting curve.
+3. **Informational (below).** The single feature that most cleanly separates a
+   6 s earthquake window from noise — amplitude relative to the station's
+   background — is provably absent from the input.
+
+### 8.2 The RAM transform discards amplitude — and that is what STA/LTA uses
+
+This is the most consequential finding of this round.
+
+By property 2.2(d), the transform is exactly scale-invariant:
+$\text{RAM}(cx) = \text{RAM}(x)$. Now consider what baseline standardization
+actually changes. After `clean_and_filter_1d` (detrend + demean + bandpass) the
+window mean is $\approx 0$, and $\mu_{\text{sta}}$ is likewise $\approx 0$
+because it is accumulated from identically-cleaned noise. So the two modes
+differ, to a very good approximation, by the single factor
+$\sigma_{\text{win}}/\sigma_{\text{sta}}$ — a pure rescale, which RAM cancels
+exactly.
+
+Measured on representative windows, comparing self- vs baseline-standardized
+images at the same station:
+
+| Event strength | $\sigma_{\text{win}}/\sigma_{\text{noise}}$ | mean pixel difference | max |
+|---|---|---|---|
+| weak (SNR ≈ 2) | 1.84 | 0.63 / 255 levels | 3 |
+| strong (SNR ≈ 20) | 19.19 | 0.27 / 255 levels | 1 |
+
+The differences are sub-level and — decisively — they do **not grow with the
+amplitude ratio**. A 20× stronger event does not produce a more
+distinguishable baseline-standardized image; it produces a slightly *smaller*
+difference. The residual comes from the near-zero post-filter mean (RAM is
+shift-sensitive, 2.2(d)), not from amplitude.
+
+Three conclusions follow:
+
+- **The `--baseline` flag cannot deliver what it was built for.** The
+  amplitude/SNR information it preserves is annihilated by the very next step
+  in the pipeline. The earlier 6 s result (74.88 % vs 77.99 %) was not evidence
+  against the long-term-memory hypothesis — it was run-to-run noise on
+  near-identical images. **The hypothesis in the previous version of this
+  report was never actually tested.**
+- **It explains STA/LTA's competitiveness at short windows.** Its entire signal
+  is amplitude measured against a long-term baseline — precisely the quantity
+  the RAM pipeline structurally cannot represent. The CNN is being asked to win
+  using shape and frequency structure alone.
+- **It predicts that magnitude regression on RAM images will underperform.**
+  Local magnitude is essentially log peak amplitude with a distance correction;
+  a scale-invariant encoding removes the dependent variable's main predictor.
+  Retrying regression with `--baseline` alone would not address this.
+
+### 8.3 Implication: amplitude belongs as an explicit input
+
+The fix is not another image variant but an auxiliary scalar. For each window
+and channel, compute
+
+$$\text{SNR}_{\log} = \log\left(\frac{\sigma_{\text{win}}}{\sigma_{\text{sta,noise}}}\right)$$
+
+store it in the manifest, and concatenate it (with epicentral distance, needed
+to disambiguate magnitude from distance) to the pooled CNN features before the
+classifier head. This restores the discarded quantity without disturbing the
+transform.
+
+Cheap validation order, before spending CNN runs:
+
+1. Confirm the no-op directly — generate a handful of windows with and without
+   `--baseline` and diff the PNGs (expected: ≤ 3 levels, per the table above).
+2. Regress magnitude on $\log(\sigma_{\text{win}}/\sigma_{\text{noise}})$ and
+   $\log(\text{distance})$ alone, with a linear model or GBM. This is
+   effectively fitting a local-magnitude relation; if it fails, the station
+   baselines are too noisy and a CNN would inherit that.
+3. Only then train the joint (image + scalar) model — for regression, and for
+   the 6 s classifier, where it hands the network exactly the feature STA/LTA
+   has been beating it with.
+
+---
+
+## 9. Limitations and next steps
+
+**Immediate (blocking re-validation):**
+
+1. Regenerate all datasets and re-run every comparison under the Section 6
+   fixes — especially the 60 s CNN-vs-STA/LTA margin, whose baseline term is
+   expected to move.
+2. Re-run 6 s generation with `--max` and a working per-window cap; station
+   diversity should improve substantially, since the previous mode discarded
+   every station beyond the bottleneck target.
+3. Re-run 6 s training under the `short` preset, then ablate
+   (`--num-stages 4` isolates regularization; `--monitor loss` isolates
+   capacity) across ≥ 3 seeds before believing any single number.
+
+**Structural:**
+
+4. Add the amplitude/distance auxiliary input (8.3) — the highest-expected-value
+   change, and a prerequisite for revisiting magnitude regression.
+5. Given 2.2(b) — 4,096 pixels carrying 63 d.o.f. — evaluate whether feeding
+   the $\beta$ vector directly to a 1D model matches the 2D CNN. If it does,
+   the image encoding is buying nothing but compute, and that is worth knowing.
+6. Ablate combine-then-RAM (vector magnitude) vs per-channel RAM.
+7. Add a distance term to the noise contamination check; the current
+   time-only rule discards usable noise we are short of.
+
+**Caveats standing:**
+
+- Personal side project; not reviewed by anyone else.
+- 60 s results are the strongest but are pre-fix; 6 s results are preliminary.
+- Short-window noise-station diversity remains thin, so precision/recall there
+  should not be read past one significant figure.
+- All conclusions in Section 8.2 concern *this* transform as specified; they
+  follow from scale invariance and would not apply to an amplitude-preserving
+  variant.
+
+---
+
+## 10. Reproducing
+
+```bash
+# 1. arrival-anchored 6s windows from downloaded 60s data
+seismic-cli anchor-windows \
+    --source-dir data/batched_waveforms/window_post_60s \
+    --output-base-dir data/batched_waveforms -t 6
+
+# 2. maximum-size balanced, station-disjoint 6s dataset
+seismic-cli generate-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms \
+    --output-dir dataset_6s_max \
+    --window-seconds 6 --overlap 0.5 --max --max-windows-per-station 20
+
+# 3. train (short preset auto-selected by --window-seconds)
+python src/model/cnn_train.py --dataset-dir dataset_6s_max \
+    --save-dir trained_model_6s --window-seconds 6
+
+# 4. STA/LTA baseline on the identical test windows (params auto-derived)
+seismic-cli eval-sta-lta \
+    --manifest-path dataset_6s_max/manifest.csv \
+    --split test --window-seconds 6 --overlap 0.5
+```
+
+Full option reference: `data_downloader/README.md`.
