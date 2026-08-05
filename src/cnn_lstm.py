@@ -155,6 +155,38 @@ class CNNBranch(nn.Module):
         return torch.flatten(self.net(x), 1)
 
 
+class GatedFusion(nn.Module):
+    """
+    Per-example gate deciding how much to trust each branch, replacing a
+    fixed pair of scalars (a*F1 + b*F2, same for every example) with
+    g(x)*F1 + (1-g(x))*F2, where g = sigmoid(MLP([F1, F2])) is conditioned on
+    both branches' own features for THIS example.
+
+    Motivation (report.md 10.5.1/10.5.2): the paper's fixed-scalar fusion
+    underperformed the best single branch on two independent 2D
+    representations (RAM and spectrogram) -- a global blend can't suppress a
+    weak branch on the specific examples where it's wrong, only shrink its
+    average contribution. Late-fusion stacking on frozen checkpoints fixed
+    that post hoc; this tests whether the same idea, trained end-to-end
+    instead of on frozen features, does at least as well without giving up
+    joint training's ability to let the branches adapt to each other.
+    """
+
+    def __init__(self, dim, hidden=None, dropout=0.1):
+        super().__init__()
+        hidden = hidden or max(8, dim // 2)
+        self.net = nn.Sequential(
+            nn.Linear(dim * 2, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, 1),
+        )
+
+    def forward(self, f1, f2):
+        g = torch.sigmoid(self.net(torch.cat([f1, f2], dim=1)))
+        return g * f1 + (1.0 - g) * f2, g
+
+
 class DualChannelRiskNet(nn.Module):
     """
     1D + 2D + auxiliary scalars, fused and classified.

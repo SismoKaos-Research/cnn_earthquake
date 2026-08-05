@@ -15,14 +15,15 @@ whether or not the 1D raw-waveform branch already compensates for some of it.
     aux      the two scalars alone, through a small head -- the floor
     1d+aux / 2d+aux   one branch plus the amplitude fix, without the other
 
-Fusion here is still the paper's plain a*F1d + b*F2d (aux concatenates
-AFTER that fusion, not through it) -- deliberately not the stacking or
-gating ideas discussed for later, so this is an isolated test of the aux
-fix alone, on top of whatever fusion mechanism was already in use.
+aux concatenates AFTER the 1D/2D fusion, not through it, so `--fusion` (linear
+or gate, same as cnn_lstm_classify.py) is an orthogonal choice to the aux
+fix -- this isolates each of the two ideas from report.md's 10.6 next-steps
+list rather than conflating them.
 
 Usage:
     python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s
     python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s --channels 2d+aux
+    python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s --fusion gate
 """
 
 import argparse
@@ -38,7 +39,7 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import CNNBranch, LSTMAttentionBranch
+from cnn_lstm import CNNBranch, GatedFusion, LSTMAttentionBranch
 from training import seed_everything
 
 AUX_FEATURES = ["log_snr", "log_rms"]
@@ -119,14 +120,17 @@ class DualChannelAuxBinaryNet(nn.Module):
     `cnn_lstm.DualChannelRiskNet` already uses for the catalog model."""
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
-                dropout=0.3, channels="all"):
+                dropout=0.3, channels="all", fusion="linear"):
         super().__init__()
         self.channels = channels
+        self.fusion = fusion
         self.use_1d = channels in ("all", "1d", "1d+aux")
         self.use_2d = channels in ("all", "2d", "2d+aux")
         self.use_aux = channels in ("all", "aux", "1d+aux", "2d+aux")
         if not (self.use_1d or self.use_2d or self.use_aux):
             raise ValueError(f"--channels {channels} disables every branch")
+        if fusion not in ("linear", "gate"):
+            raise ValueError(f"--fusion must be 'linear' or 'gate', got {fusion!r}")
 
         if self.use_1d:
             self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
@@ -134,8 +138,13 @@ class DualChannelAuxBinaryNet(nn.Module):
         if self.use_2d:
             self.b2 = CNNBranch(img_channels, dropout=dropout)
             self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
-        self.w1 = nn.Parameter(torch.tensor(1.0))
-        self.w2 = nn.Parameter(torch.tensor(1.0))
+
+        self.both = self.use_1d and self.use_2d
+        if self.both and fusion == "gate":
+            self.gated_fusion = GatedFusion(fusion_dim)
+        else:
+            self.w1 = nn.Parameter(torch.tensor(1.0))
+            self.w2 = nn.Parameter(torch.tensor(1.0))
 
         head_in = (fusion_dim if (self.use_1d or self.use_2d) else 0) + \
                   (aux_dim if self.use_aux else 0)
@@ -149,13 +158,20 @@ class DualChannelAuxBinaryNet(nn.Module):
         )
 
     def forward(self, seq, img, aux):
+        self.last_gate = None
         feats = []
         fused = None
-        if self.use_1d:
+        if self.both:
+            f1 = self.p1(self.b1(seq))
+            f2 = self.p2(self.b2(img))
+            if self.fusion == "gate":
+                fused, self.last_gate = self.gated_fusion(f1, f2)
+            else:
+                fused = self.w1 * f1 + self.w2 * f2
+        elif self.use_1d:
             fused = self.w1 * self.p1(self.b1(seq))
-        if self.use_2d:
-            f2 = self.w2 * self.p2(self.b2(img))
-            fused = f2 if fused is None else fused + f2
+        elif self.use_2d:
+            fused = self.w2 * self.p2(self.b2(img))
         if fused is not None:
             feats.append(fused)
         if self.use_aux:
@@ -173,6 +189,10 @@ def parse_args():
                    help="Directory from `seismic-cli generate-dual-aux-dataset`.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_aux")
     p.add_argument("--channels", default="all", choices=CHANNEL_CHOICES)
+    p.add_argument("--fusion", default="linear", choices=["linear", "gate"],
+                   help="linear: paper's a*F1+b*F2. gate: per-example gate "
+                        "(cnn_lstm.GatedFusion). Only affects channel combos where "
+                        "both 1D and 2D are active (all, not 1d+aux/2d+aux).")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=2e-4)
@@ -212,7 +232,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DualChannelAuxBinaryNet(seq_shape[-1], img_shape[0], aux_shape[-1], hidden=args.hidden,
                                     fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                    channels=args.channels).to(device)
+                                    channels=args.channels, fusion=args.fusion).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Device: {device} | parameters: {n_params:,} | train samples: {len(train_ds)} "
           f"({n_params / max(1, len(train_ds)):.1f} params/sample)")
@@ -298,7 +318,7 @@ def main():
 
     model.load_state_dict(torch.load(save_path, weights_only=True))
     model.eval()
-    all_labels, all_probs, all_preds = [], [], []
+    all_labels, all_probs, all_preds, all_gates = [], [], [], []
     with torch.no_grad():
         for seq, img, aux, labels in test_loader:
             seq, img, aux = seq.to(device), img.to(device), aux.to(device)
@@ -309,9 +329,11 @@ def main():
             all_labels.extend(labels.tolist())
             all_probs.extend(probs.float().cpu().squeeze(1).tolist())
             all_preds.extend(preds.float().cpu().squeeze(1).tolist())
+            if getattr(model, "last_gate", None) is not None:
+                all_gates.extend(model.last_gate.float().cpu().squeeze(1).tolist())
 
     all_labels = np.array(all_labels); all_preds = np.array(all_preds)
-    print(f"\n--- Dual-channel RAM classifier + aux (channels='{args.channels}') ---")
+    print(f"\n--- Dual-channel RAM classifier + aux (channels='{args.channels}', fusion='{args.fusion}') ---")
     print(f"Final Test Accuracy: {(all_labels == all_preds).mean() * 100:.2f}%")
     try:
         print(f"Final Test AUC:      {roc_auc_score(all_labels, all_probs):.4f}")
@@ -320,8 +342,17 @@ def main():
         pass
 
     if getattr(model, "use_1d", False) and getattr(model, "use_2d", False):
-        print(f"\nlearned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}"
-              "\n(relative magnitude indicates which representation the model leaned on)")
+        if args.fusion == "gate":
+            g = np.array(all_gates)
+            correct = (all_labels == all_preds)
+            print(f"\ngate g (1 favors 1D, 0 favors 2D): mean {g.mean():.3f}  std {g.std():.3f}"
+                  f"\n  earthquake windows: mean g {g[all_labels==1].mean():.3f}"
+                  f"\n  noise windows:      mean g {g[all_labels==0].mean():.3f}"
+                  f"\n  correct predictions: mean g {g[correct].mean():.3f}"
+                  f"\n  wrong predictions:   mean g {g[~correct].mean() if (~correct).any() else float('nan'):.3f}")
+        else:
+            print(f"\nlearned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}"
+                  "\n(relative magnitude indicates which representation the model leaned on)")
 
     cm = confusion_matrix(all_labels, all_preds)
     print("\nConfusion Matrix:")

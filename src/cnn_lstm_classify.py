@@ -3,20 +3,25 @@ Dual-channel CNN + LSTM/self-attention (1D2D-EDL, Wang & Zhao 2025) for
 earthquake-vs-noise classification, applied directly on RAM-transformed
 waveforms instead of the catalog forecasting task in `cnn_lstm.py`.
 
-    1D channel : LSTM -> multi-head self-attention over the (target_n, 3*d)
-                 chunk matrix `seismic-cli generate-dual-dataset` writes --
-                 the SAME reshaped samples the RAM image is computed from.
-    2D channel : CNN over the (3, target_n, target_n) RAM image.
-    fusion     : F = a*F_1d + b*F_2d   (a, b learned, as in the paper)
+    1D channel : LSTM -> multi-head self-attention over the raw standardized
+                 (m, 3) Z/N/E waveform `seismic-cli generate-dual-dataset`
+                 writes -- per the paper's Sec. 3.3.1, NOT a reshaped version
+                 of the RAM image (see seismic_cli/ram_dual.py's docstring
+                 for the design mistake this corrected).
+    2D channel : CNN over the (3, target_n, target_n) RAM image, built from
+                 the same window independently of the 1D channel.
+    fusion     : --fusion linear (paper's default): F = a*F_1d + b*F_2d,
+                 a fixed pair of scalars learned jointly with both branches.
+                 --fusion gate: F = g(x)*F_1d + (1-g(x))*F_2d, a per-example
+                 gate (see cnn_lstm.GatedFusion) -- built because linear
+                 fusion measurably underperformed the best single branch on
+                 two independent datasets (report.md 10.5.1).
     head       : single logit, earthquake vs. noise (BCEWithLogitsLoss).
 
-The two branches deliberately see the same underlying data (see
-seismic_cli/ram_dual.py's docstring) -- this isn't pairing two independent
-sources of information, it's testing whether the sequential view of the
-window (1D) adds anything a CNN over its pairwise-angle image (2D) doesn't
-already capture, which `--channels 1d`/`2d` ablate directly. `--channels 2d`
-alone is architecturally close to the existing CNN-only RAM classifier
-(`cnn_train.py`), so it doubles as that baseline's comparison point here.
+`--channels 1d`/`2d` ablate either branch (fusion is then a no-op).
+`--channels 2d` alone is architecturally close to the existing CNN-only RAM
+classifier (`cnn_train.py`), so it doubles as that baseline's comparison
+point here.
 
 Training conventions (label smoothing, unsmoothed-loss diagnostic, AMP, val
 AUC/MCC, matched 0.5 threshold) match `training.py`, the shared core for the
@@ -26,6 +31,7 @@ that module, since it assumes a single-tensor model, not two paired inputs.
 Usage:
     python cnn_lstm_classify.py --dataset-dir dataset_dual_6s
     python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --channels 2d   # CNN-only ablation
+    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --fusion gate   # gated fusion
 """
 
 import argparse
@@ -41,7 +47,7 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import CNNBranch, LSTMAttentionBranch
+from cnn_lstm import CNNBranch, GatedFusion, LSTMAttentionBranch
 from training import seed_everything
 
 
@@ -114,16 +120,25 @@ class RamDualTensorDataset(Dataset):
 class DualChannelBinaryNet(nn.Module):
     """Same fusion design as `cnn_lstm.py`'s DualChannelRiskNet, minus the
     auxiliary-scalar branch (there are no catalog-style physical scalars
-    here) and with a single-logit binary head instead of a 3-way softmax."""
+    here) and with a single-logit binary head instead of a 3-way softmax.
+
+    `fusion="linear"` is the paper's a*F1+b*F2 (two global scalars).
+    `fusion="gate"` replaces it with `cnn_lstm.GatedFusion`, a per-example
+    gate -- only meaningful when both branches are active (`channels="all"`);
+    single-branch ablations ignore `fusion` entirely since there is nothing
+    to combine."""
 
     def __init__(self, seq_dim, img_channels, hidden=64, fusion_dim=128,
-                dropout=0.3, channels="all"):
+                dropout=0.3, channels="all", fusion="linear"):
         super().__init__()
         self.channels = channels
+        self.fusion = fusion
         self.use_1d = channels in ("all", "1d")
         self.use_2d = channels in ("all", "2d")
         if not (self.use_1d or self.use_2d):
             raise ValueError(f"--channels {channels} disables every branch")
+        if fusion not in ("linear", "gate"):
+            raise ValueError(f"--fusion must be 'linear' or 'gate', got {fusion!r}")
 
         if self.use_1d:
             self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
@@ -131,9 +146,17 @@ class DualChannelBinaryNet(nn.Module):
         if self.use_2d:
             self.b2 = CNNBranch(img_channels, dropout=dropout)
             self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
-        # Learned fusion weights (a, b in the paper's notation).
-        self.w1 = nn.Parameter(torch.tensor(1.0))
-        self.w2 = nn.Parameter(torch.tensor(1.0))
+
+        self.both = self.use_1d and self.use_2d
+        if self.both and fusion == "gate":
+            self.gated_fusion = GatedFusion(fusion_dim)
+        else:
+            # Learned fusion weights (a, b in the paper's notation). Also
+            # used, harmlessly, as a global rescale in single-branch
+            # ablations -- the optimizer settles it near 1 since there is
+            # nothing to balance it against.
+            self.w1 = nn.Parameter(torch.tensor(1.0))
+            self.w2 = nn.Parameter(torch.tensor(1.0))
 
         self.head = nn.Sequential(
             nn.LayerNorm(fusion_dim),
@@ -145,12 +168,18 @@ class DualChannelBinaryNet(nn.Module):
         )
 
     def forward(self, seq, img):
-        fused = None
-        if self.use_1d:
+        self.last_gate = None
+        if self.both:
+            f1 = self.p1(self.b1(seq))
+            f2 = self.p2(self.b2(img))
+            if self.fusion == "gate":
+                fused, self.last_gate = self.gated_fusion(f1, f2)
+            else:
+                fused = self.w1 * f1 + self.w2 * f2
+        elif self.use_1d:
             fused = self.w1 * self.p1(self.b1(seq))
-        if self.use_2d:
-            f2 = self.w2 * self.p2(self.b2(img))
-            fused = f2 if fused is None else fused + f2
+        else:
+            fused = self.w2 * self.p2(self.b2(img))
         return self.head(fused)
 
 
@@ -168,6 +197,12 @@ def parse_args():
                    help="Ablation switch: 'all' is the full dual-channel model, "
                         "'1d' is LSTM+attention only, '2d' is CNN-only (close to "
                         "the existing image-only classifier's architecture).")
+    p.add_argument("--fusion", default="linear", choices=["linear", "gate"],
+                   help="linear: paper's a*F1+b*F2 (two global scalars). gate: "
+                        "per-example gate g(x)*F1+(1-g(x))*F2 (report.md 10.5.1/10.5.2 "
+                        "-- linear fusion underperformed the best single branch on "
+                        "both RAM and spectrogram 2D representations). Only affects "
+                        "--channels all.")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=2e-4)
@@ -207,7 +242,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DualChannelBinaryNet(seq_shape[-1], img_shape[0], hidden=args.hidden,
                                  fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                 channels=args.channels).to(device)
+                                 channels=args.channels, fusion=args.fusion).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Device: {device} | parameters: {n_params:,} | train samples: {len(train_ds)} "
           f"({n_params / max(1, len(train_ds)):.1f} params/sample)")
@@ -293,7 +328,7 @@ def main():
 
     model.load_state_dict(torch.load(save_path, weights_only=True))
     model.eval()
-    all_labels, all_probs, all_preds = [], [], []
+    all_labels, all_probs, all_preds, all_gates = [], [], [], []
     with torch.no_grad():
         for seq, img, labels in test_loader:
             seq, img = seq.to(device), img.to(device)
@@ -304,9 +339,11 @@ def main():
             all_labels.extend(labels.tolist())
             all_probs.extend(probs.float().cpu().squeeze(1).tolist())
             all_preds.extend(preds.float().cpu().squeeze(1).tolist())
+            if getattr(model, "last_gate", None) is not None:
+                all_gates.extend(model.last_gate.float().cpu().squeeze(1).tolist())
 
     all_labels = np.array(all_labels); all_preds = np.array(all_preds)
-    print(f"\n--- Dual-channel RAM classifier (channels='{args.channels}') ---")
+    print(f"\n--- Dual-channel RAM classifier (channels='{args.channels}', fusion='{args.fusion}') ---")
     print(f"Final Test Accuracy: {(all_labels == all_preds).mean() * 100:.2f}%")
     try:
         print(f"Final Test AUC:      {roc_auc_score(all_labels, all_probs):.4f}")
@@ -315,8 +352,17 @@ def main():
         pass
 
     if getattr(model, "use_1d", False) and getattr(model, "use_2d", False):
-        print(f"\nlearned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}"
-              "\n(relative magnitude indicates which representation the model leaned on)")
+        if args.fusion == "gate":
+            g = np.array(all_gates)
+            correct = (all_labels == all_preds)
+            print(f"\ngate g (1 favors 1D, 0 favors 2D): mean {g.mean():.3f}  std {g.std():.3f}"
+                  f"\n  earthquake windows: mean g {g[all_labels==1].mean():.3f}"
+                  f"\n  noise windows:      mean g {g[all_labels==0].mean():.3f}"
+                  f"\n  correct predictions: mean g {g[correct].mean():.3f}"
+                  f"\n  wrong predictions:   mean g {g[~correct].mean() if (~correct).any() else float('nan'):.3f}")
+        else:
+            print(f"\nlearned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}"
+                  "\n(relative magnitude indicates which representation the model leaned on)")
 
     cm = confusion_matrix(all_labels, all_preds)
     print("\nConfusion Matrix:")
