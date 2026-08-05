@@ -940,6 +940,59 @@ capacity, consistent with the diagnosis in Section 8.1. **On the evidence
 gathered, hyperparameter tuning is not a productive direction for this
 model; the established default configuration should be retained.**
 
+**10.5.7 The amplitude auxiliary input, extended to the spectrogram-based
+model, does not repeat its RAM-side effect — and mildly hurts the 2D branch
+in isolation.** `SpectrogramDualAuxEncoder` (Section 10.2) pairs the
+spectrogram-dual dataset with the same `[log_snr, log_rms]` vector used for
+RAM. Results, alongside the existing no-aux spectrogram figures for
+comparison:
+
+| Configuration | Test AUC | MCC | Accuracy |
+|---|---|---|---|
+| Spectrogram 2D only, no aux | **0.9793** | **0.8666** | **93.28 %** |
+| Spectrogram + aux, no LSTM branch (`2d+aux`) | 0.9749 | 0.8626 | 93.02 % |
+| Spectrogram-dual, no aux, gated fusion | 0.9761 | 0.8501 | 92.51 % |
+| Spectrogram-dual + aux, fused, linear (`all`) | 0.9733 | 0.8465 | 92.31 % |
+| Spectrogram-dual, no aux, fused, linear | 0.9646 | 0.8122 | 90.61 % |
+
+Two results follow directly. First, adding the auxiliary input to the 2D
+branch alone makes it *worse*, not better: `2d+aux` (0.9749) scores below
+plain `2d` (0.9793), a decrease of 0.0044. This is the reverse of the RAM
+result (Section 10.5.3, an increase of 0.0874) and is consistent with the
+explanation offered in Section 10.5.4: a station-normalized spectrogram
+already encodes amplitude as a function of time and frequency, so appending
+two collapsed, redundant scalars adds estimation noise without adding
+information the model did not already have access to. Where Section 10.5.3
+demonstrated that the auxiliary input matters when the 2D representation is
+scale-invariant, this result demonstrates the converse: it does not matter,
+and can mildly hurt, when the 2D representation already carries the same
+information in richer form.
+
+Second, the auxiliary input still improves the **fused** model relative to
+its own no-aux baseline (0.9646 → 0.9733, +0.0087), for a reason similar to
+why gated fusion helped in the same setting (Section 10.5.5): both
+interventions reduce how much a naive linear combination is dragged down by
+a comparatively weaker branch, whether by learning to trust the stronger
+branch more or by handing the weaker branch's fusion partner information it
+lacked. Neither intervention, alone or combined, reaches the ceiling
+established by `2d` alone.
+
+**Considered together with Sections 10.5.1–10.5.6, the single best-performing
+configuration measured in this entire investigation remains the plain
+spectrogram CNN classifier, with no LSTM branch, no auxiliary input, and no
+fusion mechanism (AUC 0.9793).** Every structural addition tested — the
+source paper's dual-channel architecture, the amplitude auxiliary input,
+gated fusion, late-fusion stacking — improved on some other configuration
+along the way, and each produced a genuine, informative finding about why
+RAM underperforms and how fusion mechanisms behave. None of them, individually
+or in combination, has yet exceeded the simplest model in this comparison.
+This should be read as a genuine result rather than a failure of the
+investigation: it indicates that, for this task and dataset, the highest-value
+remaining work is more likely to be in feature representation (for example,
+per-component auxiliary inputs, or spectrogram parameters) than in additional
+architectural complexity layered on top of an already-strong 2D
+representation.
+
 ### 10.6 Updated Limitations and Recommendations
 
 - Every result in Sections 10.4 and 10.5.5 reflects a single
@@ -949,16 +1002,18 @@ model; the established default configuration should be retained.**
   linear fusion on either RAM-dual configuration — should be treated as
   more than suggestive without repeated measurements across seeds, the same
   caution already applied to Section 7's figures in Section 9.
-- The amplitude correction has not yet been evaluated on the
-  spectrogram-dual model, nor combined with stacking (amplitude-augmented
-  branches, frozen, then stacked). This is a natural next experiment and is
-  inexpensive given that the relevant datasets and checkpoints already
-  exist.
+- The amplitude correction has now been evaluated on the spectrogram-dual
+  model (Section 10.5.7) but has not been combined with stacking
+  (amplitude-augmented branches, frozen, then stacked). This is a natural
+  next experiment and is inexpensive given that the relevant datasets and
+  checkpoints already exist.
 - Gated fusion has not been combined with stacking (for example, a gate
-  applied to frozen rather than jointly trained branch features). Given
-  that gating already matched most of what stacking achieved on
-  spectrogram-dual, whether combining the two would add further value is
-  unresolved.
+  applied to frozen rather than jointly trained branch features), nor with
+  the amplitude auxiliary input on the spectrogram-dual model specifically
+  (Section 10.5.7 used linear fusion only). Given that gating already
+  matched most of what stacking achieved on spectrogram-dual without aux,
+  whether either combination would move the model past the plain `2d`
+  ceiling (0.9793 AUC) is unresolved.
 - `log_snr` and `log_rms` are single scalars per window, averaged over
   Z, N, and E. Per-component auxiliary inputs (six scalars rather than two)
   were not tested and might retain information the averaging step
@@ -1002,6 +1057,12 @@ seismic-cli generate-dual-aux-dataset \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
     --output-dir dataset_dualaux_6s --window-seconds 6 --max
 
+# Spectrogram-dual model with the amplitude auxiliary input (Section 10.5.7)
+seismic-cli generate-spec-dual-aux-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --output-dir dataset_specdualaux_6s --window-seconds 6 --max
+
 cd ../cnn_earthquake/src
 
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_dual_6s \
@@ -1019,6 +1080,10 @@ python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dual
     --channels all --batch-size 32                 # or 1d / 2d / aux / 1d+aux / 2d+aux
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
     --channels all --fusion gate --batch-size 32    # gated fusion (Section 10.5.5)
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
+    --channels all --batch-size 32                 # spectrogram + aux (Section 10.5.7)
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
+    --channels 2d+aux --batch-size 32               # spectrogram + aux, no LSTM (Section 10.5.7)
 
 # Late-fusion stacking, given two already-trained --channels 1d / --channels 2d checkpoints
 python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
