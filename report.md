@@ -903,6 +903,43 @@ asserted. **Gated fusion is not a default improvement over linear fusion,
 and its benefit or cost should be measured directly for any new branch
 pairing rather than assumed from this result.**
 
+**10.5.6 A hyperparameter sweep of the RAM-plus-amplitude classifier
+(`cnn_ram_aux.py`) produced no distinguishable improvement over the
+established defaults.** Six configurations were trained: the established
+default (learning rate 2e-4, weight decay 3e-2, dropout 0.6/0.4, head width
+32, three residual stages), two alternative learning rates (1e-4, 3e-4), a
+lower weight decay (1e-2), a wider head alone (width 64, three stages), and
+the original "long" preset's full capacity (four stages, dropout 0.5/0.3,
+head width 64 — approximately four times the parameter count). Selection
+was made on validation AUC, decided before training began, specifically to
+avoid selecting a configuration by its test-set performance across multiple
+candidates.
+
+| Configuration | Parameters | Validation AUC | Test AUC | Test MCC | Test accuracy |
+|---|---|---|---|---|---|
+| Default | 309,777 | 0.9302 | 0.9230 | 0.7018 | 84.79 % |
+| Learning rate 3e-4 | 309,777 | **0.9307** | 0.9268 | 0.7137 | 85.28 % |
+| Weight decay 1e-2 | 309,777 | 0.9301 | 0.9228 | 0.7013 | 84.77 % |
+| Learning rate 1e-4 | 309,777 | 0.9287 | 0.9224 | 0.7040 | 84.96 % |
+| Four stages, wider head (4× capacity) | 1,249,425 | 0.9287 | 0.9302 | 0.7235 | 86.13 % |
+| Wider head only (three stages) | 314,001 | 0.9268 | 0.9270 | 0.7054 | 85.17 % |
+
+All six configurations fall within a validation AUC band of
+0.9268–0.9307 — a spread of 0.0039, well inside the approximately 1–2 point
+noise floor already established for single-seed measurements on this
+dataset (Section 9). The nominal winner by the pre-specified selection rule
+(learning rate 3e-4, val AUC 0.9307) exceeds the default by 0.0005, which is
+not distinguishable from noise and should not be reported as a genuine
+improvement. One result is worth noting for methodological reasons rather
+than performance: the four-times-larger configuration scored *lower* on
+validation AUC (0.9287) than the 310,000-parameter default despite scoring
+higher on test AUC (0.9302) — a direct illustration of why selection was
+fixed to validation performance before training began, and further evidence
+that this task is limited by available information rather than by model
+capacity, consistent with the diagnosis in Section 8.1. **On the evidence
+gathered, hyperparameter tuning is not a productive direction for this
+model; the established default configuration should be retained.**
+
 ### 10.6 Updated Limitations and Recommendations
 
 - Every result in Sections 10.4 and 10.5.5 reflects a single
@@ -976,6 +1013,7 @@ python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual
 
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --no-aux
+python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --lr 3e-4   # hyperparameter sweep (Section 10.5.6)
 
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
     --channels all --batch-size 32                 # or 1d / 2d / aux / 1d+aux / 2d+aux
