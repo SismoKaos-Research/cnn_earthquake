@@ -361,6 +361,14 @@ def main():
     bal = balanced_accuracy_score(yt, pt)
     kappa = cohen_kappa_score(yt, pt)
 
+    present = sorted(set(yt.tolist()))
+    if len(present) < len(RISK_CLASSES):
+        missing = [RISK_CLASSES[i] for i in range(len(RISK_CLASSES)) if i not in present]
+        print(f"\n  [!] class(es) {missing} do not occur in the test split at all.")
+        print("      Balanced accuracy is then an average over the classes that DO occur,")
+        print("      so it is not comparable to a run where every class is present, and")
+        print("      sklearn's 'y_pred contains classes not in y_true' warning is expected.")
+
     maj_acc, maj_bal = report_baselines(train_ds, test_ds)
     print(f"\n--- Dual-channel model (channels='{args.channels}') ---")
     print(f"  accuracy {acc:.4f} | balanced {bal:.4f} | Cohen's kappa {kappa:+.4f}")
