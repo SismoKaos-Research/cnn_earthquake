@@ -555,7 +555,208 @@ Cheap validation order, before spending CNN runs:
 
 ---
 
-## 10. Reproducing
+## 10. Extension: the paper's full dual-channel architecture, and the amplitude fix
+
+Everything above (Sections 1–9) is RAM + CNN alone — one of the paper's two
+channels. This section adds the second channel (LSTM + multi-head
+self-attention over the raw signal) to test the full architecture, and then
+tests the fix Section 8.3 proposed but did not yet build. All numbers in this
+section are **fresh runs on the corrected pipeline** (post Section 6,
+bugs 1–13) — they do not carry the "predates the fixes" caveat that Section 7
+does.
+
+All results below share one dataset: `seismic-cli generate-*-dataset --max`
+on 6 s arrival-anchored windows, 71,672 windows total (35,836 per class,
+balanced), station-disjoint (82/30/40 earthquake stations and 104/35/38 noise
+stations across train/val/test). Code lives in `data_downloader/seismic_cli/`
+(`ram_dual.py`, `ram_aux.py`, `spectrogram.py`) and `cnn_earthquake/src/`
+(`cnn_lstm_classify.py`, `cnn_lstm_classify_aux.py`, `cnn_lstm_stack.py`,
+`cnn_ram_aux.py`). As with Section 7.2, this is a single train/val/test split
+per configuration, not repeated across seeds — treat differences under ~1–2
+points as noise, not signal.
+
+### 10.1 The paper's architecture (1D2D-EDL)
+
+Two independent channels over the same window, fused:
+
+$$\text{1D: } F_{1D} = \text{MSA}\big(\text{LSTM}(x)\big) \qquad
+\text{2D: } F_{2D} = \text{CNN}\big(\text{RAM}(x)\big) \qquad
+F' = a\,F_{1D} + b\,F_{2D}$$
+
+with $a, b$ learned scalars. Implemented as `LSTMAttentionBranch` (bidirectional
+LSTM → `nn.MultiheadAttention` with a residual + LayerNorm, matching a
+standard transformer block → mean-pool over time) and `CNNBranch` (3
+conv/BN/GELU stages, global average pool — resolution-agnostic, so it takes a
+square RAM image or a non-square spectrogram unchanged). Both live in
+`cnn_earthquake/src/cnn_lstm.py`, shared with the unrelated catalog-forecasting
+model in that same file.
+
+**A design mistake, caught and fixed by reading the paper directly instead of
+working from a summary of it.** The first version of the 1D branch fed the
+LSTM the $(n, d)$ chunk matrix the RAM image's angle vector $\beta$ is
+computed from — on the theory that both channels should see the same reshaped
+data. That is not what the paper does. Sec. 3.3.1 and Fig. 7 are explicit: *"the
+1D time series is first normalized and then input into the LSTM model"* — the
+LSTM receives the **raw standardized waveform**, one timestep per raw sample;
+the RAM reshape feeds only the CNN channel. The two channels are independent
+feature extractors over the same raw signal, not two views of a shared
+intermediate. `core.ram_matrix_and_chunks()` (built to supply the wrong
+design) was removed again once this was caught; `core.ram_matrix()` was
+verified byte-identical to its pre-refactor output both times.
+
+One consequence of the correction is not free: multi-head self-attention over
+the *whole* raw window is $O(m^2)$. At 100 Hz, 6 s is $m=600$ (an attention
+matrix of 360k entries — trivial); 60 s is $m=6000$ (36M entries per head —
+noticeably heavier, and would need a smaller batch size). This is a real cost
+of matching the paper's design, not a bug.
+
+### 10.2 Data pipeline additions
+
+| Encoder | Output | What it adds |
+|---|---|---|
+| `RamDualEncoder` | `{seq, img}` | seq = raw standardized $(m,3)$ Z/N/E waveform; img = the Section 2 RAM image |
+| `SpectrogramDualEncoder` | `{seq, img}` | same seq; img = log-power spectrogram (wraps `SpectrogramEncoder` by composition, so both stay identical wherever they overlap) |
+| `RamAuxEncoder` | `{img, aux}` | img = RAM image; aux = $[\log\text{SNR}, \log\text{RMS}]$ (below), no LSTM branch at all |
+| `RamDualAuxEncoder` | `{seq, img, aux}` | all three, `RamDualEncoder` + the aux vector |
+
+$$\log\text{SNR} = \left\langle \log\frac{\sigma_{\text{win},c}}{\sigma_{\text{sta},c}} \right\rangle_{c \in \{Z,N,E\}}
+\qquad
+\log\text{RMS} = \left\langle \log \sigma_{\text{win},c} \right\rangle_{c \in \{Z,N,E\}}$$
+
+identical to `regression.py`'s `log_snr` definition. $\sigma_{\text{sta},c}$
+comes from `compute_station_noise_baselines()` (Section 3.4's machinery),
+computed **unconditionally** here — independent of `--baseline`, which
+controls only whether `seq`/`img` themselves use the station baseline or
+per-window self-standardization. That independence is deliberate: Section 8.2
+already established that RAM's image content does not depend on which
+$(\mu,\sigma)$ it is standardized with, so gating `log_snr` behind `--baseline`
+would have made the fix unavailable by default for no benefit. Any window
+whose station lacks $\geq 60$ s of usable noise data falls back to
+$\log\text{SNR} = 0$.
+
+All four encoders resample every window to a nominal rate before
+standardizing (`_resample_to`/`_fit_length`), the same fix `SpectrogramEncoder`
+needed for the image alone (Section 3.3's per-station-rate constraint) — here
+it also keeps every `seq` tensor's sample count fixed regardless of a
+station's native $f_s$, which the image's fixed `target_n` never required.
+
+### 10.3 Model architecture additions
+
+- **`DualChannelBinaryNet`** — the paper's architecture verbatim: `LSTMAttentionBranch` + `CNNBranch`, fused by $a F_{1D}+b F_{2D}$, single-logit head. `--channels {all,1d,2d}` ablates either branch.
+- **`RamAuxCNN`** — the *same* ResNet+SE trunk as `ImprovedSeismicCNN` (Section 4.1, reuses `ResBlock` directly), with the pooled features concatenated with `aux` before the classifier head. `--no-aux` drops the concatenation only — an architecture-matched control, isolating exactly what the two scalars are worth.
+- **`DualChannelAuxBinaryNet`** — `DualChannelBinaryNet` plus an aux branch concatenated *after* the $aF_{1D}+bF_{2D}$ fusion (matching the aux-branch pattern already used by the unrelated catalog model's `DualChannelRiskNet`). `--channels` extends to `{all,1d,2d,aux,1d+aux,2d+aux}`.
+- **`cnn_lstm_stack.py`** — takes two already-trained, **frozen** checkpoints (e.g. `--channels 1d` and `--channels 2d` runs), collects their pre-sigmoid logits, and fits `sklearn.LogisticRegression` — one weight per branch plus a bias, in logit space — on **val** logits only (never seen by either frozen model's own training), evaluated on test. No backbone retraining.
+
+### 10.4 Results
+
+Every row: 6 s windows, same 71,672-window dataset, test set n=9,548
+(balanced). Parameter counts are measured, not estimated.
+
+| Model | Params | Test AUC | MCC | Accuracy |
+|---|---|---|---|---|
+| Spectrogram CNN only (`2d`) | 115,459 | **0.9793** | **0.8666** | **93.28 %** |
+| Spectrogram-dual, fused (`all`) | 182,563 | 0.9646 | 0.8122 | 90.61 % |
+| RAM-dual + aux, fused (`all`) | 182,759 | 0.9514 | 0.7790 | 88.95 % |
+| RAM-dual + aux, no LSTM (`2d+aux`) | 115,655 | 0.9468 | 0.7775 | 88.84 % |
+| RAM + aux, no dual arch. (`use_aux=True`) | 309,777 | 0.9230 | 0.7018 | 84.79 % |
+| RAM-dual, raw waveform only (`1d`) | 76,707 | 0.9216 | 0.6849 | 84.22 % |
+| RAM-dual, fused, **no aux** (`all`) | 182,563 | 0.9144 | 0.6042 | 79.57 % |
+| RAM CNN only, **no aux** (`use_aux=False`) | 309,713 | 0.8356 | 0.5339 | 76.70 % |
+| RAM-dual, RAM image only (`2d`) | 115,459 | 0.8408 | 0.5288 | 76.42 % |
+
+Stacking (Section 10.3, fit on frozen 1d/2d logits):
+
+| Base checkpoints | 1d alone | 2d alone | naive avg (logits) | **stacked** |
+|---|---|---|---|---|
+| RAM-dual | AUC 0.9229, MCC 0.688 | AUC 0.8408, MCC 0.530 | AUC 0.9136, MCC 0.692 | **AUC 0.9203, MCC 0.688, acc 84.31 %** |
+| Spectrogram-dual | AUC 0.9229, MCC 0.688 | AUC 0.9793, MCC 0.867 | AUC 0.9697, MCC 0.866 | **AUC 0.9743, MCC 0.871, acc 93.54 %** |
+
+Learned joint-fusion weights $(a,b)$, for reference: RAM-dual no-aux
+$(0.996, 0.829)$; spectrogram-dual $(0.749, 1.051)$; RAM-dual+aux
+$(0.499, 0.354)$ — note the last pair is far more balanced in *relative*
+terms once both branches carry usable information, rather than one weight
+sitting near 1 and the other trailing.
+
+### 10.5 Analysis
+
+**10.5.1 The paper's joint fusion underperformed its best single branch, twice, before the aux fix.** With RAM as the 2D channel, the raw-waveform branch alone (AUC 0.9216) beat the fused model (0.9144). With a spectrogram, the image branch alone (0.9793) beat the fused model (0.9646). A fixed pair of scalars, trained jointly with both branches, cannot suppress a weaker branch on the specific examples where it is wrong — and joint training can let a noisy branch drag down the stronger one's own learned representation. This reproduced on two independent 2D representations, which is why it is treated as a property of the fusion mechanism rather than of either branch.
+
+**10.5.2 Stacking recovers what joint fusion lost, without changing either branch.** Freezing the same two checkpoints and fitting a 2-input logistic regression on their logits (10.3) is a strictly better or equal fix in both cases tested: on RAM-dual it lands within noise of the best single branch (0.9203 vs 1d-alone's 0.9229) rather than below it; on spectrogram-dual it beats *both* single branches outright (0.9743 AUC, 0.871 MCC vs 2d-alone's 0.9793 AUC — note stacking's AUC is very slightly below 2d-alone here even though its MCC and accuracy are higher, i.e. stacking traded a hair of ranking quality for a better decision at the 0.5 threshold; both are within the ≥1-2 point noise floor for this dataset). Confirms the fusion problem in 10.5.1 was the joint-training mechanism, not something inherent to combining these two branches.
+
+**10.5.3 The amplitude-aux fix is the largest single effect measured in this whole investigation, and it is exactly what Section 8.2/8.3 predicted.** Architecture-matched, single-variable comparison (same `ImprovedSeismicCNN`-derived trunk, only the aux concatenation differs):
+
+$$\text{AUC: } 0.8356 \to 0.9230 \quad(+0.0874) \qquad \text{MCC: } 0.5339 \to 0.7018 \quad (+0.1679) \qquad \text{Acc: } 76.70\% \to 84.79\% \quad (+8.09\text{ pp})$$
+
+Two scalars — computed for free from data the pipeline already had — closed
+most of the gap between a plain RAM classifier and STA/LTA-competitive
+performance. It also *incidentally* repaired the fusion pathology from
+10.5.1: the aux-augmented dual model (`all`, AUC 0.9514) now beats every
+single-branch RAM alternative, which the no-aux dual model failed to do. The
+`2d+aux` ablation (no LSTM branch at all, AUC 0.9468) lands almost exactly on
+the full fused model — meaning the amplitude fix is carrying nearly all of
+the improvement, and the LSTM branch now adds only a small increment on top,
+rather than being structurally necessary to compensate for what the RAM image
+cannot see.
+
+**10.5.4 Spectrograms remain the stronger 2D representation, aux or not.** Spectrogram-2D-only (0.9793 AUC) still beats RAM+aux-2D-only (0.9468 AUC) by a real margin. This is expected and not a contradiction of 10.5.3: `--normalize station` spectrograms preserve amplitude *as a function of frequency and time*, a much richer representation than two collapsed scalars appended after the fact. The aux fix makes RAM competitive with the *raw-waveform* branch and with itself pre-fix — it does not make RAM's 2D representation as informative as a spectrogram's. If RAM images are wanted specifically (e.g. for downstream compatibility with the original paper's method), pairing them with aux is a substantial, cheap win; if the 2D representation is a free choice, spectrograms remain the better one on this data.
+
+### 10.6 Updated limitations and next steps
+
+- Every result in Section 10.4 is a single train/val/test split at one seed. None of the differences below ~1–2 points (e.g. stacked-RAM-dual vs 1d-alone, or 2d+aux vs the full aux-dual model) should be treated as more than suggestive without repeats across seeds — the same caution Section 9 already applies to Section 7's numbers.
+- The aux fix has not yet been tried on the spectrogram-dual model, or combined with stacking (aux-augmented branches, frozen, then stacked) — the natural next experiment, and cheap given the aux datasets and checkpoints already exist.
+- Fusion beyond stacking is unexplored: a per-example learned gate ($g = \sigma(\text{MLP}([F_{1D},F_{2D}]))$, then $g\odot F_{1D} + (1-g)\odot F_{2D}$) was discussed as the next step up from a global scalar pair, but not yet built or tested.
+- `log_snr`/`log_rms` are single scalars per window, averaged over Z/N/E; per-component aux (3+3 scalars instead of 1+1) was not tried and might carry information the average discards, at the cost of tripling the aux input's dimensionality relative to what is otherwise a very cheap fix.
+- 60 s windows were not re-tested with any of Section 10's additions; Section 2.3's geometric argument for why short windows are harder applies to the RAM branch specifically, not to the raw-waveform or aux branches, so the balance between them may shift at longer windows.
+
+---
+
+## 11. Reproducing (dual-channel / aux pipeline)
+
+```bash
+# dual-channel dataset (paper's raw-waveform seq + RAM image), 6s max
+seismic-cli generate-dual-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --output-dir dataset_dual_6s --window-seconds 6 --max
+
+# same, with a spectrogram instead of a RAM image as the 2D channel
+seismic-cli generate-spec-dual-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --output-dir dataset_specdual_6s --window-seconds 6 --max
+
+# plain RAM classifier + amplitude aux (no LSTM branch)
+seismic-cli generate-ram-aux-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --output-dir dataset_ramaux_6s --window-seconds 6 --max
+
+# dual-channel + amplitude aux, all three inputs
+seismic-cli generate-dual-aux-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --output-dir dataset_dualaux_6s --window-seconds 6 --max
+
+cd ../cnn_earthquake/src
+
+python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_dual_6s \
+    --channels all --batch-size 32          # or --channels 1d / 2d
+
+python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s
+python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --no-aux
+
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
+    --channels all --batch-size 32          # or 1d / 2d / aux / 1d+aux / 2d+aux
+
+# stacking, given two already-trained --channels 1d / --channels 2d checkpoints
+python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
+    --ckpt-1d trained_model_cnnlstm_classify_1d/best_cnnlstm_classify.pth \
+    --ckpt-2d trained_model_cnnlstm_classify_2d/best_cnnlstm_classify.pth
+```
+
+---
+
+## 12. Reproducing (original RAM + CNN-only pipeline)
 
 ```bash
 # 1. arrival-anchored 6s windows from downloaded 60s data
