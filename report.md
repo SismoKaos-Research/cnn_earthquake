@@ -700,11 +700,39 @@ cannot see.
 
 **10.5.4 Spectrograms remain the stronger 2D representation, aux or not.** Spectrogram-2D-only (0.9793 AUC) still beats RAM+aux-2D-only (0.9468 AUC) by a real margin. This is expected and not a contradiction of 10.5.3: `--normalize station` spectrograms preserve amplitude *as a function of frequency and time*, a much richer representation than two collapsed scalars appended after the fact. The aux fix makes RAM competitive with the *raw-waveform* branch and with itself pre-fix — it does not make RAM's 2D representation as informative as a spectrogram's. If RAM images are wanted specifically (e.g. for downstream compatibility with the original paper's method), pairing them with aux is a substantial, cheap win; if the 2D representation is a free choice, spectrograms remain the better one on this data.
 
+**10.5.5 Gated fusion (`GatedFusion`, `--fusion gate`): a clear win on one dataset, a small loss on the other.** Replacing the fixed $a,b$ with a per-example gate $g = \sigma(\text{MLP}([F_{1D},F_{2D}]))$, then $g F_{1D} + (1-g) F_{2D}$:
+
+| Dataset | Linear fusion | Gated fusion | Best single branch |
+|---|---|---|---|
+| Spectrogram-dual | AUC 0.9646, MCC 0.812, 90.6 % | **AUC 0.9761, MCC 0.850, 92.5 %** | 2d-alone: 0.9793 / 0.867 / 93.3 % |
+| RAM-dual + aux | AUC 0.9514, MCC 0.779, 89.0 % | AUC 0.9487, MCC 0.744, 87.1 % | 2d+aux-alone: 0.9468 / 0.778 / 88.8 % |
+
+On spectrogram-dual, gating recovers most of what linear fusion lost (+0.0115
+AUC, +1.9 pp accuracy), landing close to stacking's result (10.4) without
+needing a separate frozen-checkpoint pass. On RAM-dual+aux it is *worse* than
+linear fusion, not better — the one case in Section 10 where a fusion change
+made things worse rather than better or neutral.
+
+The gate's own diagnostics explain the difference. On spectrogram-dual the
+mean gate is low and genuinely example-dependent (mean $g=0.169$ overall, but
+$0.116$ on earthquake windows vs $0.222$ on noise windows) — there is real
+case-by-case disagreement between branches for a gate to arbitrate. On
+RAM-dual+aux the mean gate sits near $0.5$ ($0.487$) with much higher spread
+($\sigma=0.245$ vs $0.133$) — consistent with 10.5.3's finding that the 2D
+branch, once aux is appended, already carries nearly all the signal
+(2d+aux-alone AUC 0.9468 barely trails the full linear-fusion model's
+0.9514). With less real heterogeneity between branches to exploit, the gate's
+extra per-example capacity has more room to overfit a single run than to help
+it. **Gated fusion is not a strict improvement over linear fusion — it helps
+when the branches are genuinely complementary and disagree meaningfully
+per-example, and can hurt when one branch already dominates.** Worth trying
+on any new branch pairing, not assuming as a default.
+
 ### 10.6 Updated limitations and next steps
 
-- Every result in Section 10.4 is a single train/val/test split at one seed. None of the differences below ~1–2 points (e.g. stacked-RAM-dual vs 1d-alone, or 2d+aux vs the full aux-dual model) should be treated as more than suggestive without repeats across seeds — the same caution Section 9 already applies to Section 7's numbers.
+- Every result in Section 10.4 and 10.5.5 is a single train/val/test split at one seed. None of the differences below ~1–2 points (e.g. stacked-RAM-dual vs 1d-alone, 2d+aux vs the full aux-dual model, or gated vs linear fusion on RAM-dual+aux) should be treated as more than suggestive without repeats across seeds — the same caution Section 9 already applies to Section 7's numbers.
 - The aux fix has not yet been tried on the spectrogram-dual model, or combined with stacking (aux-augmented branches, frozen, then stacked) — the natural next experiment, and cheap given the aux datasets and checkpoints already exist.
-- Fusion beyond stacking is unexplored: a per-example learned gate ($g = \sigma(\text{MLP}([F_{1D},F_{2D}]))$, then $g\odot F_{1D} + (1-g)\odot F_{2D}$) was discussed as the next step up from a global scalar pair, but not yet built or tested.
+- Gated fusion was not combined with stacking either (e.g. a gate over frozen rather than jointly-trained branch features) -- given gating already matches most of what stacking achieved on spectrogram-dual, it is unclear whether combining the two would add anything, but it has not been checked.
 - `log_snr`/`log_rms` are single scalars per window, averaged over Z/N/E; per-component aux (3+3 scalars instead of 1+1) was not tried and might carry information the average discards, at the cost of tripling the aux input's dimensionality relative to what is otherwise a very cheap fix.
 - 60 s windows were not re-tested with any of Section 10's additions; Section 2.3's geometric argument for why short windows are harder applies to the RAM branch specifically, not to the raw-waveform or aux branches, so the balance between them may shift at longer windows.
 
@@ -741,12 +769,16 @@ cd ../cnn_earthquake/src
 
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_dual_6s \
     --channels all --batch-size 32          # or --channels 1d / 2d
+python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
+    --channels all --fusion gate --batch-size 32   # gated fusion (10.5.5)
 
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --no-aux
 
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
     --channels all --batch-size 32          # or 1d / 2d / aux / 1d+aux / 2d+aux
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
+    --channels all --fusion gate --batch-size 32   # gated fusion (10.5.5)
 
 # stacking, given two already-trained --channels 1d / --channels 2d checkpoints
 python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
