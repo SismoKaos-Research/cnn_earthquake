@@ -64,6 +64,18 @@ Six findings carry the report:
   single 3-second window** (test accuracy 79.78%, AUC 0.855, MCC +0.566),
   clearly beating both a majority-class floor and a fitted amplitude/distance
   baseline — at a single seed and threshold, not yet re-verified.
+- **On the three-class risk task (noise / M<4 / M≥4), the best model uses no
+  image at all.** A two-stage gradient-boosted model over two physical
+  scalars reaches 82.83% accuracy and MCC +0.704, against the CNN's 73.64%
+  and +0.599 — and the CNN had those same scalars as inputs. The
+  investigation behind that number found three defects (Section 8.4), each
+  of which would have caused a wrong number to be *reported* rather than a
+  crash: a stuck instrument supplying 58% of one class's errors, a
+  validation split too station-poor to rank models (it selected the worse
+  model by 0.25 MCC), and a missing-value pattern worth ten inflated
+  accuracy points. This report's most transferable finding may be
+  methodological rather than seismological: on this data, the failure mode
+  is almost never a crash.
 
 Every numerical claim in this report is drawn directly from a measurement
 taken against the code in this repository. Where a result has not been
@@ -100,9 +112,11 @@ including a parameterization defect found while preparing this report.
 Section 6 is the detection investigation's results and analysis, organized by
 research question rather than by the order experiments were run. Section 7
 extends the same encoded-window machinery to magnitude classification.
-Section 8 discusses the results as a whole; Section 9 states limitations and
-concrete future work; Section 10 records the project's present status and
-where it goes next. Section 11 is the full changelog of software defects
+Section 8 extends this to a three-class risk task (noise / low-risk /
+high-risk) and reports where the encoded window stops helping at all.
+Section 9 discusses the results as a whole; Section 10 states limitations
+and concrete future work; Section 11 records the project's present status
+and where it goes next. Section 12 is the full changelog of software defects
 found and corrected, kept as a single reference list rather than scattered
 through the narrative. The appendix collects every command needed to
 reproduce every numbered result in the report.
@@ -231,12 +245,12 @@ observation, not a numbered result.
 
 Each component (Z, N/1, E/2) is RAM-transformed independently and stacked
 into RGB channels: R = Z, G = N-like, B = E-like. Component selection is by
-role rather than alphabetical ordering (Section 11, defect 13), and stations
+role rather than alphabetical ordering (Section 12, defect 13), and stations
 lacking a usable vertical component are excluded. Whether combining the
 three components before the transform (for example, by vector magnitude)
 would preserve inter-channel amplitude relationships better than
 transforming each independently was identified as an open question but not
-pursued (Section 9).
+pursued (Section 10).
 
 ---
 
@@ -245,7 +259,7 @@ pursued (Section 9).
 The pipeline comprises four stages, implemented in the `seismic_cli`
 package of the `data_downloader` repository (`core.py`, `anchor.py`,
 `eval_baseline.py`, `cli.py`). It is described here as it currently stands,
-after the corrections in Section 11.
+after the corrections in Section 12.
 
 ### 3.1 Acquisition (`src/download.py`)
 
@@ -263,7 +277,7 @@ sliced in memory.
   against the unfiltered catalog so a sub-threshold event cannot silently
   pass into the noise class. This check is purely temporal, so an event
   500 km away will veto a candidate noise window; this is over-conservative
-  and discards noise data that is otherwise scarce (Section 9).
+  and discards noise data that is otherwise scarce (Section 10).
 
 ### 3.2 Arrival Anchoring (`seismic-cli anchor-windows`)
 
@@ -437,7 +451,7 @@ batch-norm/GELU stages with global average pooling, which is
 resolution-agnostic and therefore accepts either a square RAM image or a
 non-square spectrogram without modification). Both reside in
 `cnn_earthquake/src/cnn_lstm.py`, shared with the unrelated
-catalog-forecasting model (Section 10).
+catalog-forecasting model (Section 11).
 
 **A design error, found and corrected by consulting the source paper
 directly rather than a prior summary of it.** The initial implementation
@@ -489,7 +503,7 @@ N, E separately, instead of averaged — `RamAuxEncoderV2` /
 `RamDualAuxEncoderV2` / `SpectrogramDualAuxEncoderV2`, behind
 `--per-component-aux`) is implemented and produces the expected `(6,)`-shaped
 tensor, requiring no model-side change since `aux_dim` is read from the
-tensor shape at load time. It has not been evaluated (Section 10).
+tensor shape at load time. It has not been evaluated (Section 11).
 
 ### 4.4 Fusion and Auxiliary Model Variants
 
@@ -505,7 +519,7 @@ tensor shape at load time. It has not been evaluated (Section 10).
 - **`DualChannelAuxBinaryNet`** extends `DualChannelBinaryNet` with an
   auxiliary branch concatenated after the $aF_{1D}+bF_{2D}$ fusion step,
   the same pattern used by the unrelated catalog model's
-  `DualChannelRiskNet` (Section 10). `--channels` extends to
+  `DualChannelRiskNet` (Section 11). `--channels` extends to
   `{all, 1d, 2d, aux, 1d+aux, 2d+aux}`.
 - **`GatedFusion`** replaces the fixed scalar pair with a per-example gate:
   $g = \sigma(\text{MLP}([F_{1D}, F_{2D}]))$, followed by
@@ -569,7 +583,7 @@ comparison against the CNN's fixed 0.5 cutoff.
 Section 6 dual-channel datasets: its filename regex matched only
 `_winNNN.png` and silently skipped every `_winNNN.pt` row the dual-channel
 encoders write, producing "0 scores computed" without an obvious error.
-Fixing the regex (Section 11, defect 14) let it run — and the first result
+Fixing the regex (Section 12, defect 14) let it run — and the first result
 was AUC 0.5093 on the 6 s anchored test set, statistically indistinguishable
 from random, which is implausible on its face given every other result in
 this report treats STA/LTA as a strong short-window competitor.
@@ -628,7 +642,7 @@ $$\textbf{STA/LTA, corrected: Test AUC 0.8194}, \quad \text{accuracy } 74.60\%,\
 
 against the broken default's Test AUC 0.5093 — a difference of 0.31 AUC
 between a working and a silently broken baseline on identical data. The
-formula itself was left unchanged for un-anchored windows (Section 11,
+formula itself was left unchanged for un-anchored windows (Section 12,
 defect 14 discussion) rather than auto-corrected, since 60 s results
 depend on it reproducing its historical 1.0/10.0 output exactly; the
 function now prints a runtime warning instead when its derived LTA exceeds
@@ -644,7 +658,7 @@ All results in this section share a common dataset: `seismic-cli
 generate-*-dataset --max` on 6 s arrival-anchored windows, 71,672 windows
 total (35,836 per class, balanced), station-disjoint (82/30/40 earthquake
 stations and 104/35/38 noise stations across train/validation/test), built
-under every correction in Section 11. Code is in
+under every correction in Section 12. Code is in
 `data_downloader/seismic_cli/` (`ram_dual.py`, `ram_aux.py`,
 `spectrogram.py`, `eval_baseline.py`) and `cnn_earthquake/src/`
 (`cnn_lstm.py`, `cnn_lstm_classify.py`, `cnn_lstm_classify_aux.py`,
@@ -655,11 +669,11 @@ approximately 1–2 points should be treated as noise rather than an
 established effect.
 
 An earlier phase of this investigation trained a plain RAM CNN at 60 s and
-6 s before the corrections in Section 11 were made (89.61% accuracy /
+6 s before the corrections in Section 12 were made (89.61% accuracy /
 STA/LTA AUC 0.7777 at 60 s; a 72–78% accuracy band across several 6 s
 variants). Those runs predate fixes to cross-class station leakage, an
 ineffective station cap, origin-anchored short windows, and the STA/LTA
-DC-offset defect (Section 11, defects 1, 2, 4, 8), and are superseded by
+DC-offset defect (Section 12, defects 1, 2, 4, 8), and are superseded by
 this section; 60 s has not been re-run under the corrected pipeline, so no
 current 60 s figure is reported. The three unrelated 6 s variants converging
 on the same 72–78% band did, however, motivate both the model-capacity audit
@@ -1090,15 +1104,202 @@ sweep has been tried.
 
 ---
 
-## 8. Discussion
+## 8. Results: Three-Class Risk Classification, and Why the Best Model Has No Image
 
-Three threads run through this investigation. First, **absolute amplitude is
+### 8.1 Motivation and Task
+
+Section 7 classified magnitude among confirmed earthquakes. This section
+asks the operationally closer question: given an arbitrary 3-second window,
+is it **noise**, a **low-risk** event (M < 4), or a **high-risk** event
+(M ≥ 4)? It folds the detection task of Section 6 and the magnitude task of
+Section 7 into one decision, on the same 3-second windows.
+
+The threshold M = 4 was chosen as a round, physically meaningful cut rather
+than a quantile fitted to this catalog. It is a CLI flag
+(`--mag-threshold`), not hardcoded.
+
+This section reports a **negative result for the CNN** and a positive one
+for a model that does not use the encoded window at all. The investigation
+that produced it also turned up three distinct defects, each of which would
+have inflated a reported number if left alone.
+
+### 8.2 Data, and the Limits of Fetching More
+
+The high-risk class is intrinsically scarce: of 23,918 already-downloaded
+3-second events, only 479 were M ≥ 4 (2.0%), following the
+Gutenberg–Richter distribution documented in Section 7.2. An attempt was
+made to close that gap from the catalog.
+
+**The attempt largely failed, for an instructive reason.** 726 catalog-listed
+M ≥ 4 events had no downloaded waveforms. Re-running the existing FDSN
+downloader against exactly those events retrieved **76 of 726 (10.5%)**.
+Station *metadata* resolves normally for the failures — a representative
+case returned 7 stations within the search radius — but the waveform
+archive itself answers `HTTP 204, no data available` for the requested
+station/time. Successes clustered almost entirely in the 2023
+Kahramanmaraş sequence; most other years returned nothing. **A catalog entry
+does not imply a retrievable waveform**, and for this network the shortfall
+is an order of magnitude, not a margin. The high-risk pool moved 479 → 556.
+
+Separately, re-running `anchor-windows` picked up roughly 7,300
+previously-downloaded but never-anchored events, taking the 3-second pool
+from 23,918 to 31,325 — a larger gain than the download attempt produced,
+obtained from data already on disk.
+
+The dataset (`generate-riskclass-dataset`,
+`data_downloader/seismic_cli/riskclass.py`) pools earthquake and noise
+windows into one manifest with a station-disjoint split spanning all three
+classes, and caps the abundant classes at `--balance-ratio` × the high-risk
+count per split (default 4.0) rather than either discarding most of them at
+1:1:1 or leaving the raw ~1:19:many imbalance. Final composition: 4,267
+train / 736 validation / 2,970 test windows, **zero stations shared across
+splits**.
+
+### 8.3 The CNN Result
+
+`cnn_riskclass.py` reuses `RegressionSeismicCNN` with `num_classes=3` and
+`CrossEntropyLoss` (Section 4.5; the trunk is unchanged and `num_classes`
+defaults to 1, so the Section 7 and regression scripts are unaffected).
+
+| Model | Accuracy | Macro-AUC | MCC |
+|---|---|---|---|
+| Predict majority class | 52.96 % | — | — |
+| Logistic on the two scalars | 81.52 % | 0.9476 | +0.6730 |
+| **CNN (image + aux)** | **73.64 %** | **0.9277** | **+0.5990** |
+
+**The CNN loses to a logistic regression on two scalars it was itself given
+as input.** Its errors concentrate almost entirely on one boundary: 609 of
+1,573 noise windows classified as low-risk. The rare high-risk class is
+*not* the problem — it is recovered well (268/281, recall 0.954), which
+overall accuracy alone would have hidden.
+
+### 8.4 Three Defects Found While Investigating the Gap
+
+The first version of this experiment showed validation accuracy 95.7 % against
+test accuracy 71.7 % — a 24-point gap demanding explanation before any
+number from it could be reported.
+
+**(a) A stuck instrument, supplying 58 % of one class's errors.** Station
+`6G.MADM` contributed 199 test noise windows, *all* misclassified. Reading
+its MiniSEED directly: traces span ~58 counts on a ~5.38-million-count DC
+offset, with ~50 unique sample values across 30,001 samples — a stuck
+digitizer, not quiet ground. Its window RMS (~6 counts) against its own
+station baseline (~975–3118) gives log SNR ≈ −6, far outside the training
+range (train noise floor −2.99), so the CNN extrapolated into territory it
+had never seen while a monotonic logistic model did not.
+
+`--min-log-snr` (default −3.0) now rejects any window whose RMS falls below
+5 % of its own station's long-term noise floor. The threshold is set by
+instrument physics — genuine ambient noise does not sit 20× below a
+station's own floor — corroborated by a clean gap in the pooled
+distribution (5th percentile −2.67, then an isolated cluster at −6.0), and
+applied uniformly to every class and split. It also removes 18 *earthquake*
+windows on identical reasoning. This is deliberately not "discard whatever
+the model gets wrong": the criterion was verified against the raw waveform,
+and it is label-independent.
+
+With the filter applied and both noise directories used (23,031 files
+instead of 11,454), **the gap closes from 24 points to about 1** (validation
+74.9 % against test 73.6 %), and the test noise log-SNR distribution returns
+to tracking train (mean −1.24, sd 0.85, against v1's −1.87, sd 2.45).
+
+**(b) The validation split cannot rank models on this task.** It holds 736
+windows from just **two** noise stations. It ranked the CNN (validation MCC
+0.873) above gradient boosting (0.867), when their test MCCs are 0.599 and
+0.851 — it selected the *worse* model by a 0.25 MCC margin. This is the same
+validation-versus-test divergence documented in Section 6.5, but far more
+consequential: there it cost a fraction of a point, here it would have
+picked the wrong model outright.
+
+Selection therefore moved to **station-grouped 5-fold cross-validation** over
+train and validation pooled (145 stations). Every failure diagnosed on this
+task has been station generalization, so the selection procedure must see
+many unseen stations. Under CV the ranking is stable and matches test:
+
+| Model | CV MCC (mean ± sd) | Test MCC |
+|---|---|---|
+| Logistic | 0.776 ± 0.061 | +0.673 |
+| Random forest | 0.809 ± 0.089 | — |
+| Gradient boosting | 0.868 ± 0.035 | +0.851 |
+| Gradient boosting (shallow) | **0.869 ± 0.037** | **+0.851** |
+
+**(c) An artifact worth ~10 accuracy points, introduced by this report's own
+dataset design.** `distance_km` is *undefined* for noise windows — there is
+no event to measure from — so in a flat three-class model, "distance is
+missing" separates noise almost perfectly by construction. Measured: 91.72 %
+accuracy with distance against 81.55 % without. That difference is dataset
+assembly, not physics.
+
+Notably, the equivalent check on the Section 7 binary task came back
+negative (log SNR alone scored within 0.3 points of the pair), so this
+artifact is specific to introducing a noise class, and would not have been
+caught by reusing the earlier task's reasoning.
+
+### 8.5 The Final Model: Two-Stage, Scalars Only
+
+The fix is structural rather than a feature deletion. Splitting the decision
+confines distance to where it physically exists:
+
+$$\text{Stage 1: noise vs. earthquake} \;\rightarrow\; \log\text{SNR only}$$
+$$\text{Stage 2: low- vs. high-risk (earthquakes only)} \;\rightarrow\; \log\text{SNR} + \log(\text{distance})$$
+
+with the two stages recombined by the chain rule into a proper
+three-class distribution. Stage 2 is not two arbitrary features: observed
+amplitude together with distance *is* the local-magnitude relation this
+project already relies on (Section 4.5). Both stages' class-weight
+exponents were selected by the station-grouped CV of 8.4(b), never on test.
+Implemented in `cnn_earthquake/src/riskclass_scalar.py`.
+
+**Test set, evaluated once after selection:**
+
+| Model | Accuracy | Macro-AUC | MCC | Balanced acc. | High-risk recall |
+|---|---|---|---|---|---|
+| CNN (image + aux) | 73.64 % | 0.9277 | +0.5990 | — | 0.954 |
+| Flat gradient boosting *(distance artifact)* | 91.72 % | 0.9792 | +0.8559 | 0.8805 | 0.790 |
+| **Two-stage scalar (leak-free)** | **82.83 %** | **0.9273** | **+0.7039** | **0.8314** | **0.861** |
+
+Per-class recall for the two-stage model: noise 0.866, low-risk 0.767,
+high-risk 0.861. Stage-1 AUC (noise vs. earthquake) 0.9425; stage-2 AUC
+(low vs. high, earthquakes only) 0.9441.
+
+The 91.72 % figure is reported here for completeness but **should not be
+quoted as this task's result**: roughly ten points of it come from the
+missing-distance artifact, and it would not survive deployment, where a
+single-window detector does not know the distance to an event it has not
+yet decided exists. The honest number is 82.83 %, which still exceeds the
+CNN by about nine accuracy points and recovers substantially more high-risk
+events than the flat model does.
+
+### 8.6 Caveats
+
+Single seed, single magnitude threshold, single train/validation/test split;
+no seed-repeat check, which Section 6.6 showed concretely can reverse a
+conclusion on this dataset. Noise-station diversity remains the binding
+constraint — 9 train / 2 validation / 6 test noise stations after the
+filter — which is precisely why one bad station could distort the whole
+picture, and why station-grouped CV rather than the held-out split is doing
+the model selection. The CNN was not re-architected or re-regularized in
+response to the diagnosis; the conclusion is that a scalar model wins *as
+configured here*, not that no CNN could win. Notably the CNN retains the
+best high-risk recall of any model tested (0.954), so a hybrid that uses it
+only for that boundary is unexplored.
+
+---
+
+## 9. Discussion
+
+Four threads run through this investigation. First, **absolute amplitude is
 the recurring missing ingredient**: it is what RAM cannot represent
 (Section 2.2(d)), what STA/LTA depends on entirely (Section 5), what its
 correction restores on both the RAM image and the raw-waveform LSTM branch
-(Section 6.3), and what the magnitude classifier's own logistic baseline is
-built from (Section 7.3). Every result in this report that involves
-amplitude, in either direction, traces back to the same structural fact.
+(Section 6.3), what the magnitude classifier's own logistic baseline is
+built from (Section 7.3), and — carried to its conclusion — the *entire*
+input of the best three-class risk model, which uses no image at all
+(Section 8.5). Every result in this report that involves amplitude, in
+either direction, traces back to the same structural fact. The trajectory
+across Sections 6 to 8 is worth stating plainly: the more directly a task
+depends on amplitude, the less the encoded image contributes, until at
+Section 8 it contributes negatively.
 
 Second, **fusion mechanisms behave inconsistently enough that none should be
 assumed without measurement**: linear fusion underperforms its own best
@@ -1133,24 +1334,53 @@ versus 3 s), against different comparison baselines (STA/LTA versus a
 fitted amplitude/distance relation). Their agreement on the general
 principle — encoded windows carry information beyond simple amplitude
 scalars — is a genuine cross-check, not a coincidence of shared code.
+Section 8 is the boundary case that qualifies it: once a noise class is
+introduced and the decision hinges on amplitude relative to a station's own
+floor, the encoded window stops adding and starts subtracting.
+
+Fourth, and least expected, **the dominant failure mode in this project is
+a wrong number, not a crash.** Of the seventeen defects in Section 12, the
+ones that mattered most were silent: STA/LTA scoring zero windows while
+printing a plausible-looking summary (defect 14), a baseline crashing past
+the model's own numbers so the model appeared to have no floor to beat
+(defect 16), a stuck instrument entering the dataset as valid quiet ground
+(defect 15), and a missing-value pattern standing in for a class label
+(defect 17). Every one produced output that looked like a result. The
+practices that caught them were not sophisticated — read the raw data
+behind a suspicious number, keep a floor next to every headline figure, and
+treat an implausibly large validation/test gap as a defect report rather
+than a tuning problem — but they had to be applied deliberately, because
+nothing failed loudly enough to force the issue.
 
 ---
 
-## 9. Limitations and Future Work
+## 10. Limitations and Future Work
 
-**Statistical.** Every result in Sections 6 and 7 reflects a single
+**Statistical.** Every result in Sections 6, 7 and 8 reflects a single
 train/validation/test split at one random seed, except the two comparisons
 re-seeded in Section 6.6, where repetition changed one reported conclusion
 and substantially narrowed another. Every other close-margin figure —
 stacked-RAM-dual vs. `1d`-alone, `2d+aux` vs. the full amplitude-dual model,
 the `1d+aux`/`2d+aux` effect sizes, the magnitude-classification result in
-Section 7 — remains unverified at additional seeds and should be read with
-the caution Section 6.6 demonstrates is warranted.
+Section 7, and the three-class results in Section 8 — remains unverified at
+additional seeds and should be read with the caution Section 6.6
+demonstrates is warranted. Section 8's margin over the CNN (about nine
+accuracy points) is comfortably outside that noise band; its narrower
+internal comparisons are not.
+
+**Station diversity is the binding constraint on the risk task, and
+possibly on more than that.** Section 8 runs on 9 train / 2 validation / 6
+test *noise* stations. That is few enough that a single faulty instrument
+distorted the entire picture (Section 8.4a) and that the held-out
+validation split could not rank models at all (Section 8.4b). Acquiring
+more noise stations would do more for Section 8 than any modelling change
+considered here, and the same concern applies, less acutely, to the
+detection results in Section 6.
 
 **Untested extensions, implemented but not evaluated.** Per-component
 auxiliary scalars (Section 4.3, six scalars instead of two, commit
 `8485ffc` in `data_downloader`) are implemented and smoke-tested but not
-evaluated at scale — deliberately deferred (Section 10), not abandoned.
+evaluated at scale — deliberately deferred (Section 11), not abandoned.
 
 **Untested extensions, proposed but not implemented.** Feeding the RAM
 angle vector $\beta$ directly to a one-dimensional model, to test whether
@@ -1186,23 +1416,37 @@ per-component-aux variant tried, and a spectrogram input small enough (5
 time frames) that its effective temporal resolution is worth questioning
 directly.
 
+**Risk classification (Section 8), specific open threads.** The CNN was not
+re-architected or re-regularized after the diagnosis, so the finding is
+that a scalar model wins *as configured*, not that no CNN could. Two
+concrete follow-ups are unexplored: the CNN retains the best high-risk
+recall of any model tested (0.954 against the two-stage model's 0.861), so
+a hybrid using it only for that boundary may beat both; and a properly
+cross-validated stack of CNN and scalars was never built, because doing it
+honestly requires out-of-fold CNN predictions and therefore k-fold
+retraining (the one stack that was tried fit on the 736-window validation
+split and lost to the scalars outright). Richer scalars — per-component log
+SNR, spectral band ratios — are cheaper to test than either.
+
 **External validity.** This investigation has not undergone external peer
 review.
 
 ---
 
-## 10. Project Status: Original Objective and Next Steps
+## 11. Project Status: Original Objective and Next Steps
 
 The project's original objective is forecasting **event onset time and
 event class from earthquake catalog data** — not waveform classification.
-Sections 2–9 are, in that light, a substantial but deliberate detour: they
+Sections 2–10 are, in that light, a substantial but deliberate detour: they
 established (a) that a specific architecture from a different domain
 transfers to seismic waveforms with real, measured limitations and fixes,
-and (b) that the same amplitude-input pattern generalizes to a related but
-distinct question (event class from a short window). Both are genuine,
-useful results, and both are being set aside now — not because a dead end
-was reached, but because continuing to refine them further would be
-extending the detour rather than returning to the original scope.
+(b) that the same amplitude-input pattern generalizes to a related but
+distinct question (event class from a short window), and (c) that on the
+three-class risk task the pattern reaches its limit — two scalars beat the
+encoded window outright. All three are genuine, useful results, and they
+are being set aside now — not because a dead end was reached, but because
+continuing to refine them further would be extending the detour rather than
+returning to the original scope.
 
 **What this phase established**, most-to-least confident: the amplitude
 auxiliary input's large effects on RAM (Sections 6.3, 6.5); that a
@@ -1212,11 +1456,13 @@ after fixing a previously-undiscovered evaluation defect (Section 5.2);
 that late-fusion stacking is the one fusion mechanism that has not
 underperformed a single branch in any configuration tested (Section 6.4);
 that magnitude class is predictable from a single 3-second window well
-beyond an amplitude/distance floor (Section 7); and, as a standing
-methodological caution rather than a specific finding, that single-seed
-margins under roughly 0.01–0.02 AUC on this dataset have been shown
-concretely to overstate an effect, understate it, or report the wrong sign
-(Section 6.6).
+beyond an amplitude/distance floor (Section 7); that on the three-class
+risk task a two-scalar model beats the CNN by about nine accuracy points
+(Section 8.5); and, as standing methodological cautions rather than
+specific findings, that single-seed margins under roughly 0.01–0.02 AUC on
+this dataset have been shown concretely to overstate an effect, understate
+it, or report the wrong sign (Section 6.6), and that a held-out split too
+poor in stations can rank models backwards outright (Section 8.4b).
 
 **Where the project goes next.** `data_downloader/seismic_cli/catalog.py`
 already builds chronologically-split, embargoed sliding-window datasets from
@@ -1234,13 +1480,17 @@ refinement question.
 
 ---
 
-## 11. Software Defects Identified and Corrected
+## 12. Software Defects Identified and Corrected
 
 The reliability of this report's results depends substantially on defects
 identified and corrected during development. Defects 1–5 predate the
 dual-channel extension (Section 4.2 onward); defects 6–13 were found during
 a systematic audit of the full repository; defect 14 was found while
-preparing this rewrite.
+preparing this rewrite; defects 15–17 were found while investigating the
+three-class model's validation/test gap (Section 8.4). Defects 15–17 are
+worth reading together: each would have caused a *wrong number to be
+reported* rather than a crash, and two of them (16, 17) would have made a
+losing model look like a winning one.
 
 | # | Defect | Mechanism | Impact |
 |---|---|---|---|
@@ -1258,6 +1508,10 @@ preparing this rewrite.
 | 12 | Single-rate assumption | The first trace's sampling rate in a file was applied to every station represented in it | Incorrect physical window duration for off-rate stations; corrected to per-station sampling rate |
 | 13 | Alphabetical channel selection | `sorted(keys)[:3]` could select `['1','2','E']` — two horizontal components, no vertical | Silent component mis-assignment; corrected to role-based selection requiring a vertical component |
 | 14 | STA/LTA silently unrunnable, then silently mis-parameterized, against anchored/dual-channel data | `eval_baseline.py`'s filename regex matched only `_winNNN.png`, so every `.pt`-based dual-channel manifest scored zero windows with no error; once fixed, the auto-derived LTA (window/3) was found to exceed `anchor.py`'s pre-arrival buffer (0.2×window) for any anchored window under ~50 s, putting the true arrival inside `classic_sta_lta`'s forced-zero warm-up region | `eval-sta-lta` had never actually run against the Section 6 dual-channel datasets; its default parameters, even once made runnable, silently score AUC 0.51 (random) at 6 s. Corrected via a validation-selected LTA (Section 5.2), giving AUC 0.82 |
+
+| 15 | Stuck-instrument windows entering the risk dataset as valid "quiet noise" | `6G.MADM`'s traces span ~58 counts on a ~5.38-million-count DC offset with ~50 unique values across 30,001 samples; gap rejection catches telemetry gaps but not a digitizer stuck at a constant | 199 windows at log SNR ≈ −6, far outside the training range, supplied 58% of one class's test errors and created a 24-point validation/test gap. Corrected by `--min-log-snr` (Section 8.4a); the gap closes to ~1 point |
+| 16 | Multi-class baseline crashed silently *past* the model's own numbers | `LogisticRegression(multi_class=...)` was removed in scikit-learn 1.9; the exception was caught by a broad `except` that printed a warning and returned `None`, after which the reporting code skipped the comparison line | The 3-class run reported the CNN's 71.71% accuracy with **no floor beneath it**. The floor, once computed, was 90.37% — the model was losing to two scalars, and the output as printed suggested the opposite |
+| 17 | `distance_km` undefined for noise leaks the noise class | There is no event to measure distance from for a noise window, so "distance is missing" identifies the noise class by construction in a flat multi-class model | Worth ~10 accuracy points of pure inflation (91.72% vs 81.55%). Corrected structurally by the two-stage split (Section 8.5). The equivalent check on the Section 7 binary task was negative, so reusing that task's reasoning would not have caught it |
 
 Two items were suspected as defects but confirmed not to be: the RAM
 mathematics as implemented transcribes the source paper correctly,
@@ -1398,5 +1652,35 @@ cd ../cnn_earthquake/src
 python cnn_magclass.py --dataset-dir ../../data_downloader/data/dataset_magclass_3s \
     --window-seconds 3 --save-dir trained_model_magclass_3s   # --mag-threshold to change the split point
 ```
+
+**Three-class risk classification (Section 8):**
+
+```bash
+# Both noise directories, and the dead-instrument filter of Section 8.4(a).
+# --noise-dir takes a PARENT directory: file discovery is recursive, so this
+# picks up noise_pre_3h and noise_pre_6h together (23,031 files).
+seismic-cli generate-riskclass-dataset \
+    --eq-dir data/batched_waveforms/window_post_3s_anchored \
+    --noise-dir data/batched_noise_waveforms \
+    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --station-catalog catalogs/istasyon_katalog.csv \
+    --output-dir data/dataset_riskclass_3s_v2 \
+    --window-seconds 3 --mag-threshold 4.0 --balance-ratio 4.0 --min-log-snr -3.0
+
+cd ../cnn_earthquake/src
+
+# The CNN (Section 8.3) -- reported for comparison; it loses to the scalars
+python cnn_riskclass.py --dataset-dir ../../data_downloader/data/dataset_riskclass_3s_v2 \
+    --window-seconds 3 --save-dir trained_model_riskclass_3s_v2
+
+# The selected model (Section 8.5): two-stage, scalars only, class weights
+# chosen by station-grouped CV internally, test evaluated once at the end
+python riskclass_scalar.py --dataset-dir ../../data_downloader/data/dataset_riskclass_3s_v2
+```
+
+To reproduce the fetch reality of Section 8.2, target only the M ≥ 4 events
+that have no downloaded waveform (`catalogs/target_missing_m4plus.csv`,
+committed) and run `src/download.py` against it; expect roughly one in ten
+to return data.
 
 Full CLI option reference: `data_downloader/README.md`.
