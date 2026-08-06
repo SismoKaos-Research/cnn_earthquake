@@ -49,6 +49,37 @@ RISK_CLASSES = ["lt_1y", "1_5y", "gt_5y"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(RISK_CLASSES)}
 
 
+def risk_classes_from_manifest(manifest: pd.DataFrame):
+    """
+    Reads the class names actually present in a manifest and orders them by
+    increasing time-to-next-mainshock.
+
+    The module-level `RISK_CLASSES` above is only correct when the dataset was
+    built with the fixed 1-year/5-year boundaries. `assign_risk_classes` in
+    `catalog.py` derives TERCILE boundaries by default, and on a catalog whose
+    recurrence is measured in weeks those terciles land nowhere near a year --
+    on the pooled 4-region dataset they are 26 d and 71 d, so a window labelled
+    `gt_5y` is actually 71-817 days out. Reading the names from the manifest,
+    and ordering them by the `days_to_major` they actually cover rather than by
+    a hardcoded list, keeps the label, the ordinal direction, and the reported
+    confusion matrix honest for any boundary choice.
+
+    Returns (ordered_class_names, class_to_idx).
+    """
+    if "risk_class" not in manifest.columns:
+        raise ValueError("manifest has no 'risk_class' column")
+    if "days_to_major" in manifest.columns:
+        order = (manifest.groupby("risk_class").days_to_major.min()
+                 .sort_values().index.tolist())
+    else:
+        # No horizon column to order by: fall back to the legacy fixed names,
+        # keeping only those actually present.
+        present = set(manifest.risk_class.unique())
+        order = [c for c in RISK_CLASSES if c in present] + \
+                sorted(present - set(RISK_CLASSES))
+    return order, {c: i for i, c in enumerate(order)}
+
+
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------

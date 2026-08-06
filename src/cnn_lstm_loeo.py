@@ -42,8 +42,15 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import CLASS_TO_IDX, RISK_CLASSES, DualChannelRiskNet
+from cnn_lstm import DualChannelRiskNet, risk_classes_from_manifest
 from training import seed_everything
+
+# Populated from the manifest in main(); see `risk_classes_from_manifest`.
+# Hardcoding these was a real defect: the tercile boundaries `catalog.py`
+# derives by default put `gt_5y` at 71-817 DAYS on the pooled dataset, so
+# every printed class name was wrong by more than an order of magnitude.
+RISK_CLASSES: list = []
+CLASS_TO_IDX: dict = {}
 
 
 class InMemoryWindowDataset(Dataset):
@@ -220,6 +227,14 @@ def main():
                           "a current `generate-catalog-dataset --split-mode loeo` run.")
     manifest["target_time"] = pd.to_datetime(manifest.target_time)
 
+    global RISK_CLASSES, CLASS_TO_IDX
+    RISK_CLASSES, CLASS_TO_IDX = risk_classes_from_manifest(manifest)
+    if "days_to_major" in manifest.columns:
+        spans = manifest.groupby("risk_class").days_to_major.agg(["min", "max"])
+        print("[classes] ordered by actual time-to-next-mainshock:")
+        for c in RISK_CLASSES:
+            print(f"            {c:12s} {spans.loc[c, 'min']:8.1f} - {spans.loc[c, 'max']:8.1f} days")
+
     groups = [(k, g) for k, g in manifest.groupby(["region", "target_time"])
              if len(g) >= args.min_fold_test]
     if args.max_folds:
@@ -265,19 +280,36 @@ def main():
     maj_acc = float((yt == maj).mean())
     maj_bal = balanced_accuracy_score(yt, maj)
 
+    chance = 1.0 / len(RISK_CLASSES)
+
     print("\n" + "=" * 64)
     print(f"POOLED RESULT across {len(groups)} folds / {len(yt)} held-out test windows")
     print("=" * 64)
+    print(f"  chance ({len(RISK_CLASSES)} classes)                       acc {chance:.4f}"
+          f"   <- THE floor that matters")
     print(f"  majority-class (per-fold train mode)  acc {maj_acc:.4f}   balanced {maj_bal:.4f}")
     print(f"  dual-channel model                    acc {acc:.4f}   balanced {bal:.4f}   "
           f"kappa {kappa:+.4f}")
+    print(f"  vs chance:         {acc - chance:+.4f} accuracy")
     print(f"  vs majority-class: {acc - maj_acc:+.4f} accuracy, {bal - maj_bal:+.4f} balanced")
-    if acc <= maj_acc + 1e-9:
-        print("  [!] Does NOT beat per-fold majority-class prediction, pooled across folds.")
+
+    # Do NOT quote the majority-class figure as the floor when the dataset is
+    # class-balanced. Under leave-one-event-out, removing a fold tips the
+    # remaining counts away from that fold's own dominant class, so the
+    # per-fold "majority" is systematically the class the fold has LEAST of --
+    # measured at 2/264 folds matching the fold's true mode and 175/264
+    # matching its rarest class on the pooled 4-region dataset. Beating an
+    # anti-predictive baseline is evidence of nothing.
+    if maj_acc < chance - 0.05:
+        print(f"\n  [!] The majority-class figure ({maj_acc:.4f}) is far BELOW chance "
+              f"({chance:.4f}) -- an artifact of balanced classes under LOEO, not a")
+        print("      baseline worth beating. Compare against chance instead.")
+    if acc <= chance + 1e-9:
+        print("  [!] Does NOT beat chance. The model has learned nothing usable.")
     elif kappa < 0.2:
-        print("  [!] Beats majority-class, but kappa < 0.2 -- agreement is barely above chance.")
+        print("  [!] Beats chance, but kappa < 0.2 -- agreement is barely above chance.")
     else:
-        print("  Beats majority-class with non-trivial kappa.")
+        print("  Beats chance with non-trivial kappa.")
 
     print("\nConfusion matrix (rows = true, cols = predicted), pooled over all folds:")
     print(pd.DataFrame(confusion_matrix(yt, pt, labels=range(len(RISK_CLASSES))),
