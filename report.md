@@ -1036,15 +1036,113 @@ discipline against choosing one by looking at test results directly.
 branch's own hyperparameters reward tuning on this dataset; the established
 defaults should be retained in both cases.**
 
-**Considered together with Sections 10.5.1–10.5.9, the single best-performing
-configuration measured in this entire investigation remains the plain
-spectrogram CNN classifier, with no LSTM branch, no auxiliary input, and no
-fusion mechanism (AUC 0.9793).** Every structural addition tested — the
-source paper's dual-channel architecture, the amplitude auxiliary input,
-gated fusion, late-fusion stacking — improved on some other configuration
-along the way, and each produced a genuine, informative finding about why
-RAM underperforms and how fusion mechanisms behave. None of them, individually
-or in combination, has yet exceeded the simplest model in this comparison.
+**10.5.10 Late-fusion stacking of the amplitude-augmented branches beats
+both linear and gated joint fusion, on both datasets.** `cnn_lstm_stack_aux.py`
+(Section 10.3) applies the Section 10.4 stacking procedure to frozen
+`1d+aux`/`2d+aux` checkpoints instead of the plain ones:
+
+| Dataset | 1d+aux alone | 2d+aux alone | Stacked | Linear fusion (`all`) | Gated fusion (`all`) |
+|---|---|---|---|---|---|
+| RAM+aux | AUC 0.9505, MCC 0.768, 88.39 % | AUC 0.9468, MCC 0.778, 88.84 % | **AUC 0.9557, MCC 0.781, 89.07 %** | AUC 0.9514, MCC 0.779, 88.95 % | AUC 0.9487, MCC 0.744, 87.12 % |
+| Spectrogram+aux | AUC 0.9505, MCC 0.768, 88.39 % | AUC 0.9749, MCC 0.863, 93.02 % | **AUC 0.9758, MCC 0.868, 93.37 %** | AUC 0.9733, MCC 0.847, 92.31 % | AUC 0.9716, MCC 0.836, 91.80 % |
+
+On both datasets, stacking is the best fusion mechanism tested among the
+three (linear, gated, stacked) once the amplitude input is present —
+consistent with Section 10.5.2's finding on the non-aux branches, where
+stacking also matched or beat joint fusion. Stacking on RAM+aux is a clear
+win over every alternative on every metric. Stacking on spectrogram+aux is
+the best fusion mechanism but does not surpass the plain `2d`-alone,
+no-aux ceiling (0.9793 AUC, Section 10.4) — no fusion mechanism has yet
+closed that gap.
+
+**10.5.11 Combining two independently helpful interventions does not
+compound, and mildly hurts.** Gated fusion (Section 10.5.5) and the
+amplitude auxiliary input (Section 10.5.3) each measurably improved
+results on their own. Combined — gated fusion applied to the
+amplitude-augmented spectrogram-dual model — the result is worse than
+either intervention alone: AUC 0.9716, versus gated-fusion-without-aux's
+0.9761 and linear-fusion-with-aux's 0.9733. This is a useful negative
+result: independently validated improvements do not automatically compose,
+and each combination has to be measured rather than assumed. The three
+fusion mechanisms tested on the amplitude-augmented spectrogram-dual model
+now rank, by AUC: stacked (0.9758) > linear (0.9733) > gated (0.9716) — the
+reverse of gated fusion's ranking on the same 2D representation without
+aux (Section 10.5.5), where gated fusion was the best of the three.
+
+**10.5.12 Seed-repeated verification of the two closest single-seed
+claims changes the reported conclusion for one of them.** Sections 10.5.5
+and 10.5.7 each rested on a single train/validation/test split. Both were
+re-run at two additional seeds (1 and 2, alongside the original 42) to
+check whether the claimed improvements survive repetition.
+
+*Gated vs. linear fusion, spectrogram-dual, no aux (Section 10.5.5):*
+
+| Seed | Linear AUC / MCC / Acc | Gated AUC / MCC / Acc | Gated − Linear (AUC) |
+|---|---|---|---|
+| 42 | 0.9646 / 0.812 / 90.61 % | 0.9761 / 0.850 / 92.51 % | +0.0115 |
+| 1 | 0.9719 / 0.848 / 92.32 % | 0.9753 / 0.851 / 92.53 % | +0.0034 |
+| 2 | 0.9746 / 0.834 / 91.68 % | 0.9720 / 0.849 / 92.36 % | **−0.0026** |
+
+The AUC advantage is not robust — it reverses sign at seed 2, and its
+magnitude at seed 1 is roughly a third of the original single-seed figure.
+Averaged across the three seeds, gated fusion still leads on AUC (mean
+0.9745 vs. 0.9704), but the effect is smaller and noisier than Section
+10.5.5 reported. Accuracy and MCC tell a more consistent story: gated
+fusion wins on **both** metrics at **all three** seeds, and does so with
+much lower run-to-run spread (accuracy range 92.36–92.53 %, a spread of
+0.17 points, versus linear fusion's 90.61–92.32 %, a spread of 1.71
+points; MCC spread 0.002 vs. 0.036). The corrected finding is therefore
+not "gated fusion is a clear AUC win" but **"gated fusion gives more
+consistent, slightly better decisions at the operating threshold, with a
+real but small and noisy ranking-quality advantage"** — a materially
+weaker and more precise claim than Section 10.5.5's original framing.
+
+*Amplitude aux vs. no aux, spectrogram-dual, linear fusion (Section 10.5.7):*
+
+| Seed | No-aux AUC / MCC / Acc | Aux AUC / MCC / Acc | Aux − No-aux (AUC) |
+|---|---|---|---|
+| 42 | 0.9646 / 0.812 / 90.61 % | 0.9733 / 0.847 / 92.31 % | +0.0087 |
+| 1 | 0.9719 / 0.848 / 92.32 % | 0.9707 / 0.841 / 92.01 % | **−0.0012** |
+| 2 | 0.9746 / 0.834 / 91.68 % | 0.9705 / 0.834 / 91.66 % | **−0.0041** |
+
+This result does not merely shrink — it reverses and averages out to
+approximately zero (mean AUC difference +0.0011 across the three seeds).
+**Section 10.5.7's claim that the amplitude auxiliary input improves the
+fused linear model does not survive repetition; the original single-seed
+result at seed 42 was not representative.** This does not call the
+amplitude fix into question generally: the much larger effects reported in
+Section 10.5.3 (RAM CNN alone, +0.087 AUC) and Section 10.5.8 (`1d+aux`
+alone, +0.029 AUC) are an order of magnitude larger than the noise band
+established here (~0.01 AUC) and are far more likely to be genuine, though
+neither has itself been re-run at additional seeds and both should be
+treated with appropriately more confidence than this reversed result, not
+full certainty. What this result specifically corrects is narrower: aux
+does not reliably help once it is combined with joint linear fusion on an
+already-strong 2D representation, where Section 10.5.4 already established
+the 2D branch has little room left for the aux input to add.
+
+**The practical lesson from 10.5.12 is broader than either individual
+correction: none of the close-margin claims elsewhere in Section 10 —
+including the `1d+aux` and `2d+aux` effects in Sections 10.5.3/10.5.8, and
+the stacking results in Section 10.5.2/10.5.10 — have been checked against
+more than one seed, and this section demonstrates concretely that a
+single-seed result on this dataset can overstate an effect, understate it,
+or report the wrong sign entirely.** Only claims with effect sizes well
+above the ~0.01 AUC / ~0.02 MCC band established here (the amplitude fix on
+RAM alone, and the standing conclusion that plain `2d` remains the overall
+best configuration) should be treated as settled without further seeds.
+
+**Considered together with Sections 10.5.1–10.5.12, the single
+best-performing configuration measured in this entire investigation remains
+the plain spectrogram CNN classifier, with no LSTM branch, no auxiliary
+input, and no fusion mechanism (AUC 0.9793).** Every structural addition
+tested — the source paper's dual-channel architecture, the amplitude
+auxiliary input, gated fusion, late-fusion stacking, and combinations of
+these — improved on some other configuration along the way, and each
+produced a genuine, informative finding about why RAM underperforms and how
+fusion mechanisms behave, including where those findings needed correcting
+under repeated measurement (Section 10.5.12). None of them, individually or
+in combination, has yet exceeded the simplest model in this comparison.
 This should be read as a genuine result rather than a failure of the
 investigation: it indicates that, for this task and dataset, the highest-value
 remaining work is more likely to be in feature representation (for example,
@@ -1054,25 +1152,21 @@ representation.
 
 ### 10.6 Updated Limitations and Recommendations
 
-- Every result in Sections 10.4 and 10.5.5 reflects a single
-  train/validation/test split at one random seed. None of the differences
-  below approximately 1–2 points — including stacked-RAM-dual versus
-  1d-alone, 2d+aux versus the full amplitude-dual model, and gated versus
-  linear fusion on either RAM-dual configuration — should be treated as
-  more than suggestive without repeated measurements across seeds, the same
-  caution already applied to Section 7's figures in Section 9.
+- Every result in Section 10 reflects a single train/validation/test split
+  at one random seed, **except** the two comparisons re-run at three seeds
+  in Section 10.5.12, where repetition changed the reported conclusion for
+  one of them (amplitude aux no longer shown to help the fused linear
+  model) and meaningfully narrowed the other (gated fusion's AUC edge).
+  Every other close-margin figure in Section 10 — including stacked-RAM-dual
+  versus 1d-alone, `2d+aux` versus the full amplitude-dual model, `1d+aux`'s
+  effect size (Section 10.5.8), and the stacking results in Sections
+  10.5.2/10.5.10 — remains unverified at additional seeds and should be
+  read with the caution Section 10.5.12 demonstrates is warranted, not
+  assumed settled by a single run.
 - The amplitude correction has now been evaluated on the spectrogram-dual
-  model (Section 10.5.7) but has not been combined with stacking
-  (amplitude-augmented branches, frozen, then stacked). This is a natural
-  next experiment and is inexpensive given that the relevant datasets and
-  checkpoints already exist.
-- Gated fusion has not been combined with stacking (for example, a gate
-  applied to frozen rather than jointly trained branch features), nor with
-  the amplitude auxiliary input on the spectrogram-dual model specifically
-  (Section 10.5.7 used linear fusion only). Given that gating already
-  matched most of what stacking achieved on spectrogram-dual without aux,
-  whether either combination would move the model past the plain `2d`
-  ceiling (0.9793 AUC) is unresolved.
+  model (Section 10.5.7) and combined with stacking (Section 10.5.10, a
+  clear win on both datasets) and with gated fusion (Section 10.5.11, a
+  clear loss relative to either intervention alone).
 - `log_snr` and `log_rms` are single scalars per window, averaged over
   Z, N, and E. Per-component auxiliary inputs (six scalars rather than two)
   were not tested and might retain information the averaging step
@@ -1083,9 +1177,11 @@ representation.
   are more difficult applies specifically to the RAM branch, not to the
   raw-waveform or auxiliary branches, so the balance between branches may
   shift at longer window lengths.
-- Gated fusion's mixed result (10.5.5) has not been diagnosed further; the
-  three plausible explanations offered are not distinguished by the current
-  evidence and should be treated as open questions rather than findings.
+- Gated fusion's mixed result across 2D representations (Section 10.5.5)
+  has not been diagnosed further, though Section 10.5.12 adds one relevant
+  data point: on spectrogram-dual specifically, the effect is real on
+  accuracy/MCC but small and noisy on AUC, which narrows rather than
+  resolves the three explanations originally offered.
 - `1d+aux` (Section 10.5.8) and the LSTM branch's own hyperparameters
   (Section 10.5.9) have now been evaluated; neither the CNN's hyperparameters
   (Section 10.5.6) nor the LSTM's reward tuning on this dataset. This
@@ -1160,6 +1256,19 @@ python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dual
 python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
     --ckpt-1d trained_model_cnnlstm_classify_1d/best_cnnlstm_classify.pth \
     --ckpt-2d trained_model_cnnlstm_classify_2d/best_cnnlstm_classify.pth
+
+# Late-fusion stacking on amplitude-augmented checkpoints (Section 10.5.10)
+python cnn_lstm_stack_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
+    --ckpt-1d trained_model_cnnlstm_aux_1daux/best_cnnlstm_aux.pth \
+    --ckpt-2d trained_model_cnnlstm_aux_2daux/best_cnnlstm_aux.pth
+
+# Gated fusion + amplitude aux combined (Section 10.5.11)
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
+    --channels all --fusion gate --batch-size 32
+
+# Seed-repeated verification (Section 10.5.12) -- rerun any of the above with --seed 1 / --seed 2
+python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
+    --channels all --seed 1 --batch-size 32               # repeat for --fusion gate, and --seed 2
 ```
 
 ## Appendix B. Reproduction Instructions: Original RAM + CNN-Only Pipeline
