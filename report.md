@@ -1,4 +1,4 @@
-# Earthquake Detection from Raw Waveforms via Relative Angle Matrix Image Encoding and Dual-Channel CNN–LSTM Networks
+# Earthquake Detection and Magnitude Classification from Raw Waveforms via Relative Angle Matrix Image Encoding and Dual-Channel CNN–LSTM Networks
 
 ## Abstract
 
@@ -6,33 +6,64 @@ This report documents an investigation into applying the Relative Angle
 Matrix (RAM) method — a technique proposed by Wang and Zhao (2025,
 *Applied Soft Computing* 172) for converting one-dimensional vibration
 signals into two-dimensional images for convolutional neural network (CNN)
-classification — to seismic event detection from three-component (Z/N/E)
-waveform data. All comparisons are made against classic STA/LTA, the
-standard seismological trigger algorithm, rather than an arbitrary baseline.
+classification — to seismic event detection and magnitude classification
+from three-component (Z/N/E) waveform data. All detection comparisons are
+made against classic STA/LTA, the standard seismological trigger algorithm,
+rather than an arbitrary baseline.
 
-The investigation proceeds in two phases. The first establishes a RAM-image
-CNN classifier, evaluates it against STA/LTA, and identifies a structural
-limitation: the RAM transform is provably scale-invariant, and therefore
-cannot represent absolute signal amplitude, which is the dominant feature
-short-window detection depends on. The second phase implements the source
-paper's full dual-channel architecture — a CNN over the RAM image paired
-with an LSTM and multi-head self-attention branch over the raw waveform —
-corrects a design error identified by direct comparison against the source
-paper, introduces an amplitude auxiliary input to address the
-scale-invariance limitation, evaluates a spectrogram-based alternative to
-the RAM image, and compares three fusion strategies for combining the two
-channels.
+The investigation has four parts. The first establishes a RAM-image CNN
+classifier, evaluates it against STA/LTA, and identifies a structural
+limitation: the RAM transform is provably scale-invariant and therefore
+cannot represent absolute signal amplitude, the dominant feature short-window
+detection depends on. The second implements the source paper's full
+dual-channel architecture — a CNN over the RAM image paired with an LSTM and
+multi-head self-attention branch over the raw waveform — corrects a design
+error found by direct comparison against the source paper, introduces an
+amplitude auxiliary input to address the scale-invariance limitation,
+evaluates a spectrogram-based alternative to the RAM image, and compares
+three fusion strategies for combining the two channels. The third asks a
+narrower, related question: can *event class* (a coarse magnitude bin) be
+predicted directly from a single 3-second window, reusing the same amplitude
+auxiliary machinery. The fourth records the project's status and its
+redirection back toward its original objective — forecasting event onset
+time and class from catalog data, not waveform classification — and points
+at the concrete, dormant code that objective already has.
 
-The amplitude auxiliary input is the single largest contributor to
-classification performance measured in this work (test AUC 0.836 → 0.923 on
-the RAM-only classifier, an architecture-matched, single-variable
-comparison). Spectrogram-based encoding outperforms RAM-based encoding as
-the two-dimensional channel in every configuration tested. Gated fusion, a
-per-example alternative to the source paper's fixed linear fusion, improves
-performance substantially on the spectrogram-based configuration but
-degrades it on both RAM-based configurations tested — a result reported in
-full rather than simplified, since a tidy explanation is not yet supported
-by the evidence.
+Six findings carry the report:
+
+- **The amplitude auxiliary input is the single largest contributor to
+  classification performance measured in this work** (test AUC 0.836 → 0.923
+  on the RAM-only classifier, an architecture-matched, single-variable
+  comparison).
+- **Once STA/LTA is correctly parameterized for arrival-anchored windows — a
+  defect found and fixed during this rewrite — it scores AUC 0.82 at 6
+  seconds, and every tested CNN configuration, including the weakest one,
+  beats it.** The library's own auto-derived default parameters silently
+  score AUC 0.51 (random) on the same data, because the default long-term
+  average window is longer than the pre-arrival buffer the anchoring scheme
+  provides, so classic STA/LTA's mandatory warm-up period swallows the P-wave
+  arrival before the characteristic function ever sees it.
+- **Spectrogram-based encoding outperforms RAM-based encoding as the
+  two-dimensional channel in every configuration tested**, and the single
+  best-performing configuration in the entire detection investigation remains
+  the plain spectrogram CNN alone — no LSTM branch, no auxiliary input, no
+  fusion mechanism (AUC 0.9793).
+- **Late-fusion stacking of independently-trained branches consistently
+  matches or beats joint (linear or gated) fusion**, on every branch pairing
+  tested, with or without the amplitude input.
+- **A single-seed measurement on this dataset can overstate an effect,
+  understate it, or report the wrong sign entirely** — demonstrated directly
+  by re-running two close-margin claims at three seeds each, which reversed
+  one conclusion and substantially narrowed another. Neither the amplitude
+  fix's largest effects nor the overall best-configuration finding above are
+  in that fragile category — they are an order of magnitude larger than the
+  noise band this check established — but most other close-margin
+  comparisons in this report have not been re-seeded and should be read with
+  that caution.
+- **Event class (magnitude ≥ M2.5 vs. below) can be predicted directly from a
+  single 3-second window** (test accuracy 79.78%, AUC 0.855, MCC +0.566),
+  clearly beating both a majority-class floor and a fitted amplitude/distance
+  baseline — at a single seed and threshold, not yet re-verified.
 
 Every numerical claim in this report is drawn directly from a measurement
 taken against the code in this repository. Where a result has not been
@@ -48,20 +79,37 @@ converting one-dimensional bearing-vibration signals into two-dimensional
 images for CNN-based fault diagnosis. Seismic waveform data shares the same
 basic structure — a time series — and three-component (Z/N/E) seismic
 stations map naturally onto a three-channel image, making this a plausible
-transfer target. The central question addressed in this report is whether
-RAM encoding combined with a CNN, and subsequently with the source paper's
-full dual-channel CNN–LSTM architecture, can separate a genuine seismic
-event from ambient noise directly from raw waveforms, and how such a system
-compares to the established STA/LTA trigger algorithm.
+transfer target. The central question this report answers is whether RAM
+encoding, combined with a CNN and subsequently with the source paper's full
+dual-channel CNN–LSTM architecture, can separate a genuine seismic event from
+ambient noise directly from raw waveforms, how such a system compares to the
+established STA/LTA trigger algorithm, and whether the same encoded-window
+machinery extends to a related but distinct task: classifying an event's
+magnitude directly from a short window rather than merely detecting its
+presence.
 
 This work was conducted independently, outside assigned project tasks, using
 publicly available data (STEAD-format HDF5 chunks and self-downloaded FDSN
 MiniSEED archives), and therefore did not require navigating data-access or
 ethics constraints beyond standard public-data terms of use.
 
+**Roadmap.** Sections 2–4 lay out the RAM transform, the data pipeline, and
+the model architectures used throughout, so later results can be read without
+backtracking to definitions. Section 5 defines the STA/LTA baseline,
+including a parameterization defect found while preparing this report.
+Section 6 is the detection investigation's results and analysis, organized by
+research question rather than by the order experiments were run. Section 7
+extends the same encoded-window machinery to magnitude classification.
+Section 8 discusses the results as a whole; Section 9 states limitations and
+concrete future work; Section 10 records the project's present status and
+where it goes next. Section 11 is the full changelog of software defects
+found and corrected, kept as a single reference list rather than scattered
+through the narrative. The appendix collects every command needed to
+reproduce every numbered result in the report.
+
 ---
 
-## 2. The RAM Transform, Formally Defined
+## 2. The RAM Transform: Definition and Structural Properties
 
 ### 2.1 Definition
 
@@ -127,13 +175,11 @@ equal magnitude, with the remainder zero.
 is generated by the vector $\beta$ up to a global offset, an entire
 $64\times64=4096$-pixel channel is reconstructible from 63 numbers. This was
 verified by recovering $\beta$ from the first column of $R$ and
-reconstructing $R$ in full; reconstruction error was exactly zero.
-
-A 64×64×3 RAM image (12,288 pixels) therefore carries at most 189
-independent values. The transform is a severe, lossy compression of the
-6,000-sample (60 s) or 600-sample (6 s) input, and a CNN's two-dimensional
-spatial processing operates on a highly redundant embedding of a
-one-dimensional signal.
+reconstructing $R$ in full; reconstruction error was exactly zero. A
+64×64×3 RAM image (12,288 pixels) therefore carries at most 189 independent
+values — a severe, lossy compression of the 6,000-sample (60 s) or
+600-sample (6 s) input, on which a CNN's two-dimensional spatial processing
+then operates on a highly redundant embedding of a one-dimensional signal.
 
 **(c) Every RAM image shares the same mean pixel value.** Antisymmetry
 implies $\sum_{ij} R_{ij} = 0$, so the mean pixel is exactly the map's
@@ -149,8 +195,10 @@ $$\frac{(cX_i)\cdot(c\bar X)}{\lVert cX_i\rVert \lVert c\bar X\rVert} = \frac{c^
 Measured: $\max|\text{RAM}(x) - \text{RAM}(37.5x)| = 8.9\times10^{-16}$, i.e.
 exact cancellation to floating-point precision. A mean *shift*, by
 contrast, does not cancel ($\max|\Delta R| = 1.31$ rad for a representative
-offset). Section 8.2 develops the consequence of property (d), which is the
-most consequential finding of the first investigation phase.
+offset). Property (d) is the most consequential fact in this report: Section
+6.2 traces its consequences for detection, and Section 5.2 shows an
+unrelated tool (STA/LTA's parameterization) breaking for a structurally
+similar reason — a warm-up requirement colliding with a fixed buffer length.
 
 ### 2.3 Short Windows Are Structurally Disadvantaged
 
@@ -168,28 +216,27 @@ window shortens (all figures at 100 Hz):
 At 3 s, each $\beta_i$ is the angle between two five-dimensional vectors.
 The cosine similarity of short random vectors has high variance, so the
 angles become dominated by sampling noise rather than signal structure, and
-the resulting image is correspondingly noisy. This is a geometric
-limitation of the encoding, independent of model capacity or dataset size,
-and it applies equally to classification and regression tasks.
-
-The tension has no clean resolution within the current design: increasing
-$d$ requires decreasing $n$ (a smaller image), and at 3 s a target
-resolution of $n=3$ would be required to reach 60 s-equivalent segment
-lengths. Reducing `--target-n` was tested and produced results in the same
-accuracy range as other short-window variants (Section 7.2).
+the resulting image is correspondingly noisy. This is a geometric limitation
+of the encoding, independent of model capacity or dataset size, and it
+applies equally to classification and regression tasks. The tension has no
+clean resolution within the current design: increasing $d$ requires
+decreasing $n$ (a smaller image), and at 3 s a target resolution of $n=3$
+would be required to reach 60 s-equivalent segment lengths. Reducing
+`--target-n` was tried informally during early short-window work and stayed
+within the same accuracy range as other short-window variants; no controlled
+comparison at fixed seed exists, so this is reported as a qualitative
+observation, not a numbered result.
 
 ### 2.4 Three-Channel Composition
 
 Each component (Z, N/1, E/2) is RAM-transformed independently and stacked
 into RGB channels: R = Z, G = N-like, B = E-like. Component selection is by
-role rather than alphabetical ordering, and stations lacking a usable
-vertical component are excluded (Section 6, defect 13).
-
-One question was identified but not pursued in this phase: whether
-combining the three components before the transform (for example, by vector
-magnitude) would preserve inter-channel amplitude relationships better than
-transforming each independently. Given property 2.2(d), any such variant
-should be evaluated specifically for its effect on amplitude information.
+role rather than alphabetical ordering (Section 11, defect 13), and stations
+lacking a usable vertical component are excluded. Whether combining the
+three components before the transform (for example, by vector magnitude)
+would preserve inter-channel amplitude relationships better than
+transforming each independently was identified as an open question but not
+pursued (Section 9).
 
 ---
 
@@ -197,7 +244,8 @@ should be evaluated specifically for its effect on amplitude information.
 
 The pipeline comprises four stages, implemented in the `seismic_cli`
 package of the `data_downloader` repository (`core.py`, `anchor.py`,
-`eval_baseline.py`, `cli.py`).
+`eval_baseline.py`, `cli.py`). It is described here as it currently stands,
+after the corrections in Section 11.
 
 ### 3.1 Acquisition (`src/download.py`)
 
@@ -210,25 +258,21 @@ sliced in memory.
 - **Earthquake windows:** 60 s from origin time.
 - **Noise windows:** 300 s slices at −3 h and −6 h relative to origin.
 - **Contamination check:** a noise window is discarded if any event in the
-  unfiltered catalog falls within ±300 s of it. Checking against the
-  filtered catalog would allow sub-threshold events to pass silently into
-  the noise class; the buffer is deliberately wide because coda from larger
-  events can persist for several minutes.
-
-This check is purely temporal, so an event 500 km away will veto a
-candidate noise window. This is over-conservative and discards noise data
-that is otherwise scarce; adding a distance term is listed as a limitation
-in Section 9.
+  unfiltered catalog falls within ±300 s of it — deliberately wide, since
+  coda from larger events can persist for several minutes, and checked
+  against the unfiltered catalog so a sub-threshold event cannot silently
+  pass into the noise class. This check is purely temporal, so an event
+  500 km away will veto a candidate noise window; this is over-conservative
+  and discards noise data that is otherwise scarce (Section 9).
 
 ### 3.2 Arrival Anchoring (`seismic-cli anchor-windows`)
 
 Short windows sliced from origin time can miss the P-wave arrival entirely
-at distant stations. At 6 s, an arrival later than 6 s after origin time
+at distant stations — at 6 s, an arrival later than 6 s after origin time
 means the nominal "earthquake" window contains no earthquake signal.
 Anchoring re-derives short windows from already-downloaded 60 s data without
-requiring re-download.
-
-The pick uses the classic STA/LTA characteristic function
+requiring re-download. The pick uses the classic STA/LTA characteristic
+function
 
 $$\text{CF}(k) = \frac{\frac{1}{n_{\text{STA}}}\sum_{j=k-n_{\text{STA}}+1}^{k} x_j^2}{\frac{1}{n_{\text{LTA}}}\sum_{j=k-n_{\text{LTA}}+1}^{k} x_j^2}$$
 
@@ -238,32 +282,28 @@ arrival sample $a$. The window is then cut as
 $$[\,a - f\cdot T,\ a - f\cdot T + T\,), \qquad f = \texttt{pre\_arrival\_fraction} = 0.2$$
 
 so that 20% of the window precedes the arrival (at 6 s: 1.2 s before, 4.8 s
-after).
+after). This 20% figure resurfaces in Section 5.2: it is the buffer a
+downstream STA/LTA *evaluation* has to respect, and the library's own
+default parameterization does not.
 
-Two correctness requirements were violated prior to this round of
-corrections (Section 6, defects 6–7): the trace must be detrended before the
-characteristic function is computed, and the pick should prefer the
-vertical component with fallback to horizontal components. A diagnostic
-block now reports, per run, the number of stations seen, skipped, picked on
-the vertical component, picked via fallback, and unpicked, together with how
-close failed picks came to the trigger threshold.
+A diagnostic block reports, per anchoring run, the number of stations seen,
+skipped, picked on the vertical component, picked via fallback, and
+unpicked, together with how close failed picks came to the trigger
+threshold.
 
-### 3.3 Dataset Generation (`seismic-cli generate-dataset`)
+### 3.3 Dataset Generation (`seismic-cli generate-dataset` and variants)
 
 Per window, per channel, processing proceeds: linear and constant detrend →
 5% Hann taper → fourth-order Butterworth bandpass (1–45 Hz, zero-phase) →
-RAM transform → 8-bit rendering → RGB stacking → PNG output.
-
-Dataset generation enforces five constraints that required several
-iterations to implement correctly.
+encoding (RAM transform, spectrogram, or both, per Section 4) → output.
+Dataset generation enforces five constraints:
 
 **Station-disjoint splits, unified across classes.** Each station is
 assigned to exactly one of train, validation, or test, and both its
 earthquake and noise windows follow that assignment. With approximately 97%
 of earthquake stations also contributing noise data, allocating the two
-classes independently — the earlier behavior — allowed nearly every station
-to appear in the training split under one label and the test split under
-the other (Section 6, defect 1).
+classes independently would let nearly every station appear in the training
+split under one label and the test split under the other.
 
 **Per-window station caps** (`--max-windows-per-station`). Enforced by
 assigning each (station, file) pair an evenly spaced window quota rather
@@ -277,24 +317,22 @@ the split with the largest relative deficit against ratio-proportional
 targets, then balances classes per split by trimming the surplus class via
 largest-remainder proportional rounding over per-file quotas. Without this
 mode, generation stops once global targets are filled and silently discards
-every remaining station, which is costly precisely where station diversity
-is already scarce.
+every remaining station — costly precisely where station diversity is
+already scarce.
 
 **Gap rejection.** Traces are merged without interpolation fill, so gaps
 remain masked; gaps are then linearly filled for filtering purposes while a
 boolean mask records which samples are synthetic. Any window whose worst
-channel exceeds 5% synthetic samples is rejected. Previously,
-`fill_value='interpolate'` converted telemetry gaps into linear ramps that
-entered training as real signal.
+channel exceeds 5% synthetic samples is rejected.
 
 **Per-station sampling rates.** Window sizing uses each station's own
-sampling rate, recorded in the manifest, rather than assuming that the
-first trace's rate in a file applies to every station represented in it.
+sampling rate, recorded in the manifest, rather than assuming the first
+trace's rate in a file applies to every station represented in it.
 
-Output is an `ImageFolder` directory tree together with `manifest.csv`
-(columns: `split, class_name, station_key, file_path, filename, fs`), one
-row per image, sufficient to reconstruct the exact source samples for any
-given image.
+Output is a manifest.csv (columns vary slightly by encoder, but always
+include `split, class_name or magnitude, station_key, file_path, filename,
+fs`) sufficient to reconstruct the exact source samples behind any given
+encoded window.
 
 ### 3.4 Baseline Standardization (`--baseline`)
 
@@ -304,18 +342,20 @@ accumulated in a streaming pass over all noise files for the given
 (station, component) pair, requiring at least 60 s of usable data — instead
 of the window's own $(\mu, \sigma)$. The intent was to give the pipeline the
 long-term amplitude memory that constitutes STA/LTA's principal advantage.
-
-This does not achieve its intended effect, for the structural reason
-established in Section 8.2.
+Section 6.2 shows this does not achieve its intended effect, for a
+structural reason tied directly to property 2.2(d).
 
 ---
 
-## 4. Model Architecture
+## 4. Model Architectures
 
-`ImprovedSeismicCNN` (`src/model/cnn_train.py`) is a ResNet-style CNN with
-Squeeze-and-Excitation blocks and a single-logit binary output.
+This section describes every model variant used in the report once,
+comprehensively, rather than introducing pieces as results are reported.
 
-### 4.1 Components
+### 4.1 `ImprovedSeismicCNN`: The Base Detector
+
+A ResNet-style CNN with Squeeze-and-Excitation blocks and a single-logit
+binary output (`src/model/cnn_train.py`).
 
 **Residual block.** For input $u$:
 
@@ -340,7 +380,7 @@ onset.
 `Linear(C_f, h)` → GELU → `Dropout(p_2)` → `Linear(h, 1)`, producing a
 single logit.
 
-### 4.2 Dimensions and Parameter Budget (64×64×3 Input, Measured)
+**Parameter budget** (64×64×3 input, measured directly):
 
 | Stage | Output (C,H,W) | Parameters |
 |---|---|---|
@@ -354,30 +394,22 @@ single logit.
 | **Total (short preset, 3 stages, head width 32)** | | **309,713** |
 
 `layer4` alone accounts for 74% of the long-preset parameter count, which
-is why the short preset omits it, reducing the model by a factor of 4.0.
+is why the short preset omits it — a factor-of-4.0 reduction.
 
-### 4.3 Training Procedure
-
-The loss function is `BCEWithLogitsLoss` applied to label-smoothed targets
+**Training procedure.** `BCEWithLogitsLoss` on label-smoothed targets
 $\tilde{y} = 0.8y + 0.1$, which bounds the confidence the model is rewarded
-for. This introduces a floor on training loss: at the optimum, per-sample
-binary cross-entropy equals the binary entropy $H(0.1) \approx 0.325$ nats,
-so smoothed training loss is not directly comparable in magnitude to
-unsmoothed validation loss. An unsmoothed training-loss diagnostic is
-therefore logged alongside the smoothed value, so the train/validation gap
-can be interpreted correctly (Section 6, defect 9).
+for and introduces a floor on training loss (at the optimum, smoothed
+per-sample cross-entropy equals $H(0.1) \approx 0.325$ nats, so it is not
+directly comparable in magnitude to unsmoothed validation loss — an
+unsmoothed training-loss diagnostic is logged alongside it). AdamW with
+gradient-norm clipping at 1.0 and mixed precision on CUDA. Checkpointing
+retains the best epoch by the monitored metric; final test evaluation always
+loads that checkpoint.
 
-The optimizer is AdamW with gradient-norm clipping at 1.0 and mixed
-precision on CUDA. Checkpointing retains the best epoch by the monitored
-metric, and final test evaluation always loads that checkpoint.
-
-### 4.4 Window-Length Presets
-
-Short-window training runs overfit the full network within approximately 10
-epochs, while 60 s runs do not. `--window-seconds` therefore selects a
-preset (12 s or shorter selects `short`); any explicitly passed flag
-overrides its preset value, and omitting the flag reproduces the original
-configuration exactly.
+**Window-length presets.** Short-window training runs overfit the full
+network within roughly 10 epochs, while 60 s runs do not, so
+`--window-seconds` selects a preset (12 s or shorter selects `short`; an
+explicit flag always overrides the preset):
 
 | | `long` (60 s) | `short` (≤ 12 s) | Rationale |
 |---|---|---|---|
@@ -389,278 +421,7 @@ configuration exactly.
 | Schedule | ReduceLROnPlateau | Cosine annealing | Plateau scheduling reacts too slowly when the performance peak arrives by roughly epoch 6 |
 | Checkpoint metric | Validation loss | Validation AUC | Validation cross-entropy degrades from calibration drift while ranking quality continues to improve; loss-based selection risks saving a pre-peak model |
 
----
-
-## 5. Baseline Method: STA/LTA on Identical Windows
-
-The baseline scores the same characteristic function as Section 3.2, taking
-$\max_k \text{CF}(k)$ over each channel and the maximum across channels as
-the window's score. Two properties make the comparison fair.
-
-- **Exact-window reconstruction.** Windows are rebuilt from the raw
-  MiniSEED data via the manifest (same file, station, and window index),
-  not resampled independently.
-- **Window-adaptive parameters.** Fixed parameters (`sta=1.0`, `lta=10.0`)
-  cannot be computed inside a 3 s or 6 s window. Parameters are instead
-  derived as $\text{LTA} = \min(10,\ T/3)$ and
-  $\text{STA} = \max(0.05,\ \text{LTA}/10)$, which reproduces the classic
-  1/10 ratio exactly at 60 s and gives 0.2/2.0 at 6 s and 0.1/1.0 at 3 s.
-
-Reported metrics are AUC — threshold-free, the appropriate comparison
-against the CNN — together with accuracy, precision, and recall at the
-Youden's-J threshold. That threshold is selected on the evaluated split,
-making it an oracle: the thresholded figures represent STA/LTA's upper
-bound rather than a like-for-like comparison against the CNN's fixed 0.5
-cutoff.
-
----
-
-## 6. Software Defects Identified and Corrected
-
-The reliability of the results in this report depends substantially on
-defects identified and corrected during development. Defects 1–5 predate
-this round of work; defects 6–13 were identified during a systematic audit
-of the full repository.
-
-| # | Defect | Mechanism | Impact |
-|---|---|---|---|
-| 1 | Cross-class station leakage | Splits were allocated independently per class; with approximately 97% station overlap, a station could appear as train-earthquake and test-noise | The model could exploit station identity as a shortcut; biased measured test performance downward, most severely where station counts are low (short windows) |
-| 2 | Station caps were ineffective | The cap was applied at file granularity; a single 300 s noise file (roughly 200 windows at 3 s) exceeded any smaller cap and was retained in full | Explains observations of only 2–4 distinct noise stations in validation/test even after capping |
-| 3 | Fixed-resolution collapse | Reshape depth $d$ was fixed regardless of window length | 3 s windows collapsed to approximately 3×3 images; corrected by deriving $d$ from the target resolution |
-| 4 | Origin-anchored short windows | Short windows were cut from origin time rather than arrival time | A meaningful fraction of nominal "earthquake" windows contained no signal |
-| 5 | Noise/earthquake station mismatch | Noise data was sourced independently of earthquake stations (approximately 47% overlap) | The model rarely observed both classes from the same instrument; a targeted downloader raised overlap to approximately 97% |
-| 6 | STA/LTA computed on raw counts (anchoring) | `classic_sta_lta` was computed on un-detrended MiniSEED counts; a large DC offset pins the characteristic function near 1 | Verified: a synthetic arrival with a $10^6$-count offset produces a maximum characteristic-function value of exactly 1.000 (no pick possible on any channel); after detrending, the pick lands within 4 samples of ground truth |
-| 7 | Arrival pick on a horizontal component | `sorted(traces)[0]` selects the E component before Z alphabetically, with a single attempt and no fallback | P-wave onsets are cleanest on the vertical component; corrected to vertical-first with fallback through remaining channels |
-| 8 | STA/LTA computed on raw counts (baseline evaluation) | The same DC-offset defect present in the baseline scorer | Baseline performance was understated at high-offset stations, plausibly explaining a measured STA/LTA AUC swing of 0.78–0.98 between data pulls |
-| 9 | Label-smoothing asymmetry | Smoothing was applied to training targets only; smoothed binary cross-entropy floors near 0.325 nats | Training and validation loss curves were not directly comparable in magnitude; validation metrics were unaffected, since they always used unsmoothed labels |
-| 10 | Threshold mismatch | `cnn_from_tensor.py` validated at a 0.60 threshold but tested at 0.50 | Validation and test accuracy were measuring different decision rules |
-| 11 | Gap interpolation treated as signal | `merge(fill_value='interpolate')` fabricates linear ramps across telemetry gaps | Synthetic data was trained on as though genuine; corrected via gap masking, with windows exceeding 5% synthetic samples rejected |
-| 12 | Single-rate assumption | The first trace's sampling rate in a file was applied to every station represented in it | Produced an incorrect physical window duration for off-rate stations; corrected to use per-station sampling rate |
-| 13 | Alphabetical channel selection | `sorted(keys)[:3]` could select `['1','2','E']` — two horizontal components and no vertical | Silent component mis-assignment; corrected to role-based selection requiring a vertical component |
-
-Two items were suspected as defects but confirmed not to be: the RAM
-mathematics as implemented transcribes the source paper correctly,
-including guards the paper itself omits (the $\varepsilon$ floor on
-$\sigma$, and clipping before the inverse cosine); and the manifest's
-window-index-to-sample mapping is exact.
-
----
-
-## 7. Initial Results (Pre-Correction Baseline)
-
-All figures in this section predate the Section 6 corrections to defects
-6–13 and are reported for continuity rather than as validated results. In
-particular, every STA/LTA figure was produced by the DC-offset-affected
-scorer, and every short-window figure by the ineffective station cap and
-the cross-class split allocation defect. These comparisons require
-re-running end-to-end before any figure in this section should be treated
-as current.
-
-### 7.1 60-Second Windows
-
-| Metric | CNN | STA/LTA |
-|---|---|---|
-| Accuracy | 89.61 % | — |
-| Recall (earthquake) | 0.963 | — |
-| Precision (earthquake) | 0.817 | — |
-| ROC-AUC | — | 0.7777 |
-
-Test set: 2,561 samples, station-disjoint. Across repeated dataset
-regenerations, the CNN's margin over STA/LTA on AUC held in the range of
-approximately 0.10–0.15 AUC points and, if anything, widened across data
-pulls. This is the headline result of the initial phase, and the one most
-likely to survive re-validation, though the baseline figure itself is
-expected to change once defect 8 is corrected, so the margin must be
-re-measured rather than assumed to hold.
-
-### 7.2 6-Second Windows
-
-Most recent pre-correction run (853 test samples):
-
-```
-Accuracy 72.80 %
-              precision  recall  f1-score  support
-   noise         0.7203  0.7727    0.7456      440
-   earthquake    0.7375  0.6804    0.7078      413
-Confusion: TN=340  FP=100  FN=132  TP=281
-```
-
-Three pipeline-side variants — per-window standardization, per-station
-baseline standardization (74.88% versus 77.99% at the time, i.e. no
-measurable improvement), and a smaller `--target-n` — all produced results
-in a 72–78% band, with the same overfitting signature: validation AUC
-peaking around epoch 4–10, followed by flattening or degradation while
-training loss continued to decrease.
-
-The convergence of three unrelated interventions on the same performance
-band motivated both the model-side audit summarized in Section 4.4 and the
-structural analysis in Section 8. At approximately 850 samples, binomial
-noise on accuracy is roughly ±1.5 percentage points; differences under
-approximately 3 percentage points between runs should not be interpreted as
-meaningful.
-
----
-
-## 8. Analysis
-
-### 8.1 Three Compounding Causes of Short-Window Underperformance
-
-1. **Geometric (Section 2.3).** At 6 s, local feature vectors are 10
-   samples long; at 3 s, 5 samples. Cosine angles between very short
-   vectors are noise-dominated, so the encoding degrades before any model
-   observes it.
-2. **Statistical.** Short-window datasets were small (approximately
-   1.5–4 k samples) and, prior to the station-cap correction, drawn from
-   very few distinct noise stations. The 1.25 M-parameter network is
-   heavily over-provisioned at this scale (roughly 300–800 parameters per
-   sample), consistent with the observed early-peak overfitting curve.
-3. **Informational (Section 8.2).** The single feature that most cleanly
-   separates a 6 s earthquake window from noise — amplitude relative to the
-   station's background level — is provably absent from the model's input.
-
-### 8.2 The RAM Transform Discards Amplitude, and Amplitude Is What STA/LTA Uses
-
-This is the most consequential finding of the first investigation phase.
-
-By property 2.2(d), the transform is exactly scale-invariant:
-$\text{RAM}(cx) = \text{RAM}(x)$. Consider what baseline standardization
-actually changes. After `clean_and_filter_1d` (detrend, demean, bandpass),
-the window mean is approximately 0, and $\mu_{\text{sta}}$ is likewise
-approximately 0, since it is accumulated from identically cleaned noise
-data. The two standardization modes therefore differ, to a close
-approximation, by a single factor $\sigma_{\text{win}}/\sigma_{\text{sta}}$
-— a pure rescaling, which RAM cancels exactly.
-
-Measured on representative windows, comparing self-standardized and
-baseline-standardized images at the same station:
-
-| Event strength | $\sigma_{\text{win}}/\sigma_{\text{noise}}$ | Mean pixel difference | Maximum |
-|---|---|---|---|
-| Weak (SNR ≈ 2) | 1.84 | 0.63 / 255 levels | 3 |
-| Strong (SNR ≈ 20) | 19.19 | 0.27 / 255 levels | 1 |
-
-The differences are sub-level, and, decisively, do not grow with the
-amplitude ratio: a 20-times stronger event produces a slightly smaller
-image difference, not a larger one. The residual difference originates from
-the near-zero post-filter mean (RAM is shift-sensitive, property 2.2(d)),
-not from amplitude.
-
-Three conclusions follow.
-
-- **The `--baseline` flag cannot deliver its intended effect.** The
-  amplitude and SNR information it is designed to preserve is eliminated by
-  the very next step in the pipeline. The earlier 6 s result (74.88% versus
-  77.99%) was not evidence against the long-term-memory hypothesis; it was
-  run-to-run noise on near-identical images. The hypothesis stated in an
-  earlier version of this report was never actually tested.
-- **This explains STA/LTA's competitiveness at short windows.** Its entire
-  discriminative signal is amplitude measured against a long-term baseline
-  — precisely the quantity the RAM pipeline structurally cannot represent.
-  The CNN is being asked to win using shape and frequency structure alone.
-- **This predicts that magnitude regression on RAM images will
-  underperform.** Local magnitude is essentially log peak amplitude with a
-  distance correction; a scale-invariant encoding removes the dependent
-  variable's principal predictor. Retrying regression with `--baseline`
-  alone would not address this limitation.
-
-### 8.3 Implication: Amplitude Belongs as an Explicit Input
-
-The indicated correction is not a further image variant, but an auxiliary
-scalar input. For each window and channel, compute
-
-$$\text{SNR}_{\log} = \log\left(\frac{\sigma_{\text{win}}}{\sigma_{\text{sta,noise}}}\right)$$
-
-store it in the manifest, and concatenate it — together with epicentral
-distance, needed to disambiguate magnitude from distance — to the pooled
-CNN features prior to the classification head. This restores the discarded
-quantity without altering the transform itself.
-
-A three-step validation order was proposed before committing further CNN
-training runs to this hypothesis:
-
-1. Confirm the near-no-op directly: generate a sample of windows with and
-   without `--baseline` and difference the resulting images (expected
-   result: at most 3 levels, per the table above).
-2. Regress magnitude on $\log(\sigma_{\text{win}}/\sigma_{\text{noise}})$
-   and $\log(\text{distance})$ alone, using a linear model or gradient-
-   boosted tree. This is effectively fitting a local-magnitude relation; if
-   it fails, the station baselines are too noisy for a CNN to inherit
-   anything useful from them.
-3. Only then train the joint (image and scalar) model — both for
-   regression and for the 6 s classifier, where this input hands the
-   network the exact feature STA/LTA has been outperforming it with.
-
-Section 10 reports the outcome of this validation order.
-
----
-
-## 9. Limitations and Recommendations (First Investigation Phase)
-
-**Immediate, blocking re-validation:**
-
-1. Regenerate all datasets and re-run every comparison under the Section 6
-   corrections, particularly the 60 s CNN-versus-STA/LTA margin, whose
-   baseline term is expected to change.
-2. Re-run 6 s generation with `--max` and a functioning per-window cap;
-   station diversity should improve substantially, since the previous mode
-   discarded every station beyond the bottleneck class target.
-3. Re-run 6 s training under the `short` preset, then run ablations
-   (`--num-stages 4` isolates the effect of regularization;
-   `--monitor loss` isolates the effect of capacity) across at least three
-   seeds before treating any single result as conclusive.
-
-**Structural:**
-
-4. Add the amplitude and distance auxiliary input described in Section 8.3
-   — the highest-expected-value change identified, and a prerequisite for
-   revisiting magnitude regression.
-5. Given property 2.2(b) — 4,096 pixels carrying 63 degrees of freedom —
-   evaluate whether feeding the $\beta$ vector directly to a one-dimensional
-   model matches the two-dimensional CNN's performance. If it does, the
-   image encoding contributes computational cost without additional
-   information, which would be an important finding in its own right.
-6. Compare combine-then-RAM (vector magnitude across components) against
-   per-channel RAM.
-7. Add a distance term to the noise-contamination check; the current
-   time-only rule discards usable noise data that is otherwise scarce.
-
-**Standing caveats:**
-
-- This investigation has not undergone external peer review.
-- The 60 s results are the strongest obtained but predate the Section 6
-  corrections; the 6 s results are preliminary.
-- Short-window noise-station diversity remains limited, so precision and
-  recall figures at short windows should not be interpreted beyond one
-  significant figure.
-- All conclusions in Section 8.2 concern this transform as specified; they
-  follow from scale invariance and would not apply to an
-  amplitude-preserving variant.
-
----
-
-## 10. Extension: The Full Dual-Channel Architecture and the Amplitude Fix
-
-Sections 1–9 address RAM encoding paired with a CNN alone — one of the two
-channels described in the source paper. This section adds the second
-channel (LSTM with multi-head self-attention over the raw signal) to
-evaluate the complete architecture, and then implements the correction
-proposed in Section 8.3. All results in this section are fresh runs on the
-corrected pipeline (post Section 6, defects 1–13); they do not carry the
-pre-correction caveat attached to Section 7.
-
-All results below share a common dataset:
-`seismic-cli generate-*-dataset --max` on 6 s arrival-anchored windows,
-71,672 windows total (35,836 per class, balanced), station-disjoint
-(82/30/40 earthquake stations and 104/35/38 noise stations across
-train/validation/test). Code is located in `data_downloader/seismic_cli/`
-(`ram_dual.py`, `ram_aux.py`, `spectrogram.py`) and `cnn_earthquake/src/`
-(`cnn_lstm.py`, `cnn_lstm_classify.py`, `cnn_lstm_classify_aux.py`,
-`cnn_lstm_stack.py`, `cnn_ram_aux.py`). As in Section 7.2, each
-configuration reflects a single train/validation/test split rather than a
-repeated measurement across seeds; differences under approximately 1–2
-points should be treated as noise rather than as an established effect.
-
-### 10.1 The Source Paper's Architecture (1D2D-EDL)
+### 4.2 The Source Paper's Dual-Channel Architecture (1D2D-EDL)
 
 Two independent channels operate on the same window and are fused:
 
@@ -672,248 +433,460 @@ with $a, b$ learned scalars. This is implemented as `LSTMAttentionBranch`
 (bidirectional LSTM, followed by `nn.MultiheadAttention` with a residual
 connection and layer normalization, matching a standard transformer block,
 followed by mean-pooling over time) and `CNNBranch` (three convolution/
-batch-norm/GELU stages with global average pooling, which is resolution-
-agnostic and therefore accepts either a square RAM image or a non-square
-spectrogram without modification). Both components reside in
+batch-norm/GELU stages with global average pooling, which is
+resolution-agnostic and therefore accepts either a square RAM image or a
+non-square spectrogram without modification). Both reside in
 `cnn_earthquake/src/cnn_lstm.py`, shared with the unrelated
-catalog-forecasting model implemented in the same file.
+catalog-forecasting model (Section 10).
 
-**A design error, identified and corrected by consulting the source paper
+**A design error, found and corrected by consulting the source paper
 directly rather than a prior summary of it.** The initial implementation
-of the 1D branch supplied the LSTM with the $(n, d)$ chunk matrix from
-which the RAM image's angle vector $\beta$ is computed, on the premise that
-both channels should observe the same reshaped data. This does not match
-the source paper. Section 3.3.1 and Figure 7 of Wang and Zhao (2025) state
-explicitly that the one-dimensional time series is normalized and then
-input directly into the LSTM model; the RAM reshape feeds only the CNN
-channel. The two channels are independent feature extractors over the same
-raw signal, not two views of a shared intermediate representation. The
-function supplying the incorrect design
-(`core.ram_matrix_and_chunks()`) was subsequently removed;
-`core.ram_matrix()` was verified to produce output byte-identical to its
-pre-refactor version on both occasions this change was made.
+fed the LSTM branch the $(n, d)$ chunk matrix the RAM image's angle vector
+$\beta$ is computed from, on the premise that both channels should observe
+the same reshaped data. This does not match the source paper: Section 3.3.1
+and Figure 7 of Wang and Zhao (2025) state that the one-dimensional time
+series is normalized and then input directly into the LSTM; the RAM reshape
+feeds only the CNN channel. The two channels are independent feature
+extractors over the same raw signal, not two views of a shared intermediate
+representation. `core.ram_matrix_and_chunks()`, which supplied the incorrect
+design, was subsequently removed; `core.ram_matrix()` was verified to
+produce output byte-identical to its pre-refactor version.
 
 One consequence of the correction carries a computational cost:
 multi-head self-attention over the full raw window is $O(m^2)$. At 100 Hz,
 a 6 s window is $m=600$ (an attention matrix of 360,000 entries — trivial);
 a 60 s window is $m=6000$ (36 million entries per attention head —
-substantially heavier, and likely to require a smaller batch size). This is
-an inherent cost of matching the source paper's design, not a defect.
+substantially heavier, likely requiring a smaller batch size). This is an
+inherent cost of matching the source paper's design, not a defect.
 
-### 10.2 Data Pipeline Additions
+### 4.3 Encoders (`data_downloader/seismic_cli/`)
 
 | Encoder | Output | Description |
 |---|---|---|
 | `RamDualEncoder` | `{seq, img}` | `seq` is the raw standardized $(m,3)$ Z/N/E waveform; `img` is the Section 2 RAM image |
-| `SpectrogramDualEncoder` | `{seq, img}` | Same `seq`; `img` is a log-power spectrogram, produced by wrapping `SpectrogramEncoder` via composition so the two implementations remain identical wherever they overlap |
-| `RamAuxEncoder` | `{img, aux}` | `img` is the RAM image; `aux` is $[\log\text{SNR}, \log\text{RMS}]$ (defined below); no LSTM branch is present |
-| `RamDualAuxEncoder` | `{seq, img, aux}` | All three components: `RamDualEncoder` plus the auxiliary vector |
+| `SpectrogramDualEncoder` | `{seq, img}` | Same `seq`; `img` is a log-power spectrogram, wrapping `SpectrogramEncoder` by composition |
+| `RamAuxEncoder` | `{img, aux}` | `img` is the RAM image; `aux` is $[\log\text{SNR}, \log\text{RMS}]$ below; no LSTM branch |
+| `RamDualAuxEncoder` | `{seq, img, aux}` | `RamDualEncoder` plus the auxiliary vector |
 
 $$\log\text{SNR} = \left\langle \log\frac{\sigma_{\text{win},c}}{\sigma_{\text{sta},c}} \right\rangle_{c \in \{Z,N,E\}}
 \qquad
 \log\text{RMS} = \left\langle \log \sigma_{\text{win},c} \right\rangle_{c \in \{Z,N,E\}}$$
 
-identical to the `log_snr` definition used in `regression.py`. The term
-$\sigma_{\text{sta},c}$ is obtained from `compute_station_noise_baselines()`
-(the mechanism described in Section 3.4), computed unconditionally in this
-context — independent of the `--baseline` flag, which controls only whether
-`seq` and `img` themselves use the station baseline or per-window
-self-standardization. This independence is deliberate: Section 8.2
-establishes that RAM's image content does not depend on which
-$(\mu,\sigma)$ pair is used for standardization, so gating `log_snr` behind
-`--baseline` would have made the correction unavailable by default with no
-offsetting benefit. Any window whose station lacks at least 60 s of usable
-noise data falls back to $\log\text{SNR} = 0$.
+$\sigma_{\text{sta},c}$ comes from `compute_station_noise_baselines()`
+(Section 3.4's mechanism), computed unconditionally here — independent of
+`--baseline`, which controls only whether `seq`/`img` themselves use the
+station baseline or per-window self-standardization. This is deliberate:
+Section 6.2 establishes that RAM's image content does not depend on which
+$(\mu,\sigma)$ pair standardizes it, so gating `log_snr` behind `--baseline`
+would make the correction unavailable by default with no offsetting benefit.
+A station lacking 60 s of usable noise data falls back to
+$\log\text{SNR} = 0$. All encoders resample every window to a nominal rate
+before standardizing, so every `seq` tensor has a fixed sample count
+regardless of a station's native sampling rate.
 
-All four encoders resample every window to a nominal rate before
-standardizing (`_resample_to`/`_fit_length`), the same correction
-`SpectrogramEncoder` required for the image alone (Section 3.3's
-per-station-rate constraint). In this context it additionally keeps every
-`seq` tensor's sample count fixed regardless of a station's native sampling
-rate, a constraint the image's fixed `target_n` did not require.
+A per-component variant of `aux` (six scalars — `log_snr`/`log_rms` for Z,
+N, E separately, instead of averaged — `RamAuxEncoderV2` /
+`RamDualAuxEncoderV2` / `SpectrogramDualAuxEncoderV2`, behind
+`--per-component-aux`) is implemented and produces the expected `(6,)`-shaped
+tensor, requiring no model-side change since `aux_dim` is read from the
+tensor shape at load time. It has not been evaluated (Section 10).
 
-### 10.3 Model Architecture Additions
+### 4.4 Fusion and Auxiliary Model Variants
 
 - **`DualChannelBinaryNet`** implements the source paper's architecture
   directly: `LSTMAttentionBranch` combined with `CNNBranch`, fused as
-  $a F_{1D}+b F_{2D}$, with a single-logit head. The `--channels`
-  argument (`all`, `1d`, `2d`) ablates either branch.
+  $a F_{1D}+b F_{2D}$, with a single-logit head. `--channels {all,1d,2d}`
+  ablates either branch.
 - **`RamAuxCNN`** uses the same ResNet-with-Squeeze-and-Excitation trunk as
-  `ImprovedSeismicCNN` (Section 4.1, reusing `ResBlock` directly), with
-  pooled features concatenated with the auxiliary vector before the
-  classification head. The `--no-aux` flag removes the concatenation only,
-  providing an architecture-matched control that isolates precisely what
-  the two auxiliary scalars contribute.
+  `ImprovedSeismicCNN`, with pooled features concatenated with the
+  auxiliary vector before the classification head. `--no-aux` removes only
+  the concatenation, giving an architecture-matched control that isolates
+  exactly what the two auxiliary scalars contribute.
 - **`DualChannelAuxBinaryNet`** extends `DualChannelBinaryNet` with an
   auxiliary branch concatenated after the $aF_{1D}+bF_{2D}$ fusion step,
-  following the same pattern already used by the unrelated catalog model's
-  `DualChannelRiskNet`. The `--channels` argument extends to
+  the same pattern used by the unrelated catalog model's
+  `DualChannelRiskNet` (Section 10). `--channels` extends to
   `{all, 1d, 2d, aux, 1d+aux, 2d+aux}`.
-- **`cnn_lstm_stack.py`** implements late-fusion stacking: given two
-  already-trained, frozen checkpoints (for example, `--channels 1d` and
-  `--channels 2d` runs), it collects their pre-sigmoid logits and fits
-  `sklearn.LogisticRegression` — one weight per branch plus a bias, in
-  logit space — on validation-set logits only, which were not observed by
-  either frozen model's own training, and evaluates on the test set. No
-  backbone retraining is involved.
-- **`GatedFusion`** (`cnn_lstm.py`, shared by both classification scripts)
-  replaces the fixed scalar pair with a per-example gate:
+- **`GatedFusion`** replaces the fixed scalar pair with a per-example gate:
   $g = \sigma(\text{MLP}([F_{1D}, F_{2D}]))$, followed by
-  $g F_{1D} + (1-g) F_{2D}$. Selected via `--fusion {linear, gate}` in both
-  `cnn_lstm_classify.py` and `cnn_lstm_classify_aux.py`; the option affects
-  only channel combinations in which both branches are active. Gate-value
-  diagnostics (mean value by true class, and by prediction correctness) are
-  reported at test time in place of the linear mode's learned-weight
-  summary.
+  $g F_{1D} + (1-g) F_{2D}$. Selected via `--fusion {linear, gate}`; affects
+  only channel combinations where both branches are active. Gate-value
+  diagnostics (mean by true class, and by prediction correctness) are
+  reported at test time.
+- **`cnn_lstm_stack.py` / `cnn_lstm_stack_aux.py`** implement late-fusion
+  stacking: given two already-trained, frozen checkpoints (for example,
+  `--channels 1d` and `--channels 2d` runs), collect their pre-sigmoid
+  logits and fit `sklearn.LogisticRegression` — one weight per branch plus a
+  bias, in logit space — on validation-set logits only, then evaluate on
+  test. No backbone retraining is involved; the `_aux` variant does the same
+  for `1d+aux`/`2d+aux` checkpoints, using TRAIN-only auxiliary
+  standardization statistics carried over from each frozen checkpoint's own
+  training run.
 
-### 10.4 Results
+### 4.5 `RegressionSeismicCNN`: The Magnitude Classifier
 
-Every row reflects 6 s windows on the same 71,672-window dataset, with a
-test set of 9,548 samples (balanced). Parameter counts are measured
-directly from each trained model, not estimated.
+Built for continuous magnitude regression (`cnn_earthquake/src/
+cnn_regression.py`) and reused, unchanged, for magnitude *classification*
+in Section 7. Shared CNN trunk (identical to `ImprovedSeismicCNN`), pooled
+features concatenated with two auxiliary scalars —
+$\log\text{SNR}$ and $\log(\text{distance}_{\text{km}})$, the classical
+local-magnitude relation's two physical predictors — before a head ending in
+a single un-squashed `nn.Linear(hidden\_dim, 1)`. `use_aux=False` reproduces
+an image-only model, the honest ablation for "does the encoded window carry
+magnitude information at all." Because the head is already a bare logit,
+reusing this architecture for binary classification (Section 7) requires no
+architectural change at all — only the loss function and reported metrics
+differ.
+
+---
+
+## 5. Baseline Method: STA/LTA
+
+### 5.1 Scoring Procedure
+
+The baseline scores the same characteristic function as Section 3.2, taking
+$\max_k \text{CF}(k)$ over each channel and the maximum across channels as
+the window's score, with two properties that make the comparison fair:
+
+- **Exact-window reconstruction.** Windows are rebuilt from the raw
+  MiniSEED data via the manifest (same file, station, and window index),
+  not resampled independently.
+- **Window-adaptive parameters.** Fixed parameters (`sta=1.0`, `lta=10.0`)
+  cannot be computed inside a 3 s or 6 s window. `derive_sta_lta_params`
+  instead computes $\text{LTA} = \min(10,\ T/3)$ and
+  $\text{STA} = \max(0.05,\ \text{LTA}/10)$, reproducing the classic 1/10
+  ratio exactly at 60 s and giving 0.2 s/2.0 s at 6 s and 0.1 s/1.0 s at 3 s.
+
+Reported metrics are AUC — threshold-free, the appropriate comparison
+against the CNN — together with accuracy, precision, and recall at the
+Youden's-J threshold, selected on the evaluated split, making those
+thresholded figures an oracle upper bound rather than a like-for-like
+comparison against the CNN's fixed 0.5 cutoff.
+
+### 5.2 A Parameterization Defect, Found While Preparing This Report
+
+`eval-sta-lta` had never actually been run to completion against any of the
+Section 6 dual-channel datasets: its filename regex matched only
+`_winNNN.png` and silently skipped every `_winNNN.pt` row the dual-channel
+encoders write, producing "0 scores computed" without an obvious error.
+Fixing the regex (Section 11, defect 14) let it run — and the first result
+was AUC 0.5093 on the 6 s anchored test set, statistically indistinguishable
+from random, which is implausible on its face given every other result in
+this report treats STA/LTA as a strong short-window competitor.
+
+The cause is a second, more consequential defect in the same function.
+`classic_sta_lta`'s characteristic function is defined as exactly 0 for its
+first `nlta` samples — no long-term average exists yet to divide by. The
+auto-derived default at 6 s gives $\text{LTA}=2.0\text{s}=200$ samples. But
+`anchor.py`'s default `pre_arrival_fraction=0.2` places the P-wave arrival at
+only 1.2 s (120 samples) into the window — *inside* that forced-zero warm-up
+region. The arrival is invisible to the characteristic function by
+construction; the reported "max ratio" instead reflects whatever the
+function sees later, after its own long-term average has already been
+contaminated by the earthquake's own elevated amplitude, which pulls the
+ratio back down toward 1. Measured directly on one representative window
+(Z-like channel, KO.KULA, event 696188): amplitude jumps from
+$\sigma\approx1313$ (pre-arrival) to $\sigma\approx13111$ (post-arrival) at
+sample 120, a clean, strong onset — yet the characteristic function is
+exactly 0.0 through sample 199, and its eventual maximum of only 1.21 occurs
+at sample 356 (3.56 s in), long after the true onset and well into the
+degraded region.
+
+This is a general problem, not specific to this one window: for *any*
+anchored window, $\text{LTA}_{\text{auto}} = T/3$ exceeds
+$f \cdot T = 0.2T$ (the pre-arrival buffer) whenever $T/3 > 0.2T$, which is
+true for every $T$ — the auto-derivation formula was simply never designed
+with arrival-anchored windows in mind. It only escapes the problem once the
+10 s cap on LTA takes over, at $T \gtrsim 50\text{s}$: at 60 s,
+$\text{LTA}=10\text{s} < 0.2\times60\text{s}=12\text{s}$, so the buffer is
+just barely sufficient — and separately, 60 s windows in this pipeline are
+sliced from origin time (Section 3.1), not arrival-anchored at all, so the
+question does not even arise there. Every *anchored* short window (3 s, 6 s,
+10 s) is affected.
+
+**Corrected measurement.** Following this project's own established
+discipline of selecting configuration on validation and reporting only the
+selected configuration's test performance, seven `(STA, LTA)` pairs with
+$\text{LTA} \in \{0.1,\dots,0.5\}\text{s}$ were scored on the 6 s dataset's
+*validation* split (never test) before any test-set number was examined:
+
+| LTA (s) | Val AUC |
+|---|---|
+| 0.10 | 0.637 |
+| 0.15 | 0.650 |
+| 0.20 | 0.801 |
+| 0.25 | 0.801 |
+| **0.30** | **0.821** |
+| 0.35 | 0.821 |
+| 0.40 | 0.810 |
+| 0.50 | 0.798 |
+
+$\text{LTA}=0.3\text{s}$, $\text{STA}=0.03\text{s}$ (val AUC 0.8212) was
+selected and evaluated once on test:
+
+$$\textbf{STA/LTA, corrected: Test AUC 0.8194}, \quad \text{accuracy } 74.60\%,\ \text{precision } 73.90\%,\ \text{recall } 76.08\%\ \text{(oracle threshold)}$$
+
+against the broken default's Test AUC 0.5093 — a difference of 0.31 AUC
+between a working and a silently broken baseline on identical data. The
+formula itself was left unchanged for un-anchored windows (Section 11,
+defect 14 discussion) rather than auto-corrected, since 60 s results
+depend on it reproducing its historical 1.0/10.0 output exactly; the
+function now prints a runtime warning instead when its derived LTA exceeds
+15% of the window, pointing at explicit `--sta-seconds`/`--lta-seconds`
+overrides. Section 6.1 places this corrected number in the full
+detection-results table.
+
+---
+
+## 6. Results: Detection (Earthquake vs. Noise)
+
+All results in this section share a common dataset: `seismic-cli
+generate-*-dataset --max` on 6 s arrival-anchored windows, 71,672 windows
+total (35,836 per class, balanced), station-disjoint (82/30/40 earthquake
+stations and 104/35/38 noise stations across train/validation/test), built
+under every correction in Section 11. Code is in
+`data_downloader/seismic_cli/` (`ram_dual.py`, `ram_aux.py`,
+`spectrogram.py`, `eval_baseline.py`) and `cnn_earthquake/src/`
+(`cnn_lstm.py`, `cnn_lstm_classify.py`, `cnn_lstm_classify_aux.py`,
+`cnn_lstm_stack.py`, `cnn_lstm_stack_aux.py`, `cnn_ram_aux.py`). Unless
+stated otherwise (Section 6.6), every configuration reflects a single
+train/validation/test split at one random seed; differences under
+approximately 1–2 points should be treated as noise rather than an
+established effect.
+
+An earlier phase of this investigation trained a plain RAM CNN at 60 s and
+6 s before the corrections in Section 11 were made (89.61% accuracy /
+STA/LTA AUC 0.7777 at 60 s; a 72–78% accuracy band across several 6 s
+variants). Those runs predate fixes to cross-class station leakage, an
+ineffective station cap, origin-anchored short windows, and the STA/LTA
+DC-offset defect (Section 11, defects 1, 2, 4, 8), and are superseded by
+this section; 60 s has not been re-run under the corrected pipeline, so no
+current 60 s figure is reported. The three unrelated 6 s variants converging
+on the same 72–78% band did, however, motivate both the model-capacity audit
+in Section 4.1 and the structural analysis in Section 6.2.
+
+### 6.1 Headline Comparison
 
 | Model | Parameters | Test AUC | MCC | Accuracy |
 |---|---|---|---|---|
-| Spectrogram CNN only (`2d`) | 115,459 | **0.9793** | **0.8666** | **93.28 %** |
+| **Spectrogram CNN only (`2d`)** | 115,459 | **0.9793** | **0.8666** | **93.28 %** |
 | Spectrogram-dual, fused, linear (`all`) | 182,563 | 0.9646 | 0.8122 | 90.61 % |
 | RAM-dual + aux, fused, linear (`all`) | 182,759 | 0.9514 | 0.7790 | 88.95 % |
 | RAM-dual + aux, no LSTM branch (`2d+aux`) | 115,655 | 0.9468 | 0.7775 | 88.84 % |
 | RAM + aux, no dual architecture (`use_aux=True`) | 309,777 | 0.9230 | 0.7018 | 84.79 % |
 | RAM-dual, raw waveform only (`1d`) | 76,707 | 0.9216 | 0.6849 | 84.22 % |
 | RAM-dual, fused, linear, no aux (`all`) | 182,563 | 0.9144 | 0.6042 | 79.57 % |
-| RAM CNN only, no aux (`use_aux=False`) | 309,713 | 0.8356 | 0.5339 | 76.70 % |
 | RAM-dual, RAM image only (`2d`) | 115,459 | 0.8408 | 0.5288 | 76.42 % |
+| RAM CNN only, no aux (`use_aux=False`) | 309,713 | 0.8356 | 0.5339 | 76.70 % |
+| **STA/LTA, correctly parameterized (Section 5.2)** | — | **0.8194** | — | 74.60 % |
+| STA/LTA, library default (broken, Section 5.2) | — | 0.5093 | — | 56.88 % |
 
-Late-fusion stacking (Section 10.3), fit on frozen 1d/2d logits:
+**Every CNN configuration tested beats a correctly-parameterized STA/LTA
+baseline on this dataset, including the weakest one** (plain RAM, no
+amplitude correction, 0.8356 vs. 0.8194). This is a materially different,
+and more clear-cut, headline finding than the pre-correction phase's — where
+STA/LTA's competitiveness at short windows was a live open question — because
+that question rested partly on a baseline implementation that, it turns out,
+was itself badly broken. The margin is modest against the weakest CNN
+configurations and substantial (0.16 AUC) against the best one.
 
-| Base checkpoints | 1d alone | 2d alone | Naive average (logits) | Stacked |
-|---|---|---|---|---|
-| RAM-dual | AUC 0.9229, MCC 0.688 | AUC 0.8408, MCC 0.530 | AUC 0.9136, MCC 0.692 | AUC 0.9203, MCC 0.688, accuracy 84.31 % |
-| Spectrogram-dual | AUC 0.9229, MCC 0.688 | AUC 0.9793, MCC 0.867 | AUC 0.9697, MCC 0.866 | AUC 0.9743, MCC 0.871, accuracy 93.54 % |
+### 6.2 Why RAM Underperforms at Short Windows
 
-Learned linear-fusion weights $(a,b)$, for reference: RAM-dual without aux,
-$(0.996, 0.829)$; spectrogram-dual, $(0.749, 1.051)$; RAM-dual with aux,
-$(0.499, 0.354)$. The last pair is markedly more balanced in relative terms
-once both branches carry usable information, rather than one weight sitting
-near 1 with the other trailing.
+Three causes compound:
 
-### 10.5 Analysis
+1. **Geometric (Section 2.3).** At 6 s, local feature vectors are 10
+   samples long; at 3 s, 5 samples. Cosine angles between very short vectors
+   are noise-dominated, so the encoding degrades before any model observes
+   it.
+2. **Statistical.** Short-window datasets were small in early runs
+   (roughly 1.5–4k samples) and, before the station-cap fix, drawn from very
+   few distinct noise stations. A 1.25M-parameter network is heavily
+   over-provisioned at that scale (roughly 300–800 parameters per sample),
+   consistent with the early-peak overfitting observed then.
+3. **Informational — the most consequential finding of the first
+   investigation phase.** The single feature that most cleanly separates a
+   short earthquake window from noise — amplitude relative to the station's
+   background level — is provably absent from the model's input, by property
+   2.2(d).
 
-**10.5.1 The source paper's fixed linear fusion underperformed the best
-single branch, on two independent representations, before the amplitude
-correction.** With RAM as the 2D channel, the raw-waveform branch alone
-(AUC 0.9216) outperformed the fused model (0.9144). With a spectrogram as
-the 2D channel, the image branch alone (0.9793) outperformed the fused
-model (0.9646). A fixed pair of scalars, trained jointly with both
-branches, cannot suppress a weaker branch on the specific examples where it
-is incorrect, and joint training can allow a noisy branch to degrade the
-stronger branch's own learned representation. This pattern reproduced on
-two independent 2D representations, which is why it is treated as a
-property of the fusion mechanism rather than of either individual branch.
+Consider what baseline standardization (Section 3.4) actually changes.
+After `clean_and_filter_1d` (detrend, demean, bandpass), the window mean is
+approximately 0, and $\mu_{\text{sta}}$ is likewise approximately 0, since it
+is accumulated from identically cleaned noise data. The two standardization
+modes therefore differ, to a close approximation, by a single factor
+$\sigma_{\text{win}}/\sigma_{\text{sta}}$ — a pure rescaling, which RAM
+cancels exactly. Measured on representative windows, comparing
+self-standardized and baseline-standardized images at the same station:
 
-**10.5.2 Late-fusion stacking recovers what joint fusion lost, without
-modifying either branch.** Freezing the same two checkpoints and fitting a
-two-input logistic regression on their logits (Section 10.3) matched or
-improved on the joint-fusion result in both cases tested. On RAM-dual, the
-stacked result lands within measurement noise of the best single branch
-(0.9203 versus the 1d-alone figure of 0.9229) rather than below it. On
-spectrogram-dual, stacking outperforms both single branches outright (0.9743
-AUC, 0.871 MCC, versus 2d-alone's 0.9793 AUC and 0.867 MCC); stacking's AUC
-is marginally below the 2d-alone figure even though its MCC and accuracy
-are higher, indicating a small trade of ranking quality for a better
-decision at the fixed 0.5 threshold, a difference within this dataset's
-established noise floor. This result confirms that the fusion problem
-identified in 10.5.1 originates in the joint-training mechanism rather than
-in an inherent limitation of combining the two branches.
+| Event strength | $\sigma_{\text{win}}/\sigma_{\text{noise}}$ | Mean pixel difference | Maximum |
+|---|---|---|---|
+| Weak (SNR ≈ 2) | 1.84 | 0.63 / 255 levels | 3 |
+| Strong (SNR ≈ 20) | 19.19 | 0.27 / 255 levels | 1 |
 
-**10.5.3 The amplitude auxiliary input is the largest single effect
-measured in this investigation, and confirms the prediction made in
-Sections 8.2 and 8.3 quantitatively.** In an architecture-matched,
-single-variable comparison (identical `ImprovedSeismicCNN`-derived trunk,
-differing only in whether the auxiliary concatenation is present):
+The differences are sub-level and, decisively, do not grow with the
+amplitude ratio — a 20-times stronger event produces a slightly smaller
+image difference, not a larger one. The residual originates from the
+near-zero post-filter mean (RAM is shift-sensitive, property 2.2(d)), not
+from amplitude.
+
+Two conclusions follow. First, **`--baseline` cannot deliver its intended
+effect** — the amplitude information it is designed to preserve is
+eliminated by the very next pipeline step. Second, **this explains STA/LTA's
+competitiveness**: its entire discriminative signal is amplitude measured
+against a long-term baseline, precisely the quantity RAM structurally cannot
+represent. Section 6.3 develops the fix.
+
+### 6.3 The Amplitude Auxiliary Input
+
+The correction is not a further image variant but an auxiliary scalar input
+(Section 4.3's `aux`), concatenated to pooled CNN features before the
+classification head, restoring the discarded quantity without altering the
+transform itself.
+
+**On the RAM classifier alone, this is the single largest effect measured in
+this entire investigation.** Architecture-matched, single-variable
+comparison (`RamAuxCNN`, differing only in whether `aux` is concatenated):
 
 $$\text{AUC: } 0.8356 \to 0.9230 \quad(+0.0874) \qquad \text{MCC: } 0.5339 \to 0.7018 \quad (+0.1679) \qquad \text{Accuracy: } 76.70\% \to 84.79\% \quad (+8.09\text{ pp})$$
 
 Two scalars, computed at negligible cost from data the pipeline already
 possessed, closed most of the gap between a plain RAM classifier and
-STA/LTA-competitive performance. This correction also incidentally resolved
-the fusion pathology identified in 10.5.1: the amplitude-augmented dual
-model (`all`, AUC 0.9514) outperforms every single-branch RAM alternative,
-which the equivalent model without the auxiliary input failed to do. The
-`2d+aux` ablation (no LSTM branch present, AUC 0.9468) lands almost exactly
-on the full fused model's result, indicating that the amplitude correction
-accounts for nearly all of the improvement, and that the LSTM branch
-contributes only a small increment beyond it, rather than being structurally
-necessary to compensate for what the RAM image cannot represent.
+STA/LTA-competitive performance (and, per Section 6.1, comfortably past it).
 
-**10.5.4 Spectrograms remain the stronger 2D representation, with or
-without the amplitude correction.** Spectrogram-2D-only (0.9793 AUC)
-outperforms RAM-plus-amplitude-2D-only (0.9468 AUC) by a substantial
-margin. This is expected and does not contradict 10.5.3:
-`--normalize station` spectrograms preserve amplitude as a function of
-frequency and time, a considerably richer representation than two collapsed
-scalars appended after the fact. The amplitude correction makes RAM
-competitive with the raw-waveform branch and with its own pre-correction
-performance; it does not make RAM's 2D representation as informative as a
-spectrogram's. Where RAM images are specifically required — for example,
-for compatibility with the source paper's method — pairing them with the
-amplitude auxiliary input is a substantial, low-cost improvement. Where the
-2D representation is an open choice, spectrograms remain the stronger
-option on this dataset.
+**On the raw-waveform LSTM branch, the same fix helps almost as much, for
+the same underlying reason.** `--channels 1d+aux` (raw standardized
+waveform plus `aux`, no 2D branch):
 
-**10.5.5 Gated fusion produces mixed results across three tested
-configurations, and does not support a single unifying explanation on the
-evidence available.** `GatedFusion` was evaluated against linear fusion on
-three configurations: spectrogram-dual, RAM-dual without the amplitude
-input, and RAM-dual with it.
+$$\text{Test AUC: } 0.9216 \to 0.9501 \quad(+0.0285) \qquad \text{MCC: } 0.6849 \to 0.7675 \quad(+0.0826) \qquad \text{Accuracy: } 84.22\% \to 88.37\% \quad(+4.15\text{ pp})$$
+
+The raw waveform is standardized before entering the LSTM, which removes
+absolute amplitude exactly as RAM's own internal standardization does — the
+branch is scale-blind for the same structural reason the RAM image is, and
+benefits from the same correction. Running the identical `1d+aux`
+configuration against the spectrogram-plus-amplitude dataset (which shares
+the same `seq`/`aux` computation and never reads `img`) reproduces this
+result to four decimal places (88.37% / 0.9501 / 0.7675) — a pipeline
+correctness check, not a second independent measurement.
+
+**On the spectrogram-based 2D branch, the fix does not repeat its RAM-side
+effect, and mildly hurts in isolation.**
+
+| Configuration | Test AUC | MCC | Accuracy |
+|---|---|---|---|
+| Spectrogram 2D only, no aux | **0.9793** | **0.8666** | **93.28 %** |
+| Spectrogram + aux, no LSTM branch (`2d+aux`) | 0.9749 | 0.8626 | 93.02 % |
+
+A station-normalized spectrogram already encodes amplitude as a function of
+time and frequency; appending two collapsed, redundant scalars adds
+estimation noise without adding information the model did not already have.
+Where the RAM result showed the auxiliary input matters when the 2D
+representation is scale-invariant, this shows the converse: it does not
+matter, and can mildly hurt, when the 2D representation already carries the
+same information in richer form. This is also why the amplitude-corrected
+RAM 2D branch (0.9468 AUC, `2d+aux`) still falls well short of the plain
+spectrogram (0.9793): the correction restores what RAM structurally
+discarded, but two collapsed scalars are a much thinner representation than
+a station-normalized spectrogram's amplitude-as-function-of-time-and-frequency.
+Where RAM images are specifically required (for example, to match the
+source paper's method), pairing them with the amplitude auxiliary input is
+a substantial, low-cost improvement; where the 2D representation is an open
+choice, spectrograms remain the stronger option on this dataset.
+
+A seed-repeated check of the aux effect on the *fused* spectrogram-dual
+model changes this section's original single-seed conclusion; see Section
+6.6.
+
+### 6.4 Dual-Channel Fusion Mechanisms
+
+**Linear fusion underperforms the best single branch, on two independent 2D
+representations.** With RAM: the raw-waveform branch alone (AUC 0.9216)
+outperforms the fused model (0.9144). With a spectrogram: the image branch
+alone (0.9793) outperforms the fused model (0.9646). A fixed pair of
+scalars, trained jointly with both branches, cannot suppress a weaker branch
+on the specific examples where it is wrong, and joint training can let a
+noisy branch degrade the stronger branch's own learned representation. This
+reproduced on two independent 2D representations, so it is treated as a
+property of the fusion mechanism, not of either branch.
+
+**Late-fusion stacking recovers what joint fusion lost, without modifying
+either branch.** Freezing the same two checkpoints and fitting a two-input
+logistic regression on their logits matched or improved on joint fusion in
+both cases:
+
+| Base checkpoints | 1d alone | 2d alone | Naive average (logits) | Stacked |
+|---|---|---|---|---|
+| RAM-dual | AUC 0.9229, MCC 0.688 | AUC 0.8408, MCC 0.530 | AUC 0.9136, MCC 0.692 | AUC 0.9203, MCC 0.688, 84.31 % |
+| Spectrogram-dual | AUC 0.9229, MCC 0.688 | AUC 0.9793, MCC 0.867 | AUC 0.9697, MCC 0.866 | AUC 0.9743, MCC 0.871, 93.54 % |
+
+On RAM-dual, stacking lands within measurement noise of the best single
+branch rather than below it. On spectrogram-dual, stacking outright beats
+both single branches (0.9743 AUC, 0.871 MCC vs. 2d-alone's 0.9793 AUC,
+0.867 MCC — AUC marginally below 2d-alone even as MCC and accuracy are
+higher, a small trade of ranking quality for a better fixed-threshold
+decision, within this dataset's noise floor). This confirms the fusion
+problem originates in joint training, not in an inherent limitation of
+combining the two branches.
+
+**Applied to the amplitude-augmented branches, stacking beats both linear
+and gated joint fusion, on both datasets:**
+
+| Dataset | 1d+aux alone | 2d+aux alone | Stacked | Linear fusion (`all`) | Gated fusion (`all`) |
+|---|---|---|---|---|---|
+| RAM+aux | 0.9505 / 0.768 / 88.39 % | 0.9468 / 0.778 / 88.84 % | **0.9557 / 0.781 / 89.07 %** | 0.9514 / 0.779 / 88.95 % | 0.9487 / 0.744 / 87.12 % |
+| Spectrogram+aux | 0.9505 / 0.768 / 88.39 % | 0.9749 / 0.863 / 93.02 % | **0.9758 / 0.868 / 93.37 %** | 0.9733 / 0.847 / 92.31 % | 0.9716 / 0.836 / 91.80 % |
+
+(cells are AUC / MCC / accuracy). Stacking on RAM+aux is a clear win over
+every alternative on every metric; on spectrogram+aux it is the best fusion
+mechanism tested but still does not surpass the plain `2d`-alone, no-aux
+ceiling (0.9793 AUC) — no fusion mechanism has closed that gap.
+
+**Gated fusion is mixed across representations, and does not compose with
+the amplitude fix.**
 
 | Configuration | Linear fusion | Gated fusion | Best single branch | Mean gate $g$ |
 |---|---|---|---|---|
-| Spectrogram-dual | AUC 0.9646, MCC 0.812, 90.61 % | **AUC 0.9761, MCC 0.850, 92.51 %** | 2d-alone: 0.9793 / 0.867 / 93.28 % | 0.169 |
-| RAM-dual, no aux | AUC 0.9144, MCC 0.604, 79.57 % | AUC 0.9071, MCC 0.637, 81.68 % | 1d-alone: 0.9216 / 0.685 / 84.22 % | 0.719 |
-| RAM-dual + aux | AUC 0.9514, MCC 0.779, 88.95 % | AUC 0.9487, MCC 0.744, 87.12 % | 2d+aux-alone: 0.9468 / 0.778 / 88.84 % | 0.487 |
+| Spectrogram-dual | 0.9646 / 0.812 / 90.61 % | **0.9761 / 0.850 / 92.51 %** | 2d-alone: 0.9793 / 0.867 / 93.28 % | 0.169 |
+| RAM-dual, no aux | 0.9144 / 0.604 / 79.57 % | 0.9071 / 0.637 / 81.68 % | 1d-alone: 0.9216 / 0.685 / 84.22 % | 0.719 |
+| RAM-dual + aux | 0.9514 / 0.779 / 88.95 % | 0.9487 / 0.744 / 87.12 % | 2d+aux-alone: 0.9468 / 0.778 / 88.84 % | 0.487 |
 
-The outcome differs by metric as well as by configuration. On
-spectrogram-dual, gated fusion improves all three metrics over linear
-fusion, closing most of the gap to the best single branch without the
-separate frozen-checkpoint procedure stacking requires. On RAM-dual without
-the amplitude input, gated fusion is *mixed*: AUC decreases (0.9144 →
-0.9071) while MCC and accuracy both increase (0.604 → 0.637; 79.57% →
-81.68%), indicating a shift in decision calibration at the fixed 0.5
-threshold rather than a uniform change in ranking quality. On RAM-dual with
-the amplitude input, gated fusion is uniformly worse across all three
-metrics.
+On spectrogram-dual, gated fusion improves all three metrics. On RAM-dual
+without aux, it is mixed: AUC drops (0.9144→0.9071) while MCC and accuracy
+both rise (0.604→0.637; 79.57%→81.68%), a shift in decision calibration
+rather than a uniform ranking change. On RAM-dual with aux, gated fusion is
+uniformly worse. An initial hypothesis — that gating helps when branches are
+genuinely complementary and can hurt when one branch dominates — does not
+survive the third configuration: the branch gap on RAM-dual without aux
+(0.081) is larger than on spectrogram-dual (0.058), yet gating still
+underperformed there. The more accurate statement is that gated fusion
+improved results in exactly one of three tested configurations — the
+spectrogram-based one — and modestly degraded results in the two RAM-based
+ones, with no established explanation distinguishing genuine representation
+dependence from noisy gate estimation on a comparatively harder branch pair.
+**Gated fusion is not a default improvement over linear fusion and should be
+measured directly for any new branch pairing.**
 
-An initial hypothesis, formed after the first two configurations were
-measured, proposed that gating helps when branches are genuinely
-complementary and disagree meaningfully on a per-example basis, and can hurt
-when one branch already dominates. The third configuration does not cleanly
-support this account: the performance gap between branches on RAM-dual
-without aux (0.9216 versus 0.8408, a difference of 0.081) is larger than on
-spectrogram-dual (0.9793 versus 0.9216, a difference of 0.058), yet gating
-still underperformed linear fusion in the RAM-dual case. The more accurate
-statement, on the evidence collected, is that gated fusion improved results
-in exactly one of three tested configurations — the spectrogram-based one —
-and modestly degraded results in the two RAM-based configurations. Whether
-this reflects a property of the RAM representation specifically, an
-estimation difficulty in learning the gate function reliably from a
-comparatively noisier branch pair, or an artifact of single-seed
-measurement, is not established by the data available and should not be
-asserted. **Gated fusion is not a default improvement over linear fusion,
-and its benefit or cost should be measured directly for any new branch
-pairing rather than assumed from this result.**
+Combining gated fusion with the amplitude input (spectrogram-dual)
+demonstrates this concretely: the result (AUC 0.9716) is worse than either
+intervention alone (gated-without-aux 0.9761; linear-with-aux 0.9733).
+Independently-validated improvements did not compose here; the three
+mechanisms rank, by AUC, stacked (0.9758) > linear (0.9733) > gated (0.9716)
+on the amplitude-augmented model — the reverse of gated fusion's ranking on
+the same 2D representation without aux, where it was best.
 
-**10.5.6 A hyperparameter sweep of the RAM-plus-amplitude classifier
-(`cnn_ram_aux.py`) produced no distinguishable improvement over the
-established defaults.** Six configurations were trained: the established
-default (learning rate 2e-4, weight decay 3e-2, dropout 0.6/0.4, head width
-32, three residual stages), two alternative learning rates (1e-4, 3e-4), a
-lower weight decay (1e-2), a wider head alone (width 64, three stages), and
-the original "long" preset's full capacity (four stages, dropout 0.5/0.3,
-head width 64 — approximately four times the parameter count). Selection
-was made on validation AUC, decided before training began, specifically to
-avoid selecting a configuration by its test-set performance across multiple
-candidates.
+Learned linear-fusion weights $(a,b)$, for reference: RAM-dual without aux,
+$(0.996, 0.829)$; spectrogram-dual, $(0.749, 1.051)$; RAM-dual with aux,
+$(0.499, 0.354)$ — markedly more balanced once both branches carry usable
+information, rather than one weight sitting near 1 with the other trailing.
+
+### 6.5 Hyperparameter Sensitivity
+
+Two sweeps, each selected on validation AUC before training began (never on
+test), specifically to avoid selecting a configuration by its test
+performance across candidates.
+
+**RAM-plus-amplitude classifier** (`cnn_ram_aux.py`), six configurations —
+the default, two alternative learning rates, lower weight decay, a wider
+head, and the original 4×-capacity preset:
 
 | Configuration | Parameters | Validation AUC | Test AUC | Test MCC | Test accuracy |
 |---|---|---|---|---|---|
@@ -924,92 +897,18 @@ candidates.
 | Four stages, wider head (4× capacity) | 1,249,425 | 0.9287 | 0.9302 | 0.7235 | 86.13 % |
 | Wider head only (three stages) | 314,001 | 0.9268 | 0.9270 | 0.7054 | 85.17 % |
 
-All six configurations fall within a validation AUC band of
-0.9268–0.9307 — a spread of 0.0039, well inside the approximately 1–2 point
-noise floor already established for single-seed measurements on this
-dataset (Section 9). The nominal winner by the pre-specified selection rule
-(learning rate 3e-4, val AUC 0.9307) exceeds the default by 0.0005, which is
-not distinguishable from noise and should not be reported as a genuine
-improvement. One result is worth noting for methodological reasons rather
-than performance: the four-times-larger configuration scored *lower* on
-validation AUC (0.9287) than the 310,000-parameter default despite scoring
-higher on test AUC (0.9302) — a direct illustration of why selection was
-fixed to validation performance before training began, and further evidence
-that this task is limited by available information rather than by model
-capacity, consistent with the diagnosis in Section 8.1. **On the evidence
-gathered, hyperparameter tuning is not a productive direction for this
-model; the established default configuration should be retained.**
+All six fall within a validation-AUC band of 0.9268–0.9307 (spread 0.0039),
+inside the ~1–2 point single-seed noise floor. The nominal winner by the
+pre-specified rule beats the default by 0.0005 — not distinguishable from
+noise. Worth noting for methodological reasons: the 4×-capacity
+configuration scored *lower* on validation (0.9287) than the 310k-parameter
+default despite scoring *higher* on test (0.9302) — a direct illustration of
+why selection was fixed to validation before training, and evidence this
+task is limited by available information rather than model capacity
+(Section 6.2).
 
-**10.5.7 The amplitude auxiliary input, extended to the spectrogram-based
-model, does not repeat its RAM-side effect — and mildly hurts the 2D branch
-in isolation.** `SpectrogramDualAuxEncoder` (Section 10.2) pairs the
-spectrogram-dual dataset with the same `[log_snr, log_rms]` vector used for
-RAM. Results, alongside the existing no-aux spectrogram figures for
-comparison:
-
-| Configuration | Test AUC | MCC | Accuracy |
-|---|---|---|---|
-| Spectrogram 2D only, no aux | **0.9793** | **0.8666** | **93.28 %** |
-| Spectrogram + aux, no LSTM branch (`2d+aux`) | 0.9749 | 0.8626 | 93.02 % |
-| Spectrogram-dual, no aux, gated fusion | 0.9761 | 0.8501 | 92.51 % |
-| Spectrogram-dual + aux, fused, linear (`all`) | 0.9733 | 0.8465 | 92.31 % |
-| Spectrogram-dual, no aux, fused, linear | 0.9646 | 0.8122 | 90.61 % |
-
-Two results follow directly. First, adding the auxiliary input to the 2D
-branch alone makes it *worse*, not better: `2d+aux` (0.9749) scores below
-plain `2d` (0.9793), a decrease of 0.0044. This is the reverse of the RAM
-result (Section 10.5.3, an increase of 0.0874) and is consistent with the
-explanation offered in Section 10.5.4: a station-normalized spectrogram
-already encodes amplitude as a function of time and frequency, so appending
-two collapsed, redundant scalars adds estimation noise without adding
-information the model did not already have access to. Where Section 10.5.3
-demonstrated that the auxiliary input matters when the 2D representation is
-scale-invariant, this result demonstrates the converse: it does not matter,
-and can mildly hurt, when the 2D representation already carries the same
-information in richer form.
-
-Second, the auxiliary input still improves the **fused** model relative to
-its own no-aux baseline (0.9646 → 0.9733, +0.0087), for a reason similar to
-why gated fusion helped in the same setting (Section 10.5.5): both
-interventions reduce how much a naive linear combination is dragged down by
-a comparatively weaker branch, whether by learning to trust the stronger
-branch more or by handing the weaker branch's fusion partner information it
-lacked. Neither intervention, alone or combined, reaches the ceiling
-established by `2d` alone.
-
-**10.5.8 The amplitude auxiliary input helps the raw-waveform branch nearly
-as much as it helps the RAM branch.** `--channels 1d+aux` (the raw
-standardized waveform plus `[log_snr, log_rms]`, with no 2D branch present
-at all) was trained on the RAM-plus-amplitude dataset:
-
-$$\text{Test AUC: } 0.9216 \to 0.9501 \quad(+0.0285) \qquad \text{MCC: } 0.6849 \to 0.7675 \quad(+0.0826) \qquad \text{Accuracy: } 84.22\% \to 88.37\% \quad(+4.15\text{ pp})$$
-
-comparing against the no-aux `1d`-alone figure from Section 10.4. This is
-consistent with the same underlying mechanism identified in Section 8.2: the
-raw waveform is standardized before entering the LSTM (Section 10.1), which
-removes absolute amplitude exactly as RAM's own internal standardization
-does, so the raw-waveform branch is scale-blind for the same structural
-reason the RAM image is, and benefits from the same correction. With the
-auxiliary input present, `1d+aux` (0.9501 AUC) is closer to the full fused
-model (0.9514, Section 10.4) than `2d+aux` is (0.9468), and closer than
-either branch was to the fused model without the auxiliary input (Section
-10.5.1). One data point confirms this is dataset-independent by
-construction rather than by measurement: running the identical `1d+aux`
-configuration against the spectrogram-plus-amplitude dataset produced
-test figures identical to four decimal places (accuracy 88.37%, AUC 0.9501,
-MCC 0.7675), because that ablation never reads the `img` tensor and both
-encoders compute `seq` and `aux` with the same formula — a useful check on
-the pipeline's correctness, not a second independent measurement.
-
-**10.5.9 A hyperparameter sweep of `LSTMAttentionBranch` itself (depth,
-attention heads, hidden width) produced no distinguishable improvement,
-and illustrates the validation-versus-test divergence risk more sharply
-than the RAM CNN sweep did.** Five configurations were trained on
-`1d+aux` (isolating the LSTM branch, since the 2D branch is absent and the
-auxiliary input is held fixed): the established default (one LSTM layer,
-four attention heads, hidden width 48), two head counts (2, 8), a deeper
-LSTM (two layers), and a wider hidden state (64). Selection was fixed to
-validation AUC before training, as in Section 10.5.6.
+**`LSTMAttentionBranch` itself** (depth, attention heads, hidden width),
+five configurations, isolated via `1d+aux`:
 
 | Configuration | Parameters | Validation AUC | Test AUC | Test MCC | Test accuracy |
 |---|---|---|---|---|---|
@@ -1019,63 +918,26 @@ validation AUC before training, as in Section 10.5.6.
 | Hidden width 64 | 123,815 | **0.9588** | 0.9488 | 0.7508 | 87.52 % |
 | 2 LSTM layers | 132,967 | 0.9565 | 0.9484 | 0.7486 | 87.33 % |
 
-All five configurations fall within a validation AUC band of 0.9565–0.9588
-(a spread of 0.0023, tighter even than Section 10.5.6's RAM CNN sweep), again
-well inside the established single-seed noise floor. The nominal winner by
-the pre-specified rule (hidden width 64, val AUC 0.9588) is not a
-meaningful improvement over the default. More notably, the default
-configuration has the *best* test-set MCC and accuracy of all five
-candidates despite ranking fourth of five on validation AUC — every
-configuration the sweep would have nominally preferred by its own selection
-rule scores worse on held-out test than the untouched default across MCC
-and accuracy. This is a sharper illustration of the same point Section
-10.5.6 made with the RAM CNN sweep: validation-based selection is not a
-guarantee against picking a configuration that generalizes worse, only a
-discipline against choosing one by looking at test results directly.
-**Neither the RAM CNN's hyperparameters (Section 10.5.6) nor the LSTM
-branch's own hyperparameters reward tuning on this dataset; the established
-defaults should be retained in both cases.**
+All five fall within an even tighter validation band (0.9565–0.9588, spread
+0.0023). More notably, **the default has the best test MCC and accuracy of
+all five candidates despite ranking fourth of five on validation AUC** —
+every configuration this sweep would have nominally preferred by its own
+selection rule scores worse on held-out test across MCC and accuracy. This
+sharpens the RAM-CNN sweep's point: validation-based selection is a
+discipline against choosing by looking at test results directly, not a
+guarantee against picking a configuration that generalizes worse. **Neither
+sweep found a productive direction for tuning; the established defaults
+should be retained in both cases**, which narrows the plausible location of
+any remaining performance gap toward feature representation rather than
+architecture search on either branch.
 
-**10.5.10 Late-fusion stacking of the amplitude-augmented branches beats
-both linear and gated joint fusion, on both datasets.** `cnn_lstm_stack_aux.py`
-(Section 10.3) applies the Section 10.4 stacking procedure to frozen
-`1d+aux`/`2d+aux` checkpoints instead of the plain ones:
+### 6.6 Statistical Reliability: Seed-Repeated Verification
 
-| Dataset | 1d+aux alone | 2d+aux alone | Stacked | Linear fusion (`all`) | Gated fusion (`all`) |
-|---|---|---|---|---|---|
-| RAM+aux | AUC 0.9505, MCC 0.768, 88.39 % | AUC 0.9468, MCC 0.778, 88.84 % | **AUC 0.9557, MCC 0.781, 89.07 %** | AUC 0.9514, MCC 0.779, 88.95 % | AUC 0.9487, MCC 0.744, 87.12 % |
-| Spectrogram+aux | AUC 0.9505, MCC 0.768, 88.39 % | AUC 0.9749, MCC 0.863, 93.02 % | **AUC 0.9758, MCC 0.868, 93.37 %** | AUC 0.9733, MCC 0.847, 92.31 % | AUC 0.9716, MCC 0.836, 91.80 % |
+Two close-margin claims from Sections 6.3–6.4 were re-run at two additional
+seeds (1 and 2, alongside the original 42) to check whether they survive
+repetition.
 
-On both datasets, stacking is the best fusion mechanism tested among the
-three (linear, gated, stacked) once the amplitude input is present —
-consistent with Section 10.5.2's finding on the non-aux branches, where
-stacking also matched or beat joint fusion. Stacking on RAM+aux is a clear
-win over every alternative on every metric. Stacking on spectrogram+aux is
-the best fusion mechanism but does not surpass the plain `2d`-alone,
-no-aux ceiling (0.9793 AUC, Section 10.4) — no fusion mechanism has yet
-closed that gap.
-
-**10.5.11 Combining two independently helpful interventions does not
-compound, and mildly hurts.** Gated fusion (Section 10.5.5) and the
-amplitude auxiliary input (Section 10.5.3) each measurably improved
-results on their own. Combined — gated fusion applied to the
-amplitude-augmented spectrogram-dual model — the result is worse than
-either intervention alone: AUC 0.9716, versus gated-fusion-without-aux's
-0.9761 and linear-fusion-with-aux's 0.9733. This is a useful negative
-result: independently validated improvements do not automatically compose,
-and each combination has to be measured rather than assumed. The three
-fusion mechanisms tested on the amplitude-augmented spectrogram-dual model
-now rank, by AUC: stacked (0.9758) > linear (0.9733) > gated (0.9716) — the
-reverse of gated fusion's ranking on the same 2D representation without
-aux (Section 10.5.5), where gated fusion was the best of the three.
-
-**10.5.12 Seed-repeated verification of the two closest single-seed
-claims changes the reported conclusion for one of them.** Sections 10.5.5
-and 10.5.7 each rested on a single train/validation/test split. Both were
-re-run at two additional seeds (1 and 2, alongside the original 42) to
-check whether the claimed improvements survive repetition.
-
-*Gated vs. linear fusion, spectrogram-dual, no aux (Section 10.5.5):*
+**Gated vs. linear fusion, spectrogram-dual, no aux:**
 
 | Seed | Linear AUC / MCC / Acc | Gated AUC / MCC / Acc | Gated − Linear (AUC) |
 |---|---|---|---|
@@ -1083,21 +945,19 @@ check whether the claimed improvements survive repetition.
 | 1 | 0.9719 / 0.848 / 92.32 % | 0.9753 / 0.851 / 92.53 % | +0.0034 |
 | 2 | 0.9746 / 0.834 / 91.68 % | 0.9720 / 0.849 / 92.36 % | **−0.0026** |
 
-The AUC advantage is not robust — it reverses sign at seed 2, and its
-magnitude at seed 1 is roughly a third of the original single-seed figure.
-Averaged across the three seeds, gated fusion still leads on AUC (mean
-0.9745 vs. 0.9704), but the effect is smaller and noisier than Section
-10.5.5 reported. Accuracy and MCC tell a more consistent story: gated
-fusion wins on **both** metrics at **all three** seeds, and does so with
-much lower run-to-run spread (accuracy range 92.36–92.53 %, a spread of
-0.17 points, versus linear fusion's 90.61–92.32 %, a spread of 1.71
-points; MCC spread 0.002 vs. 0.036). The corrected finding is therefore
-not "gated fusion is a clear AUC win" but **"gated fusion gives more
-consistent, slightly better decisions at the operating threshold, with a
-real but small and noisy ranking-quality advantage"** — a materially
-weaker and more precise claim than Section 10.5.5's original framing.
+The AUC advantage reverses sign at seed 2, and is roughly a third of the
+original figure at seed 1. Averaged across seeds, gated fusion still leads
+on AUC (mean 0.9745 vs. 0.9704), but the effect is smaller and noisier than
+Section 6.4's original framing suggested. Accuracy and MCC tell a more
+consistent story: gated fusion wins on **both** metrics at **all three**
+seeds, with much lower run-to-run spread (accuracy 92.36–92.53%, spread
+0.17 points, vs. linear's 90.61–92.32%, spread 1.71 points; MCC spread 0.002
+vs. 0.036). **The corrected finding is not "gated fusion is a clear AUC
+win" but "gated fusion gives more consistent, slightly better decisions at
+the operating threshold, with a real but small and noisy ranking-quality
+advantage"** — materially weaker and more precise than the original framing.
 
-*Amplitude aux vs. no aux, spectrogram-dual, linear fusion (Section 10.5.7):*
+**Amplitude aux vs. no aux, spectrogram-dual, linear fusion:**
 
 | Seed | No-aux AUC / MCC / Acc | Aux AUC / MCC / Acc | Aux − No-aux (AUC) |
 |---|---|---|---|
@@ -1105,147 +965,339 @@ weaker and more precise claim than Section 10.5.5's original framing.
 | 1 | 0.9719 / 0.848 / 92.32 % | 0.9707 / 0.841 / 92.01 % | **−0.0012** |
 | 2 | 0.9746 / 0.834 / 91.68 % | 0.9705 / 0.834 / 91.66 % | **−0.0041** |
 
-This result does not merely shrink — it reverses and averages out to
-approximately zero (mean AUC difference +0.0011 across the three seeds).
-**Section 10.5.7's claim that the amplitude auxiliary input improves the
-fused linear model does not survive repetition; the original single-seed
-result at seed 42 was not representative.** This does not call the
-amplitude fix into question generally: the much larger effects reported in
-Section 10.5.3 (RAM CNN alone, +0.087 AUC) and Section 10.5.8 (`1d+aux`
-alone, +0.029 AUC) are an order of magnitude larger than the noise band
-established here (~0.01 AUC) and are far more likely to be genuine, though
-neither has itself been re-run at additional seeds and both should be
-treated with appropriately more confidence than this reversed result, not
-full certainty. What this result specifically corrects is narrower: aux
-does not reliably help once it is combined with joint linear fusion on an
-already-strong 2D representation, where Section 10.5.4 already established
-the 2D branch has little room left for the aux input to add.
+This result does not merely shrink — it reverses and averages to
+approximately zero (mean +0.0011 across seeds). **Section 6.3's claim that
+the amplitude input improves the fused linear spectrogram model does not
+survive repetition; the seed-42 result was not representative.** This does
+not call the amplitude fix into question generally — the RAM-alone effect
+(+0.087 AUC) and the `1d+aux` effect (+0.029 AUC) are an order of magnitude
+larger than the ~0.01 AUC noise band this check establishes, and are far
+more likely to be genuine, though neither has itself been re-seeded. What
+this specifically corrects is narrower: aux does not reliably help once
+combined with joint linear fusion on an already-strong 2D representation,
+where Section 6.3 already showed the 2D branch has little room left for it
+to add.
 
-**The practical lesson from 10.5.12 is broader than either individual
-correction: none of the close-margin claims elsewhere in Section 10 —
-including the `1d+aux` and `2d+aux` effects in Sections 10.5.3/10.5.8, and
-the stacking results in Section 10.5.2/10.5.10 — have been checked against
-more than one seed, and this section demonstrates concretely that a
-single-seed result on this dataset can overstate an effect, understate it,
-or report the wrong sign entirely.** Only claims with effect sizes well
-above the ~0.01 AUC / ~0.02 MCC band established here (the amplitude fix on
-RAM alone, and the standing conclusion that plain `2d` remains the overall
-best configuration) should be treated as settled without further seeds.
+**The practical lesson is broader than either individual correction: none of
+the other close-margin claims in this section — including the `1d+aux` and
+`2d+aux` effects, and the stacking results — have been checked against more
+than one seed, and this check demonstrates concretely that a single-seed
+result on this dataset can overstate an effect, understate it, or report the
+wrong sign entirely.** Only effects well above the ~0.01 AUC / ~0.02 MCC
+band established here — the amplitude fix on RAM alone, and the overall
+best-configuration finding below — should be treated as settled without
+further seeds.
 
-**Considered together with Sections 10.5.1–10.5.12, the single
-best-performing configuration measured in this entire investigation remains
-the plain spectrogram CNN classifier, with no LSTM branch, no auxiliary
-input, and no fusion mechanism (AUC 0.9793).** Every structural addition
-tested — the source paper's dual-channel architecture, the amplitude
-auxiliary input, gated fusion, late-fusion stacking, and combinations of
-these — improved on some other configuration along the way, and each
-produced a genuine, informative finding about why RAM underperforms and how
-fusion mechanisms behave, including where those findings needed correcting
-under repeated measurement (Section 10.5.12). None of them, individually or
-in combination, has yet exceeded the simplest model in this comparison.
-This should be read as a genuine result rather than a failure of the
-investigation: it indicates that, for this task and dataset, the highest-value
-remaining work is more likely to be in feature representation (for example,
-per-component auxiliary inputs, or spectrogram parameters) than in additional
-architectural complexity layered on top of an already-strong 2D
+### 6.7 Summary
+
+**Considered together, the single best-performing configuration measured in
+this entire detection investigation remains the plain spectrogram CNN
+classifier — no LSTM branch, no auxiliary input, no fusion mechanism (AUC
+0.9793) — and it beats a correctly-parameterized STA/LTA baseline (0.8194)
+by 0.16 AUC.** Every structural addition tested — the dual-channel
+architecture, the amplitude auxiliary input, gated fusion, late-fusion
+stacking, and combinations of these — improved on some other configuration
+along the way and produced a genuine, informative finding about why RAM
+underperforms and how fusion mechanisms behave, including where those
+findings needed correcting under repeated measurement. None of them,
+individually or combined, has yet exceeded the simplest model in this
+comparison. This is a genuine result, not a failure of the investigation: it
+indicates the highest-value remaining work is more likely in feature
+representation (per-component auxiliary inputs, spectrogram parameters) than
+in additional architectural complexity layered on an already-strong 2D
 representation.
 
-### 10.6 Updated Limitations and Recommendations
+---
 
-- Every result in Section 10 reflects a single train/validation/test split
-  at one random seed, **except** the two comparisons re-run at three seeds
-  in Section 10.5.12, where repetition changed the reported conclusion for
-  one of them (amplitude aux no longer shown to help the fused linear
-  model) and meaningfully narrowed the other (gated fusion's AUC edge).
-  Every other close-margin figure in Section 10 — including stacked-RAM-dual
-  versus 1d-alone, `2d+aux` versus the full amplitude-dual model, `1d+aux`'s
-  effect size (Section 10.5.8), and the stacking results in Sections
-  10.5.2/10.5.10 — remains unverified at additional seeds and should be
-  read with the caution Section 10.5.12 demonstrates is warranted, not
-  assumed settled by a single run.
-- The amplitude correction has now been evaluated on the spectrogram-dual
-  model (Section 10.5.7) and combined with stacking (Section 10.5.10, a
-  clear win on both datasets) and with gated fusion (Section 10.5.11, a
-  clear loss relative to either intervention alone).
-- `log_snr` and `log_rms` are single scalars per window, averaged over
-  Z, N, and E. A per-component variant (six scalars rather than two,
-  `--per-component-aux` in `data_downloader`) has been implemented and
-  smoke-tested but not evaluated — see Section 10.7.
-- 60 s windows were not re-tested with any of the additions described in
-  this section. The geometric argument in Section 2.3 for why short windows
-  are more difficult applies specifically to the RAM branch, not to the
-  raw-waveform or auxiliary branches, so the balance between branches may
-  shift at longer window lengths.
-- Gated fusion's mixed result across 2D representations (Section 10.5.5)
-  has not been diagnosed further, though Section 10.5.12 adds one relevant
-  data point: on spectrogram-dual specifically, the effect is real on
-  accuracy/MCC but small and noisy on AUC, which narrows rather than
-  resolves the three explanations originally offered.
-- `1d+aux` (Section 10.5.8) and the LSTM branch's own hyperparameters
-  (Section 10.5.9) have now been evaluated; neither the CNN's hyperparameters
-  (Section 10.5.6) nor the LSTM's reward tuning on this dataset. This
-  narrows the plausible location of any remaining gap toward feature
-  representation rather than architecture search on either existing branch.
+## 7. Results: Magnitude Classification from a 3-Second Window
 
-### 10.7 Investigation Status and Next Steps
+### 7.1 Motivation
 
-This closes the dual-channel waveform-classification investigation (Section
-10) as an active line of work. It is not concluded because a dead end was
-reached; it is being set aside deliberately because it was itself an
-extension of the project's original scope, and continuing to refine it
-further would be digging the same hole deeper rather than returning to that
-scope.
+The detection task (Sections 5–6) asks whether a window contains an
+earthquake at all. This section asks a narrower, related question directly
+motivated by the same amplitude-invariance finding (Section 6.2): can
+*event class* — a coarse magnitude bin — be read directly off a single
+3-second window at the P-wave arrival? This reuses machinery already built
+for a different purpose: `regression.py` and `cnn_regression.py`
+(Section 4.5) implement continuous magnitude regression, complete with the
+manifest already storing per-window magnitude, log-SNR, and epicentral
+distance, but had never been run to completion or reported on before this
+section. Since `RegressionSeismicCNN`'s head is already a bare logit,
+classification requires no architecture change — only a relabeled target,
+a swapped loss, and swapped metrics.
 
-**What this phase established.** Across all configurations tested,
-`2d`-alone with no auxiliary input remains the single best-performing
-configuration in the entire investigation (test AUC 0.9793, Section 7.2).
-Relative to that ceiling: gated fusion gives a real but small and noisy AUC
-edge over linear fusion, alongside a more robust, low-variance win on
-accuracy and MCC (Section 10.5.12); the amplitude-scalar correction produces
-a large, seed-independent improvement on the RAM-only and RAM-dual models
-(Sections 8.2, 10.5.3, 10.5.8) but a much smaller, seed-fragile one on the
-spectrogram-dual model (Section 10.5.12); late-fusion stacking of frozen
-aux-augmented branches beats both linear and gated joint fusion on both
-datasets (Section 10.5.10); and gated fusion combined with amplitude aux
-performs worse than either intervention alone — an explicit case of two
-independently-validated improvements failing to compose (Section 10.5.11).
-Section 10.5.12's seed-repeat check is the standing methodological caution
-for the whole section: single-seed margins under roughly 0.01–0.02 AUC have
-been shown concretely, on this dataset, to overstate an effect, understate
-it, or report the wrong sign.
+### 7.2 Data
 
-**What was started but not finished.** Per-component auxiliary scalars
-(`--per-component-aux`, adding `RamAuxEncoderV2`, `RamDualAuxEncoderV2`, and
-`SpectrogramDualAuxEncoderV2` to `data_downloader/seismic_cli`, commit
-`8485ffc`) are implemented, produce the expected `(6,)`-shaped tensor, and
-required no model-side changes since `aux_dim` is read from the tensor shape
-at load time. No dataset was regenerated at full scale and no model was
-retrained against it — this is left as unevaluated, not abandoned. 60 s
-windows with the LSTM+attention branch (Section 10.6) were never started.
-Neither should be treated as a loose end requiring closure; either could be
-picked back up later if the amplitude-correction or window-length questions
-become relevant again.
+`data/batched_waveforms/window_post_3s_anchored` holds 23,918
+P-wave-anchored 3 s events, already downloaded for the detection work
+(confirmed: each mseed file is exactly 300 samples at 100 Hz = 2.99 s). Of
+the catalogs on disk, only `catalogs/deprem_katalog_utc.csv` (482,898 rows)
+matches 100% of these events by EventID (the smaller, curated
+`catalogs/data.csv` matches only 6.6%).
 
-**Where the project goes next.** The original objective was forecasting
-event onset time and event class from earthquake catalog data — not
-waveform classification. That work already has a dormant implementation
-that predates this section and has never been run or reported on:
-`data_downloader/seismic_cli/catalog.py` builds chronologically-split,
-embargoed sliding-window datasets from a catalog (feature channels in
-`SEQ_FEATURES`/`IMAGE_FEATURES`/`AUX_FEATURES`, three-class time-to-next-event
-labels in `RISK_CLASSES = [lt_1y, 1_5y, gt_5y]`), reachable via the
-`generate-catalog-dataset` CLI command; `cnn_earthquake/src/cnn_lstm_loeo.py`
-implements `DualChannelRiskNet`, the corresponding model. Both were built
-using the same dual-channel {seq, img, aux} pattern documented in Section
-10.2–10.3, so the architecture work in this section is not wasted even
-though its focus was elsewhere — but neither the dataset generation nor the
-model has been exercised end-to-end, so the next phase starts from
-"does this run at all and what does a first result look like," not from a
+The magnitude distribution across all 23,918 events is heavily right-skewed,
+as expected (Gutenberg–Richter): 85.8% are M2.0–3.0, and only 37 events
+(0.2%) are M≥5. This rules out fine physically-meaningful bins (a "large
+event" class would have only a few dozen examples) and weighs against pure
+quantile bins (boundaries would sit within a quarter magnitude unit of each
+other — balanced but not physically meaningful). A **binary** split at
+**M = 2.5** was chosen: closer to balanced (62.4% below / 37.6% at-or-above)
+than the more standard M = 3.0 cut (85.7%/14.3%), while remaining a single,
+round, physically interpretable number rather than a value fitted to this
+catalog; it is a CLI flag (`--mag-threshold`), not hardcoded. Each mseed
+file corresponds to exactly one event (23,918 files, 23,918 unique
+EventIDs), so `split_by="event"` (already the default in `regression.py`)
+is the correct leakage guard when an event is recorded at multiple stations.
+
+`seismic-cli generate-regression-dataset --eq-dir
+window_post_3s_anchored --catalog-path deprem_katalog_utc.csv
+--window-seconds 3 --encoding spectrogram --split-by event` produced 37,289
+labelled windows: train 26,101 (M2.0–5.9, 36.9% positive, 16,685 events),
+val 5,594 (M2.0–6.2, 35.8% positive, 3,639 events), test 5,594 (M2.0–5.5,
+38.6% positive, 3,594 events). Verified: zero EventIDs appear in more than
+one split.
+
+### 7.3 Result
+
+`cnn_magclass.py` (Section 4.5's `RegressionSeismicCNN`, `BCEWithLogitsLoss`
+in place of `L1Loss`), short preset (3 residual stages, hidden width 32),
+314,001 parameters, trained to early stopping (best epoch 4/80, val AUC
+0.864; stopped at epoch 14 on 10 flat epochs):
+
+| | Accuracy | AUC | MCC |
+|---|---|---|---|
+| Predict majority class (always "< M2.5") | 61.35% | — | — |
+| Logistic regression on $\log\text{SNR}$ + $\log(\text{distance})$ alone | 71.36% | 0.7486 | +0.372 |
+| **CNN (spectrogram + aux)** | **79.78%** | **0.8550** | **+0.566** |
+
+The full model beats the majority-class floor by 18.4 points and, more
+importantly, beats the amplitude/distance-only logistic baseline by +0.106
+AUC — the 3-second window's spectrogram carries real magnitude-class signal
+beyond what a simple "how loud, how far" rule already captures, directly
+analogous to Section 6.3's finding that the encoded window contributes
+beyond amplitude+distance for the *detection* task.
+
+### 7.4 Caveats
+
+This is a single run at one seed and one threshold (M = 2.5) — the same
+caveat Section 6.6 demonstrated matters concretely for this project's other
+close-margin claims; a seed-repeat check has not been run here. The
+spectrogram input to the CNN was small — `(3, 129, 5)`, only 5 time frames
+from a 3 s window at the default FFT settings — so most of the model's
+signal is coming from very few effective time steps, not rich temporal
+structure. Neither a per-component-aux variant nor a threshold-sensitivity
+sweep has been tried.
+
+---
+
+## 8. Discussion
+
+Three threads run through this investigation. First, **absolute amplitude is
+the recurring missing ingredient**: it is what RAM cannot represent
+(Section 2.2(d)), what STA/LTA depends on entirely (Section 5), what its
+correction restores on both the RAM image and the raw-waveform LSTM branch
+(Section 6.3), and what the magnitude classifier's own logistic baseline is
+built from (Section 7.3). Every result in this report that involves
+amplitude, in either direction, traces back to the same structural fact.
+
+Second, **fusion mechanisms behave inconsistently enough that none should be
+assumed without measurement**: linear fusion underperforms its own best
+branch; gated fusion helps on one 2D representation and hurts on two others;
+stacking is the one mechanism that has not underperformed a single branch in
+any configuration tested, at the cost of a separate training and fitting
+procedure rather than end-to-end joint training. If a single practical
+recommendation follows from Section 6.4, it is to default to stacking over
+joint fusion when branches are trained separately regardless, and to measure
+gated fusion's effect directly rather than assume it from another
+representation.
+
+Third, **the RAM transform's core promise — extracting useful structure from
+a scale-invariant, geometrically compressed image — never exceeded a
+station-normalized spectrogram fed to the same CNN trunk, in any
+configuration tested, with or without the amplitude fix, with or without an
+LSTM partner branch.** This is not a failure specific to this
+implementation of RAM; it follows directly from properties 2.2(b) and (d):
+a 64×64×3 RAM image carries at most 189 independent values and no amplitude
+information at all, while a spectrogram of comparable size carries
+substantially more of both. Where RAM is specifically required — matching
+the source paper exactly, for instance — the amplitude auxiliary input is a
+necessary, low-cost companion; where the 2D representation is an open
+design choice, this investigation did not find a case where RAM was the
+better one.
+
+The two bodies of work in Sections 6 and 7 are related but should not be
+over-connected: both reuse the amplitude-auxiliary-input pattern and the
+same CNN trunk, but they answer structurally different questions (is there
+an event at all, versus how large is it), on different window lengths (6 s
+versus 3 s), against different comparison baselines (STA/LTA versus a
+fitted amplitude/distance relation). Their agreement on the general
+principle — encoded windows carry information beyond simple amplitude
+scalars — is a genuine cross-check, not a coincidence of shared code.
+
+---
+
+## 9. Limitations and Future Work
+
+**Statistical.** Every result in Sections 6 and 7 reflects a single
+train/validation/test split at one random seed, except the two comparisons
+re-seeded in Section 6.6, where repetition changed one reported conclusion
+and substantially narrowed another. Every other close-margin figure —
+stacked-RAM-dual vs. `1d`-alone, `2d+aux` vs. the full amplitude-dual model,
+the `1d+aux`/`2d+aux` effect sizes, the magnitude-classification result in
+Section 7 — remains unverified at additional seeds and should be read with
+the caution Section 6.6 demonstrates is warranted.
+
+**Untested extensions, implemented but not evaluated.** Per-component
+auxiliary scalars (Section 4.3, six scalars instead of two, commit
+`8485ffc` in `data_downloader`) are implemented and smoke-tested but not
+evaluated at scale — deliberately deferred (Section 10), not abandoned.
+
+**Untested extensions, proposed but not implemented.** Feeding the RAM
+angle vector $\beta$ directly to a one-dimensional model, to test whether
+property 2.2(b)'s 63-degrees-of-freedom argument means the 2D CNN adds
+nothing the 1D vector didn't already carry. Combining the three components
+before the RAM transform (vector magnitude) rather than transforming each
+independently. A distance term for the noise-contamination check
+(Section 3.1), which currently discards otherwise-scarce noise data purely
+on elapsed time.
+
+**Window length.** 60 s windows have not been re-run under the corrected
+pipeline (Section 6, introduction) and 60 s results from before those
+corrections are not reported here at all, only referenced as superseded.
+60 s windows with the LSTM+attention branch were never started. The
+geometric argument for why short windows are harder (Section 2.3) applies
+specifically to the RAM branch, not to the raw-waveform or auxiliary
+branches, so the balance between branches may shift at longer window
+lengths.
+
+**Gated fusion's mechanism.** Its mixed result across three 2D
+representations (Section 6.4) has not been diagnosed further, though
+Section 6.6 adds one relevant data point: on spectrogram-dual specifically,
+the effect is real on accuracy/MCC but small and noisy on AUC — narrowing
+rather than resolving the explanations originally offered.
+
+**Hyperparameters.** Neither the CNN's hyperparameters (Section 6.5) nor the
+LSTM branch's own hyperparameters reward tuning on this dataset; this
+narrows the plausible location of any remaining gap toward feature
+representation rather than architecture search on either existing branch.
+
+**Magnitude classification (Section 7).** Single seed, single threshold, no
+per-component-aux variant tried, and a spectrogram input small enough (5
+time frames) that its effective temporal resolution is worth questioning
+directly.
+
+**External validity.** This investigation has not undergone external peer
+review.
+
+---
+
+## 10. Project Status: Original Objective and Next Steps
+
+The project's original objective is forecasting **event onset time and
+event class from earthquake catalog data** — not waveform classification.
+Sections 2–9 are, in that light, a substantial but deliberate detour: they
+established (a) that a specific architecture from a different domain
+transfers to seismic waveforms with real, measured limitations and fixes,
+and (b) that the same amplitude-input pattern generalizes to a related but
+distinct question (event class from a short window). Both are genuine,
+useful results, and both are being set aside now — not because a dead end
+was reached, but because continuing to refine them further would be
+extending the detour rather than returning to the original scope.
+
+**What this phase established**, most-to-least confident: the amplitude
+auxiliary input's large effects on RAM (Sections 6.3, 6.5); that a
+correctly-parameterized STA/LTA baseline is beaten by every tested CNN
+configuration at 6 s (Section 6.1), a finding that only became measurable
+after fixing a previously-undiscovered evaluation defect (Section 5.2);
+that late-fusion stacking is the one fusion mechanism that has not
+underperformed a single branch in any configuration tested (Section 6.4);
+that magnitude class is predictable from a single 3-second window well
+beyond an amplitude/distance floor (Section 7); and, as a standing
+methodological caution rather than a specific finding, that single-seed
+margins under roughly 0.01–0.02 AUC on this dataset have been shown
+concretely to overstate an effect, understate it, or report the wrong sign
+(Section 6.6).
+
+**Where the project goes next.** `data_downloader/seismic_cli/catalog.py`
+already builds chronologically-split, embargoed sliding-window datasets from
+a catalog (feature channels in `SEQ_FEATURES`/`IMAGE_FEATURES`/
+`AUX_FEATURES`, three-class time-to-next-event labels in
+`RISK_CLASSES = [lt_1y, 1_5y, gt_5y]`), reachable via the
+`generate-catalog-dataset` CLI command; `cnn_earthquake/src/
+cnn_lstm_loeo.py` implements `DualChannelRiskNet`, the corresponding model.
+Both predate this report and use the same dual-channel `{seq, img, aux}`
+pattern documented in Section 4 — the architecture work here is not wasted,
+even though its focus was elsewhere — but neither the dataset generation nor
+the model has been exercised end-to-end. The next phase starts from "does
+this run at all and what does a first result look like," not from a
 refinement question.
 
 ---
 
-## Appendix A. Reproduction Instructions: Dual-Channel and Auxiliary Pipeline
+## 11. Software Defects Identified and Corrected
+
+The reliability of this report's results depends substantially on defects
+identified and corrected during development. Defects 1–5 predate the
+dual-channel extension (Section 4.2 onward); defects 6–13 were found during
+a systematic audit of the full repository; defect 14 was found while
+preparing this rewrite.
+
+| # | Defect | Mechanism | Impact |
+|---|---|---|---|
+| 1 | Cross-class station leakage | Splits were allocated independently per class; with ~97% station overlap, a station could appear as train-earthquake and test-noise | The model could exploit station identity as a shortcut; biased measured test performance downward, most severely where station counts are low (short windows) |
+| 2 | Station caps were ineffective | The cap was applied at file granularity; a single 300 s noise file (~200 windows at 3 s) exceeded any smaller cap and was retained in full | Explains observations of only 2–4 distinct noise stations in validation/test even after capping |
+| 3 | Fixed-resolution collapse | Reshape depth $d$ was fixed regardless of window length | 3 s windows collapsed to ~3×3 images; corrected by deriving $d$ from the target resolution |
+| 4 | Origin-anchored short windows | Short windows were cut from origin time rather than arrival time | A meaningful fraction of nominal "earthquake" windows contained no signal |
+| 5 | Noise/earthquake station mismatch | Noise data was sourced independently of earthquake stations (~47% overlap) | The model rarely observed both classes from the same instrument; a targeted downloader raised overlap to ~97% |
+| 6 | STA/LTA computed on raw counts (anchoring) | `classic_sta_lta` was computed on un-detrended MiniSEED counts; a large DC offset pins the characteristic function near 1 | Verified: a synthetic arrival with a $10^6$-count offset produces a maximum characteristic-function value of exactly 1.000 (no pick possible); after detrending, the pick lands within 4 samples of ground truth |
+| 7 | Arrival pick on a horizontal component | `sorted(traces)[0]` selects the E component before Z alphabetically, with no fallback | P-wave onsets are cleanest on the vertical component; corrected to vertical-first with fallback |
+| 8 | STA/LTA computed on raw counts (baseline evaluation) | The same DC-offset defect present in the baseline scorer | Baseline performance was understated at high-offset stations, plausibly explaining a measured STA/LTA AUC swing of 0.78–0.98 between data pulls |
+| 9 | Label-smoothing asymmetry | Smoothing was applied to training targets only; smoothed binary cross-entropy floors near 0.325 nats | Training and validation loss curves were not directly comparable in magnitude; validation metrics were unaffected |
+| 10 | Threshold mismatch | `cnn_from_tensor.py` validated at a 0.60 threshold but tested at 0.50 | Validation and test accuracy were measuring different decision rules |
+| 11 | Gap interpolation treated as signal | `merge(fill_value='interpolate')` fabricates linear ramps across telemetry gaps | Synthetic data was trained on as though genuine; corrected via gap masking, windows exceeding 5% synthetic samples rejected |
+| 12 | Single-rate assumption | The first trace's sampling rate in a file was applied to every station represented in it | Incorrect physical window duration for off-rate stations; corrected to per-station sampling rate |
+| 13 | Alphabetical channel selection | `sorted(keys)[:3]` could select `['1','2','E']` — two horizontal components, no vertical | Silent component mis-assignment; corrected to role-based selection requiring a vertical component |
+| 14 | STA/LTA silently unrunnable, then silently mis-parameterized, against anchored/dual-channel data | `eval_baseline.py`'s filename regex matched only `_winNNN.png`, so every `.pt`-based dual-channel manifest scored zero windows with no error; once fixed, the auto-derived LTA (window/3) was found to exceed `anchor.py`'s pre-arrival buffer (0.2×window) for any anchored window under ~50 s, putting the true arrival inside `classic_sta_lta`'s forced-zero warm-up region | `eval-sta-lta` had never actually run against the Section 6 dual-channel datasets; its default parameters, even once made runnable, silently score AUC 0.51 (random) at 6 s. Corrected via a validation-selected LTA (Section 5.2), giving AUC 0.82 |
+
+Two items were suspected as defects but confirmed not to be: the RAM
+mathematics as implemented transcribes the source paper correctly,
+including guards the paper itself omits (the $\varepsilon$ floor on
+$\sigma$, and clipping before the inverse cosine); and the manifest's
+window-index-to-sample mapping is exact.
+
+---
+
+## Appendix. Reproduction Instructions
+
+**Original RAM + CNN-only pipeline (Section 6.2, pre-amplitude-fix figures):**
+
+```bash
+# 1. Arrival-anchored 6 s windows from downloaded 60 s data
+seismic-cli anchor-windows \
+    --source-dir data/batched_waveforms/window_post_60s \
+    --output-base-dir data/batched_waveforms -t 6
+
+# 2. Maximum-size balanced, station-disjoint 6 s dataset
+seismic-cli generate-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms \
+    --output-dir dataset_6s_max \
+    --window-seconds 6 --overlap 0.5 --max --max-windows-per-station 20
+
+# 3. Train (short preset auto-selected by --window-seconds)
+python src/model/cnn_train.py --dataset-dir dataset_6s_max \
+    --save-dir trained_model_6s --window-seconds 6
+
+# 4. STA/LTA baseline on the identical test windows (parameters auto-derived --
+#    see Section 5.2 for why this default is wrong on anchored windows;
+#    pass --sta-seconds/--lta-seconds explicitly instead, as below)
+seismic-cli eval-sta-lta \
+    --manifest-path dataset_6s_max/manifest.csv \
+    --split test --window-seconds 6 --overlap 0.5 \
+    --sta-seconds 0.03 --lta-seconds 0.3
+```
+
+**Dual-channel and auxiliary datasets (Section 6):**
 
 ```bash
 # Dual-channel dataset (paper's raw-waveform seq + RAM image), 6 s, maximum size
@@ -1272,38 +1324,43 @@ seismic-cli generate-dual-aux-dataset \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
     --output-dir dataset_dualaux_6s --window-seconds 6 --max
 
-# Spectrogram-dual model with the amplitude auxiliary input (Section 10.5.7)
+# Spectrogram-dual model with the amplitude auxiliary input
 seismic-cli generate-spec-dual-aux-dataset \
     --eq-dir data/batched_waveforms/window_post_6s_anchored \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
     --output-dir dataset_specdualaux_6s --window-seconds 6 --max
+
+# STA/LTA on the corrected 6s dual-channel dataset (Section 6.1's headline number)
+seismic-cli eval-sta-lta --manifest-path dataset_specdual_6s/manifest.csv \
+    --split test --window-seconds 6 --overlap 0.5 \
+    --sta-seconds 0.03 --lta-seconds 0.3
 
 cd ../cnn_earthquake/src
 
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_dual_6s \
     --channels all --batch-size 32                # or --channels 1d / 2d
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_dual_6s \
-    --channels all --fusion gate --batch-size 32   # gated fusion (Section 10.5.5)
+    --channels all --fusion gate --batch-size 32   # gated fusion (Section 6.4)
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
-    --channels all --fusion gate --batch-size 32   # gated fusion (Section 10.5.5)
+    --channels all --fusion gate --batch-size 32   # gated fusion (Section 6.4)
 
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s
 python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --no-aux
-python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --lr 3e-4   # hyperparameter sweep (Section 10.5.6)
+python cnn_ram_aux.py --dataset-dir ../../data_downloader/dataset_ramaux_6s --lr 3e-4   # hyperparameter sweep (Section 6.5)
 
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
     --channels all --batch-size 32                 # or 1d / 2d / aux / 1d+aux / 2d+aux
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
-    --channels all --fusion gate --batch-size 32    # gated fusion (Section 10.5.5)
+    --channels all --fusion gate --batch-size 32    # gated fusion (Section 6.4)
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
-    --channels all --batch-size 32                 # spectrogram + aux (Section 10.5.7)
+    --channels all --batch-size 32                 # spectrogram + aux (Section 6.3)
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
-    --channels 2d+aux --batch-size 32               # spectrogram + aux, no LSTM (Section 10.5.7)
+    --channels 2d+aux --batch-size 32               # spectrogram + aux, no LSTM (Section 6.3)
 
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
-    --channels 1d+aux --batch-size 32               # raw waveform + aux, no 2D branch (Section 10.5.8)
+    --channels 1d+aux --batch-size 32               # raw waveform + aux, no 2D branch (Section 6.3)
 
-# LSTM branch hyperparameter sweep, isolated via --channels 1d+aux (Section 10.5.9)
+# LSTM branch hyperparameter sweep, isolated via --channels 1d+aux (Section 6.5)
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
     --channels 1d+aux --batch-size 32 --lstm-heads 2      # or --lstm-heads 8 / --lstm-layers 2 / --hidden 64
 
@@ -1312,43 +1369,34 @@ python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s
     --ckpt-1d trained_model_cnnlstm_classify_1d/best_cnnlstm_classify.pth \
     --ckpt-2d trained_model_cnnlstm_classify_2d/best_cnnlstm_classify.pth
 
-# Late-fusion stacking on amplitude-augmented checkpoints (Section 10.5.10)
+# Late-fusion stacking on amplitude-augmented checkpoints (Section 6.4)
 python cnn_lstm_stack_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
     --ckpt-1d trained_model_cnnlstm_aux_1daux/best_cnnlstm_aux.pth \
     --ckpt-2d trained_model_cnnlstm_aux_2daux/best_cnnlstm_aux.pth
 
-# Gated fusion + amplitude aux combined (Section 10.5.11)
+# Gated fusion + amplitude aux combined (Section 6.4)
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
     --channels all --fusion gate --batch-size 32
 
-# Seed-repeated verification (Section 10.5.12) -- rerun any of the above with --seed 1 / --seed 2
+# Seed-repeated verification (Section 6.6) -- rerun any of the above with --seed 1 / --seed 2
 python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
     --channels all --seed 1 --batch-size 32               # repeat for --fusion gate, and --seed 2
 ```
 
-## Appendix B. Reproduction Instructions: Original RAM + CNN-Only Pipeline
+**Magnitude classification (Section 7):**
 
 ```bash
-# 1. Arrival-anchored 6 s windows from downloaded 60 s data
-seismic-cli anchor-windows \
-    --source-dir data/batched_waveforms/window_post_60s \
-    --output-base-dir data/batched_waveforms -t 6
+seismic-cli generate-regression-dataset \
+    --eq-dir data/batched_waveforms/window_post_3s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --station-catalog catalogs/istasyon_katalog.csv \
+    --output-dir data/dataset_magclass_3s \
+    --window-seconds 3 --encoding spectrogram --split-by event
 
-# 2. Maximum-size balanced, station-disjoint 6 s dataset
-seismic-cli generate-dataset \
-    --eq-dir data/batched_waveforms/window_post_6s_anchored \
-    --noise-dir data/batched_noise_waveforms \
-    --output-dir dataset_6s_max \
-    --window-seconds 6 --overlap 0.5 --max --max-windows-per-station 20
-
-# 3. Train (short preset auto-selected by --window-seconds)
-python src/model/cnn_train.py --dataset-dir dataset_6s_max \
-    --save-dir trained_model_6s --window-seconds 6
-
-# 4. STA/LTA baseline on the identical test windows (parameters auto-derived)
-seismic-cli eval-sta-lta \
-    --manifest-path dataset_6s_max/manifest.csv \
-    --split test --window-seconds 6 --overlap 0.5
+cd ../cnn_earthquake/src
+python cnn_magclass.py --dataset-dir ../../data_downloader/data/dataset_magclass_3s \
+    --window-seconds 3 --save-dir trained_model_magclass_3s   # --mag-threshold to change the split point
 ```
 
-Full option reference: `data_downloader/README.md`.
+Full CLI option reference: `data_downloader/README.md`.
