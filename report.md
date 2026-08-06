@@ -977,7 +977,66 @@ branch more or by handing the weaker branch's fusion partner information it
 lacked. Neither intervention, alone or combined, reaches the ceiling
 established by `2d` alone.
 
-**Considered together with Sections 10.5.1–10.5.6, the single best-performing
+**10.5.8 The amplitude auxiliary input helps the raw-waveform branch nearly
+as much as it helps the RAM branch.** `--channels 1d+aux` (the raw
+standardized waveform plus `[log_snr, log_rms]`, with no 2D branch present
+at all) was trained on the RAM-plus-amplitude dataset:
+
+$$\text{Test AUC: } 0.9216 \to 0.9501 \quad(+0.0285) \qquad \text{MCC: } 0.6849 \to 0.7675 \quad(+0.0826) \qquad \text{Accuracy: } 84.22\% \to 88.37\% \quad(+4.15\text{ pp})$$
+
+comparing against the no-aux `1d`-alone figure from Section 10.4. This is
+consistent with the same underlying mechanism identified in Section 8.2: the
+raw waveform is standardized before entering the LSTM (Section 10.1), which
+removes absolute amplitude exactly as RAM's own internal standardization
+does, so the raw-waveform branch is scale-blind for the same structural
+reason the RAM image is, and benefits from the same correction. With the
+auxiliary input present, `1d+aux` (0.9501 AUC) is closer to the full fused
+model (0.9514, Section 10.4) than `2d+aux` is (0.9468), and closer than
+either branch was to the fused model without the auxiliary input (Section
+10.5.1). One data point confirms this is dataset-independent by
+construction rather than by measurement: running the identical `1d+aux`
+configuration against the spectrogram-plus-amplitude dataset produced
+test figures identical to four decimal places (accuracy 88.37%, AUC 0.9501,
+MCC 0.7675), because that ablation never reads the `img` tensor and both
+encoders compute `seq` and `aux` with the same formula — a useful check on
+the pipeline's correctness, not a second independent measurement.
+
+**10.5.9 A hyperparameter sweep of `LSTMAttentionBranch` itself (depth,
+attention heads, hidden width) produced no distinguishable improvement,
+and illustrates the validation-versus-test divergence risk more sharply
+than the RAM CNN sweep did.** Five configurations were trained on
+`1d+aux` (isolating the LSTM branch, since the 2D branch is absent and the
+auxiliary input is held fixed): the established default (one LSTM layer,
+four attention heads, hidden width 48), two head counts (2, 8), a deeper
+LSTM (two layers), and a wider hidden state (64). Selection was fixed to
+validation AUC before training, as in Section 10.5.6.
+
+| Configuration | Parameters | Validation AUC | Test AUC | Test MCC | Test accuracy |
+|---|---|---|---|---|---|
+| Default (1 layer, 4 heads, hidden 48) | 76,903 | 0.9574 | **0.9501** | **0.7675** | **88.37 %** |
+| 2 attention heads | 76,903 | 0.9576 | 0.9485 | 0.7520 | 87.59 % |
+| 8 attention heads | 76,903 | 0.9586 | 0.9495 | 0.7513 | 87.53 % |
+| Hidden width 64 | 123,815 | **0.9588** | 0.9488 | 0.7508 | 87.52 % |
+| 2 LSTM layers | 132,967 | 0.9565 | 0.9484 | 0.7486 | 87.33 % |
+
+All five configurations fall within a validation AUC band of 0.9565–0.9588
+(a spread of 0.0023, tighter even than Section 10.5.6's RAM CNN sweep), again
+well inside the established single-seed noise floor. The nominal winner by
+the pre-specified rule (hidden width 64, val AUC 0.9588) is not a
+meaningful improvement over the default. More notably, the default
+configuration has the *best* test-set MCC and accuracy of all five
+candidates despite ranking fourth of five on validation AUC — every
+configuration the sweep would have nominally preferred by its own selection
+rule scores worse on held-out test than the untouched default across MCC
+and accuracy. This is a sharper illustration of the same point Section
+10.5.6 made with the RAM CNN sweep: validation-based selection is not a
+guarantee against picking a configuration that generalizes worse, only a
+discipline against choosing one by looking at test results directly.
+**Neither the RAM CNN's hyperparameters (Section 10.5.6) nor the LSTM
+branch's own hyperparameters reward tuning on this dataset; the established
+defaults should be retained in both cases.**
+
+**Considered together with Sections 10.5.1–10.5.9, the single best-performing
 configuration measured in this entire investigation remains the plain
 spectrogram CNN classifier, with no LSTM branch, no auxiliary input, and no
 fusion mechanism (AUC 0.9793).** Every structural addition tested — the
@@ -1027,6 +1086,11 @@ representation.
 - Gated fusion's mixed result (10.5.5) has not been diagnosed further; the
   three plausible explanations offered are not distinguished by the current
   evidence and should be treated as open questions rather than findings.
+- `1d+aux` (Section 10.5.8) and the LSTM branch's own hyperparameters
+  (Section 10.5.9) have now been evaluated; neither the CNN's hyperparameters
+  (Section 10.5.6) nor the LSTM's reward tuning on this dataset. This
+  narrows the plausible location of any remaining gap toward feature
+  representation rather than architecture search on either existing branch.
 
 ---
 
@@ -1084,6 +1148,13 @@ python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_spec
     --channels all --batch-size 32                 # spectrogram + aux (Section 10.5.7)
 python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_specdualaux_6s \
     --channels 2d+aux --batch-size 32               # spectrogram + aux, no LSTM (Section 10.5.7)
+
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
+    --channels 1d+aux --batch-size 32               # raw waveform + aux, no 2D branch (Section 10.5.8)
+
+# LSTM branch hyperparameter sweep, isolated via --channels 1d+aux (Section 10.5.9)
+python cnn_lstm_classify_aux.py --dataset-dir ../../data_downloader/dataset_dualaux_6s \
+    --channels 1d+aux --batch-size 32 --lstm-heads 2      # or --lstm-heads 8 / --lstm-layers 2 / --hidden 64
 
 # Late-fusion stacking, given two already-trained --channels 1d / --channels 2d checkpoints
 python cnn_lstm_stack.py --dataset-dir ../../data_downloader/dataset_specdual_6s \
