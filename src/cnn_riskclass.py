@@ -1,33 +1,29 @@
 """
-Magnitude regression from encoded seismic windows.
+Three-class risk classification (noise / low-risk / high-risk) from encoded
+seismic windows.
 
-Consumes a dataset built by `seismic-cli generate-regression-dataset`: encoded
-windows (spectrogram .pt tensors or RAM .png images) plus a manifest carrying,
-per window, the source magnitude and two physical predictors -- log SNR
-against the station's noise floor, and epicentral distance.
+Consumes a dataset built by `seismic-cli generate-riskclass-dataset`
+(`data_downloader/seismic_cli/riskclass.py`): encoded windows plus a
+manifest carrying, per window, `risk_class` (`00_noise`, `01_low_risk`,
+`02_high_risk`), the source magnitude (NaN for noise), and the same two
+physical predictors `cnn_magclass.py` uses -- log SNR against the station's
+noise floor, and epicentral distance.
 
-Design follows report.md 8.2/8.3. Local magnitude is essentially log peak
-amplitude with a distance correction, but the RAM transform is exactly
-scale-invariant, so amplitude cannot reach the network through the image at
-all. Feeding `log_snr` and `log(distance)` alongside the encoded window gives
-the model a direct path to the dominant term; the image contributes shape,
-frequency content and coda structure on top.
+Reuses `RegressionSeismicCNN` with `num_classes=3` (see its docstring in
+`cnn_regression.py`) and `CrossEntropyLoss` in place of `BCEWithLogitsLoss`.
+As in `cnn_magclass.py`, a headline number is never reported alone:
 
-Because of that, the script always reports two reference points next to the
-CNN, so a headline MAE cannot be mistaken for a result:
-
-  * predict-the-mean  -- the floor any model must beat
-  * ridge on the two scalars alone -- effectively a fitted local-magnitude
-    relation. If the CNN does not beat this, the encoded window is
-    contributing nothing beyond amplitude and distance, which is the specific
-    thing worth knowing before investing further.
+  * predict-the-majority-class -- the floor any model must beat
+  * multinomial logistic regression on the two scalars alone -- the honest
+    test of whether the image contributes anything beyond amplitude and
+    distance (and, for the noise class specifically, whether "amplitude
+    close to this station's own baseline" alone already separates it out)
 
 Usage:
-    python cnn_regression.py --dataset-dir dataset_reg_60s --window-seconds 60
+    python cnn_riskclass.py --dataset-dir dataset_riskclass_3s --window-seconds 3
 """
 
 import argparse
-import math
 import os
 from pathlib import Path
 
@@ -36,28 +32,25 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (accuracy_score, confusion_matrix, matthews_corrcoef,
+                             roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from training import ImprovedSeismicCNN, seed_everything
+from cnn_regression import AUX_COLUMNS, RegressionSeismicCNN
+from training import seed_everything
 
-AUX_COLUMNS = ["log_snr", "log_distance"]
+RISK_CLASSES = ["00_noise", "01_low_risk", "02_high_risk"]
+CLASS_TO_IDX = {c: i for i, c in enumerate(RISK_CLASSES)}
 
 
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
 
-class MagnitudeDataset(Dataset):
-    """
-    Manifest-driven: rows carry the label and auxiliary scalars, so the encoded
-    window on disk stays exactly what the generator wrote.
-
-    Auxiliary features are standardized with statistics computed on TRAIN only
-    and passed in for val/test -- fitting them per-split would leak the test
-    distribution into its own normalization.
-    """
+class RiskClassDataset(Dataset):
+    """Identical manifest-driven loading to `cnn_magclass.MagnitudeClassDataset`,
+    except the target is the 3-way `risk_class` column mapped to {0,1,2}."""
 
     def __init__(self, manifest: pd.DataFrame, root: Path, aux_stats=None, transform=None):
         self.rows = manifest.reset_index(drop=True)
@@ -65,8 +58,6 @@ class MagnitudeDataset(Dataset):
         self.transform = transform
 
         aux = self.rows[AUX_COLUMNS].to_numpy(dtype=np.float64)
-        # NaNs (e.g. no station catalog -> no distance) become 0 after
-        # standardization, i.e. "no information", rather than poisoning the batch.
         if aux_stats is None:
             with np.errstate(invalid="ignore"):
                 mu = np.nanmean(aux, axis=0)
@@ -77,7 +68,7 @@ class MagnitudeDataset(Dataset):
         self.aux_mu, self.aux_sd = aux_stats
         aux = (aux - self.aux_mu) / self.aux_sd
         self.aux = np.nan_to_num(aux, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-        self.targets = self.rows["magnitude"].to_numpy(dtype=np.float32)
+        self.targets = self.rows["risk_class"].map(CLASS_TO_IDX).to_numpy(dtype=np.int64)
 
     def aux_stats(self):
         return (self.aux_mu, self.aux_sd)
@@ -98,90 +89,51 @@ class MagnitudeDataset(Dataset):
             x = self.transform(x)
         return (x,
                 torch.from_numpy(self.aux[idx]),
-                torch.tensor(self.targets[idx], dtype=torch.float32))
+                torch.tensor(self.targets[idx], dtype=torch.long))
 
 
 # ---------------------------------------------------------------------------
-# Model
+# Baselines
 # ---------------------------------------------------------------------------
-
-class RegressionSeismicCNN(nn.Module):
-    """
-    Shared CNN trunk, then the pooled features are concatenated with the
-    auxiliary scalars before the regression head.
-
-    `use_aux=False` reproduces an image-only model, which is the honest
-    ablation for "does the encoded window carry magnitude information at all".
-
-    `num_classes` defaults to 1 (a bare regression/binary-classification
-    logit, unchanged from every existing caller) and is otherwise the width
-    of the final layer -- e.g. 3 for `cnn_riskclass.py`'s noise/low-risk/
-    high-risk head, paired with `CrossEntropyLoss` instead of `L1Loss`/
-    `BCEWithLogitsLoss`. No other part of the trunk changes.
-    """
-
-    def __init__(self, dropout1=0.4, dropout2=0.2, hidden_dim=128,
-                 num_stages=4, in_channels=3, n_aux=len(AUX_COLUMNS), use_aux=True,
-                 num_classes=1):
-        super().__init__()
-        backbone = ImprovedSeismicCNN(dropout1=dropout1, dropout2=dropout2,
-                                      hidden_dim=hidden_dim, num_stages=num_stages,
-                                      in_channels=in_channels)
-        self.in_conv = backbone.in_conv
-        self.layer1, self.layer2 = backbone.layer1, backbone.layer2
-        self.layer3, self.layer4 = backbone.layer3, backbone.layer4
-        self.global_pool = backbone.global_pool
-        feat_dim = 256 if num_stages >= 4 else 128
-
-        self.use_aux = use_aux
-        self.n_aux = n_aux if use_aux else 0
-        self.head = nn.Sequential(
-            nn.Dropout(dropout1),
-            nn.Linear(feat_dim + self.n_aux, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout2),
-            nn.Linear(hidden_dim, num_classes),
-        )
-
-    def forward(self, x, aux=None):
-        x = self.in_conv(x)
-        x = self.layer1(x); x = self.layer2(x)
-        x = self.layer3(x); x = self.layer4(x)
-        x = torch.flatten(self.global_pool(x), 1)
-        if self.use_aux:
-            x = torch.cat([x, aux], dim=1)
-        return self.head(x)
-
-
-# ---------------------------------------------------------------------------
-# Metrics / baselines
-# ---------------------------------------------------------------------------
-
-def regression_metrics(y_true, y_pred):
-    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
-    return {
-        "MAE": float(mean_absolute_error(y_true, y_pred)),
-        "RMSE": float(math.sqrt(np.mean((y_true - y_pred) ** 2))),
-        "R2": float(r2_score(y_true, y_pred)) if len(y_true) > 1 else float("nan"),
-    }
-
 
 def report_baselines(train_ds, test_ds):
-    """Predict-the-mean, and ridge on the auxiliary scalars alone."""
+    """Predict-the-majority-class, and multinomial logistic regression on the
+    auxiliary scalars alone."""
     y_tr, y_te = train_ds.targets, test_ds.targets
     print("\n--- Reference points (test set) ---")
-    m = regression_metrics(y_te, np.full_like(y_te, y_tr.mean()))
-    print(f"  predict-the-mean      MAE {m['MAE']:.3f}  RMSE {m['RMSE']:.3f}  R2 {m['R2']:+.3f}")
+    majority = int(np.bincount(y_tr).argmax())
+    maj_preds = np.full_like(y_te, majority)
+    print(f"  predict-the-majority-class ({RISK_CLASSES[majority]})  "
+          f"acc {accuracy_score(y_te, maj_preds) * 100:.2f}%")
 
     try:
-        ridge = Ridge(alpha=1.0).fit(train_ds.aux, y_tr)
-        m2 = regression_metrics(y_te, ridge.predict(test_ds.aux))
-        print(f"  ridge(log_snr, log_dist)  MAE {m2['MAE']:.3f}  RMSE {m2['RMSE']:.3f}  R2 {m2['R2']:+.3f}"
-              "   <- a fitted local-magnitude relation; the CNN must beat this")
-        return m2["MAE"]
+        # sklearn >= 1.9 removed the `multi_class` argument; multinomial is
+        # the default for multiclass targets, so passing it is both
+        # unnecessary and fatal on current versions.
+        clf = LogisticRegression(max_iter=1000).fit(train_ds.aux, y_tr)
+        probs = clf.predict_proba(test_ds.aux)
+        preds = probs.argmax(axis=1)
+        acc = accuracy_score(y_te, preds) * 100
+        mcc = matthews_corrcoef(y_te, preds)
+        try:
+            auc = roc_auc_score(y_te, probs, multi_class="ovr", average="macro")
+        except ValueError:
+            auc = float("nan")
+        print(f"  logistic(log_snr, log_dist)  acc {acc:.2f}%  macro-auc {auc:.4f}  mcc {mcc:+.4f}"
+              "   <- a fitted amplitude/distance rule; the CNN must beat this")
+        return auc
     except Exception as e:
-        print(f"  [WARN] ridge baseline failed: {e}")
+        print(f"  [WARN] logistic baseline failed: {e}")
         return None
+
+
+def print_confusion(y_true, y_pred, label):
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(len(RISK_CLASSES))))
+    print(f"\n  Confusion matrix ({label}), rows=true cols=pred:")
+    header = "            " + "  ".join(f"{c:>11s}" for c in RISK_CLASSES)
+    print(header)
+    for i, c in enumerate(RISK_CLASSES):
+        print(f"  {c:>10s} " + "  ".join(f"{cm[i, j]:11d}" for j in range(len(RISK_CLASSES))))
 
 
 # ---------------------------------------------------------------------------
@@ -189,10 +141,11 @@ def report_baselines(train_ds, test_ds):
 # ---------------------------------------------------------------------------
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Magnitude regression on encoded seismic windows.")
+    p = argparse.ArgumentParser(description="Three-class risk classification "
+                                            "(noise / low-risk / high-risk) on encoded seismic windows.")
     p.add_argument("--dataset-dir", type=str, required=True,
-                   help="Directory produced by `seismic-cli generate-regression-dataset`.")
-    p.add_argument("--save-dir", type=str, default="trained_model_regression")
+                   help="Directory produced by `seismic-cli generate-riskclass-dataset`.")
+    p.add_argument("--save-dir", type=str, default="trained_model_riskclass")
     p.add_argument("--window-seconds", type=float, default=None,
                    help="Selects the short preset at <= 12s (smaller model, harder regularization).")
     p.add_argument("--no-aux", action="store_true",
@@ -208,8 +161,6 @@ def parse_args():
     p.add_argument("--dropout2", type=float, default=None)
     p.add_argument("--hidden-dim", type=int, default=None)
     p.add_argument("--num-stages", type=int, default=None, choices=[3, 4])
-    p.add_argument("--huber-delta", type=float, default=0.0,
-                   help="If > 0 use SmoothL1 with this beta instead of plain L1 (MAE).")
     args = p.parse_args()
 
     short = args.window_seconds is not None and args.window_seconds <= 12.0
@@ -231,10 +182,10 @@ def main():
 
     root = Path(args.dataset_dir)
     manifest = pd.read_csv(root / "manifest.csv")
-    for col in ("magnitude", "log_snr"):
+    for col in ("risk_class", "log_snr"):
         if col not in manifest.columns:
             raise ValueError(f"manifest.csv is missing '{col}'. Regenerate it with "
-                             f"`seismic-cli generate-regression-dataset`.")
+                             f"`seismic-cli generate-riskclass-dataset`.")
     if "distance_km" not in manifest.columns:
         manifest["distance_km"] = np.nan
     manifest["log_distance"] = np.log(manifest["distance_km"].clip(lower=1.0))
@@ -246,33 +197,34 @@ def main():
             raise ValueError(f"Split '{split}' is empty in the manifest.")
         parts[split] = sub
 
-    train_ds = MagnitudeDataset(parts["train"], root)
-    stats = train_ds.aux_stats()          # TRAIN-only statistics, reused below
-    val_ds = MagnitudeDataset(parts["val"], root, aux_stats=stats)
-    test_ds = MagnitudeDataset(parts["test"], root, aux_stats=stats)
+    train_ds = RiskClassDataset(parts["train"], root)
+    stats = train_ds.aux_stats()
+    val_ds = RiskClassDataset(parts["val"], root, aux_stats=stats)
+    test_ds = RiskClassDataset(parts["test"], root, aux_stats=stats)
 
     sample_x, sample_aux, _ = train_ds[0]
     in_channels = sample_x.shape[0]
 
     print("=" * 64)
-    print(f"Magnitude regression | preset '{args.preset_name}' | aux={'off' if args.no_aux else 'on'}")
+    print(f"Risk-class (noise / low-risk / high-risk) | preset '{args.preset_name}' "
+          f"| aux={'off' if args.no_aux else 'on'}")
     print(f"  input {tuple(sample_x.shape)} | aux dim {sample_aux.numel()} "
           f"({', '.join(AUX_COLUMNS)})")
-    for s in ("train", "val", "test"):
+    for s, ds in (("train", train_ds), ("val", val_ds), ("test", test_ds)):
         d = parts[s]
-        print(f"  {s:5s}: n={len(d):5d}  M {d.magnitude.min():.1f}-{d.magnitude.max():.1f} "
-              f"(mean {d.magnitude.mean():.2f})  events={d.event_id.nunique()}")
+        counts = d.risk_class.value_counts()
+        print(f"  {s:5s}: n={len(d):6d}  " + "  ".join(f"{c}={counts.get(c, 0)}" for c in RISK_CLASSES))
     n_dist = int(manifest.distance_km.notna().sum())
     if n_dist == 0:
         print("  [note] distance_km is absent -- rerun generation with --station-catalog "
-              "to add it; magnitude and distance are confounded without it.")
+              "to add it.")
     print("=" * 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = RegressionSeismicCNN(dropout1=args.dropout1, dropout2=args.dropout2,
                                  hidden_dim=args.hidden_dim, num_stages=args.num_stages,
                                  in_channels=in_channels, n_aux=len(AUX_COLUMNS),
-                                 use_aux=not args.no_aux).to(device)
+                                 use_aux=not args.no_aux, num_classes=len(RISK_CLASSES)).to(device)
     print(f"Device: {device} | parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
@@ -282,37 +234,34 @@ def main():
     test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False,
                              num_workers=args.num_workers, pin_memory=True)
 
-    # L1 matches how magnitude error is judged and resists the heavy tail of
-    # large events far better than MSE.
-    criterion = (nn.SmoothL1Loss(beta=args.huber_delta) if args.huber_delta > 0
-                 else nn.L1Loss())
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_epochs)
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    save_path = os.path.join(args.save_dir, "best_regression_model.pth")
-    best_val_mae = float("inf")
+    save_path = os.path.join(args.save_dir, "best_riskclass_model.pth")
+    best_val_mcc = -1.0
     epochs_no_improve = 0
 
     def evaluate(loader):
         model.eval()
-        preds, trues = [], []
+        probs, trues = [], []
         with torch.no_grad():
             for x, aux, y in loader:
                 x, aux = x.to(device), aux.to(device)
                 with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     out = model(x, aux)
-                preds.extend(out.float().squeeze(1).cpu().tolist())
+                probs.extend(torch.softmax(out.float(), dim=1).cpu().tolist())
                 trues.extend(y.tolist())
-        return np.array(trues), np.array(preds)
+        return np.array(trues), np.array(probs)
 
     for epoch in range(args.num_epochs):
         model.train()
         running = 0.0
         for x, aux, y in train_loader:
-            x, aux, y = x.to(device), aux.to(device), y.to(device).unsqueeze(1)
+            x, aux, y = x.to(device), aux.to(device), y.to(device)
             with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                 loss = criterion(model(x, aux), y)
             scaler.scale(loss).backward()
@@ -323,37 +272,44 @@ def main():
         scheduler.step()
 
         yt, yp = evaluate(val_loader)
-        vm = regression_metrics(yt, yp)
+        preds = yp.argmax(axis=1)
+        val_acc = accuracy_score(yt, preds)
+        val_mcc = matthews_corrcoef(yt, preds)
         print(f"Epoch {epoch+1}/{args.num_epochs} | train {running/len(train_ds):.4f} "
-              f"| val MAE {vm['MAE']:.4f}  RMSE {vm['RMSE']:.4f}  R2 {vm['R2']:+.4f}")
+              f"| val acc {val_acc:.4f}  mcc {val_mcc:+.4f}")
 
-        if vm["MAE"] < best_val_mae:
-            best_val_mae = vm["MAE"]
+        if val_mcc > best_val_mcc:
+            best_val_mcc = val_mcc
             epochs_no_improve = 0
             torch.save(model.state_dict(), save_path)
-            print(f"  => saved (val MAE {best_val_mae:.4f})")
+            print(f"  => saved (val MCC {best_val_mcc:.4f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= args.patience:
-                print(f"\nEarly stopping: val MAE flat for {args.patience} epochs.")
+                print(f"\nEarly stopping: val MCC flat for {args.patience} epochs.")
                 break
 
     model.load_state_dict(torch.load(save_path, weights_only=True))
     yt, yp = evaluate(test_loader)
-    tm = regression_metrics(yt, yp)
+    preds = yp.argmax(axis=1)
+    test_acc = accuracy_score(yt, preds) * 100
+    test_mcc = matthews_corrcoef(yt, preds)
+    try:
+        test_auc = roc_auc_score(yt, yp, multi_class="ovr", average="macro")
+    except ValueError:
+        test_auc = float("nan")
 
-    ridge_mae = report_baselines(train_ds, test_ds)
+    baseline_auc = report_baselines(train_ds, test_ds)
     print(f"\n--- CNN ({'image only' if args.no_aux else 'image + aux'}) ---")
-    print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}")
-    if ridge_mae is not None:
-        delta = ridge_mae - tm["MAE"]
+    print(f"  Accuracy {test_acc:.2f}%  Macro-AUC {test_auc:.4f}  MCC {test_mcc:+.4f}")
+    if baseline_auc is not None and not np.isnan(baseline_auc):
+        delta = test_auc - baseline_auc
         verdict = ("the encoded window adds information beyond amplitude+distance"
                    if delta > 0.01 else
                    "NO measurable gain over amplitude+distance alone -- the encoding "
                    "is not contributing")
-        print(f"  vs ridge baseline: {delta:+.3f} MAE  ->  {verdict}")
-    print(f"\n  residual std {np.std(yt - yp):.3f} magnitude units over "
-          f"M {yt.min():.1f}-{yt.max():.1f}")
+        print(f"  vs logistic baseline: {delta:+.4f} macro-AUC  ->  {verdict}")
+    print_confusion(yt, preds, "test")
 
 
 if __name__ == "__main__":
