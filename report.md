@@ -1168,10 +1168,9 @@ representation.
   clear win on both datasets) and with gated fusion (Section 10.5.11, a
   clear loss relative to either intervention alone).
 - `log_snr` and `log_rms` are single scalars per window, averaged over
-  Z, N, and E. Per-component auxiliary inputs (six scalars rather than two)
-  were not tested and might retain information the averaging step
-  discards, at the cost of tripling the auxiliary input's dimensionality
-  relative to what is otherwise an inexpensive correction.
+  Z, N, and E. A per-component variant (six scalars rather than two,
+  `--per-component-aux` in `data_downloader`) has been implemented and
+  smoke-tested but not evaluated — see Section 10.7.
 - 60 s windows were not re-tested with any of the additions described in
   this section. The geometric argument in Section 2.3 for why short windows
   are more difficult applies specifically to the RAM branch, not to the
@@ -1187,6 +1186,62 @@ representation.
   (Section 10.5.6) nor the LSTM's reward tuning on this dataset. This
   narrows the plausible location of any remaining gap toward feature
   representation rather than architecture search on either existing branch.
+
+### 10.7 Investigation Status and Next Steps
+
+This closes the dual-channel waveform-classification investigation (Section
+10) as an active line of work. It is not concluded because a dead end was
+reached; it is being set aside deliberately because it was itself an
+extension of the project's original scope, and continuing to refine it
+further would be digging the same hole deeper rather than returning to that
+scope.
+
+**What this phase established.** Across all configurations tested,
+`2d`-alone with no auxiliary input remains the single best-performing
+configuration in the entire investigation (test AUC 0.9793, Section 7.2).
+Relative to that ceiling: gated fusion gives a real but small and noisy AUC
+edge over linear fusion, alongside a more robust, low-variance win on
+accuracy and MCC (Section 10.5.12); the amplitude-scalar correction produces
+a large, seed-independent improvement on the RAM-only and RAM-dual models
+(Sections 8.2, 10.5.3, 10.5.8) but a much smaller, seed-fragile one on the
+spectrogram-dual model (Section 10.5.12); late-fusion stacking of frozen
+aux-augmented branches beats both linear and gated joint fusion on both
+datasets (Section 10.5.10); and gated fusion combined with amplitude aux
+performs worse than either intervention alone — an explicit case of two
+independently-validated improvements failing to compose (Section 10.5.11).
+Section 10.5.12's seed-repeat check is the standing methodological caution
+for the whole section: single-seed margins under roughly 0.01–0.02 AUC have
+been shown concretely, on this dataset, to overstate an effect, understate
+it, or report the wrong sign.
+
+**What was started but not finished.** Per-component auxiliary scalars
+(`--per-component-aux`, adding `RamAuxEncoderV2`, `RamDualAuxEncoderV2`, and
+`SpectrogramDualAuxEncoderV2` to `data_downloader/seismic_cli`, commit
+`8485ffc`) are implemented, produce the expected `(6,)`-shaped tensor, and
+required no model-side changes since `aux_dim` is read from the tensor shape
+at load time. No dataset was regenerated at full scale and no model was
+retrained against it — this is left as unevaluated, not abandoned. 60 s
+windows with the LSTM+attention branch (Section 10.6) were never started.
+Neither should be treated as a loose end requiring closure; either could be
+picked back up later if the amplitude-correction or window-length questions
+become relevant again.
+
+**Where the project goes next.** The original objective was forecasting
+event onset time and event class from earthquake catalog data — not
+waveform classification. That work already has a dormant implementation
+that predates this section and has never been run or reported on:
+`data_downloader/seismic_cli/catalog.py` builds chronologically-split,
+embargoed sliding-window datasets from a catalog (feature channels in
+`SEQ_FEATURES`/`IMAGE_FEATURES`/`AUX_FEATURES`, three-class time-to-next-event
+labels in `RISK_CLASSES = [lt_1y, 1_5y, gt_5y]`), reachable via the
+`generate-catalog-dataset` CLI command; `cnn_earthquake/src/cnn_lstm_loeo.py`
+implements `DualChannelRiskNet`, the corresponding model. Both were built
+using the same dual-channel {seq, img, aux} pattern documented in Section
+10.2–10.3, so the architecture work in this section is not wasted even
+though its focus was elsewhere — but neither the dataset generation nor the
+model has been exercised end-to-end, so the next phase starts from
+"does this run at all and what does a first result look like," not from a
+refinement question.
 
 ---
 
