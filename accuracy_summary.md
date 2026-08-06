@@ -61,24 +61,45 @@ so "distance is missing" identifies the noise class by construction.
 
 ---
 
-## Task 4 — Catalog forecasting: time to next mainshock (3 balanced classes, 264-event LOEO)
+## Task 4 — Catalog forecasting
+
+Two formulations were tried. The first is a clean negative result; the second
+works, but only in some zones.
+
+**4a. Time to next mainshock** (3 balanced classes, 264-event LOEO) — *abandoned*
 
 | Model | Accuracy | Kappa |
 |---|---|---|
 | Gradient boosting on 9 seismicity indicators | 31.49 % | −0.028 |
-| Dual-channel CNN+LSTM | *run in progress* | — |
 | *floor:* chance (3 balanced classes) | *33.33 %* | *0.000* |
 
-**The scalar model is below chance with negative kappa** — the nine seismicity
-indicators (b-value, Lyapunov exponent, energy release rate, …) carry no usable
-signal for this target under leave-one-event-out evaluation. See
-`catalog_report.md`.
+At chance with negative kappa. Declustering removes aftershocks — the most
+predictable part of seismicity — leaving mainshock timing that is near-Poisson
+(gap CV 0.67–1.17). Near-unlearnable by construction.
 
-> The per-fold majority-class baseline that both LOEO scripts originally
-> reported (8.53 %) must **not** be used as the floor: with balanced classes,
-> removing a fold tips the training pool away from that fold's own dominant
-> class, so the "majority" is the class the fold has *least* of — it matched the
-> fold's true mode in 2 of 264 folds. Beating it is evidence of nothing.
+**4b. M ≥ 4.5 within 30 days, per fault zone** — *the working forecaster*
+
+| Zone | CV | Persistence AUC | Best model AUC |
+|---|---|---|---|
+| **AEGEAN** | 1.56 | 0.640 | **0.798** |
+| EAFZ | 1.46 | 0.499 | 0.570 |
+| NAFZ | 1.04 | 0.380 | 0.409 |
+| CENTRAL | 1.02 | 0.270 | 0.424 |
+| *pooled (window-weighted)* | — | *0.634* | *0.723* |
+
+**Forecastable in the Aegean (AUC 0.798 vs a 0.640 persistence floor); not
+forecastable in the near-Poisson zones**, where even zone-specific models stay
+below chance. Forecastability tracks clustering: where CV ≈ 1 the process is
+memoryless and no model of this kind can work. The pooled 0.723 is AEGEAN's
+number in disguise — macro-averaged across zones it falls to 0.544.
+
+> Two floors here are traps, not baselines. The per-fold majority-class figure
+> both LOEO scripts originally reported (8.53 %) is *anti-predictive*: with
+> balanced classes, removing a fold tips the pool away from that fold's own
+> dominant class, so the "majority" is the class it has *least* of — matching
+> the fold's true mode in 2 of 264 folds. And for 4b, the base rate is far
+> weaker than **persistence**, which is the floor that actually has to be
+> beaten. See `catalog_report.md`.
 
 ---
 

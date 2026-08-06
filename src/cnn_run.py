@@ -1,13 +1,11 @@
 import torch
-# Imported so torch.load can resolve the pickled class in full_model.pth.
-# (This said `SeismicCNN`, which no longer exists -- the script raised
-# ImportError before it could load anything.)
-from cnn_train import ImprovedSeismicCNN  # noqa: F401
 from sklearn.metrics import (brier_score_loss, classification_report,
                              confusion_matrix, matthews_corrcoef,
                              roc_auc_score)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+from cnn_train import ImprovedSeismicCNN  # noqa: F401
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
