@@ -120,7 +120,7 @@ class DualChannelAuxBinaryNet(nn.Module):
     `cnn_lstm.DualChannelRiskNet` already uses for the catalog model."""
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
-                dropout=0.3, channels="all", fusion="linear"):
+                dropout=0.3, channels="all", fusion="linear", lstm_layers=1, lstm_heads=4):
         super().__init__()
         self.channels = channels
         self.fusion = fusion
@@ -133,7 +133,8 @@ class DualChannelAuxBinaryNet(nn.Module):
             raise ValueError(f"--fusion must be 'linear' or 'gate', got {fusion!r}")
 
         if self.use_1d:
-            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
+            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, layers=lstm_layers,
+                                          heads=lstm_heads, dropout=dropout)
             self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
         if self.use_2d:
             self.b2 = CNNBranch(img_channels, dropout=dropout)
@@ -198,6 +199,12 @@ def parse_args():
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=3e-2)
     p.add_argument("--hidden", type=int, default=48)
+    p.add_argument("--lstm-layers", type=int, default=1,
+                   help="LSTMAttentionBranch's LSTM depth. Never swept before this run.")
+    p.add_argument("--lstm-heads", type=int, default=4,
+                   help="LSTMAttentionBranch's MultiheadAttention head count. Must divide "
+                        "2*hidden (the bidirectional LSTM's output width). Never swept before "
+                        "this run.")
     p.add_argument("--fusion-dim", type=int, default=96)
     p.add_argument("--dropout", type=float, default=0.4)
     p.add_argument("--patience", type=int, default=10)
@@ -232,7 +239,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DualChannelAuxBinaryNet(seq_shape[-1], img_shape[0], aux_shape[-1], hidden=args.hidden,
                                     fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                    channels=args.channels, fusion=args.fusion).to(device)
+                                    channels=args.channels, fusion=args.fusion,
+                                    lstm_layers=args.lstm_layers, lstm_heads=args.lstm_heads).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Device: {device} | parameters: {n_params:,} | train samples: {len(train_ds)} "
           f"({n_params / max(1, len(train_ds)):.1f} params/sample)")
