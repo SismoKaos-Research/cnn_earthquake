@@ -10,18 +10,26 @@ This is the project's stated objective — forecasting earthquake occurrence fro
 catalog data — as distinct from the waveform work in `report.md`, which was a
 detour.
 
-The result is a **narrow, defensible forecast and a well-explained failure**.
-Reformulated as "will a M ≥ 4.5 event occur in this fault zone within the next
-30 days?", the forecaster reaches **test AUC 0.78 in the Aegean extensional
-province against a 0.64 persistence floor** — a genuine forecast. In the two
-near-Poisson zones it does not work at all, scoring **below chance even with
-zone-specific models**.
+The result is a **weak but real forecast in two zones, and a well-explained
+failure in the other two**. Reformulated as "will a M ≥ 4.5 event occur in this
+fault zone within the next 30 days?", the forecaster reaches a **median test AUC
+of 0.66 in the Aegean and 0.65 in the East Anatolian zone across 12 rolling
+origins**, against persistence floors of 0.54 and 0.45. In the two near-Poisson
+zones it does not work at all, scoring **below chance at almost every origin**.
+
+Those medians replace an earlier single-cut headline of 0.798 for the Aegean.
+A rolling-origin backtest (§4.4) showed that figure sat near the **top** of a
+distribution with an interquartile range spanning 0.23 AUC — the direction of
+the result survived, the precision of the number did not. The same backtest
+promoted EAFZ from "not forecastable" to the zone with the most consistent
+signal of the four.
 
 The reason is physical rather than architectural, and it is the same reason
-throughout. **Forecastability tracks clustering.** Across four zones, the
-predictive value of recency correlates almost monotonically with the
-coefficient of variation of inter-event gaps, and where CV ≈ 1 — exactly
-memoryless — no model of this kind can work.
+throughout. **Forecastability tracks clustering.** The two zones that work are
+the two with clustered inter-event gaps (CV 1.56 and 1.46); the two that fail
+are the two sitting at CV ≈ 1 — exactly memoryless — where no model of this kind
+can work. The single cut broke this pattern by placing EAFZ at chance; the
+backtest restored it, so the physical explanation now fits all four zones.
 
 That argument also explains the phase this replaced. The original target
 (time to the next independent mainshock, in terciles) measured **at chance**:
@@ -158,6 +166,11 @@ accuracy is dominated by the base rate.
 Logistic beating gradient boosting repeats the pattern of `report.md` §8.5 —
 the simpler model wins again.
 
+> **These are single-cut numbers. §4.4 replaces them with a distribution over
+> 12 test eras, and the headline moves.** They are retained because they are
+> what `forecast_eval.py` still prints, and because the gap between them and
+> §4.4 is itself the finding.
+
 ### 4.2 Per zone — where the pooled number comes from
 
 | zone | n_test | pos | persist | pooled | pool+zone | per-zone |
@@ -200,27 +213,115 @@ opposite temporal dependences at once, so it learns the average and fails on
 the minority behaviour. Per-zone models can represent both and do improve the
 Poisson-like zones — but improving toward chance is not forecasting.
 
-**The defensible claim** is therefore narrow and specific: *M ≥ 4.5 within 30
-days is forecastable in the Aegean extensional province (AUC 0.78 against a
-0.64 persistence floor) and is not forecastable in the near-Poisson NAFZ and
-Cyprus-arc zones.*
+### 4.4 Rolling-origin backtest — the numbers above are one era
+
+Everything in §4.1–4.3 rests on **one** chronological cut. That cannot be told
+apart from *"the 2023–2026 test era happened to favour the Aegean"* — especially
+since that era contains the Kahramanmaraş sequence, and CENTRAL and NAFZ are
+judged on 142 and 320 windows. `forecast_backtest.py` walks the origin forward
+over **12 semi-annual cuts**, refitting at each, keeping the 30-day embargo, and
+reports AUC as a distribution.
+
+**The bar is `max(chance, persistence)`, not persistence alone.** Persistence
+scores 0.18–0.34 in NAFZ and CENTRAL — far *below* chance, because a recent
+event there predicts *fewer* events. Beating an anti-predictive floor while
+sitting below a coin flip is not a forecast; it is §2(b)'s trap in a new place.
+Counted against persistence alone, CENTRAL "wins" 9 of 12 origins while its
+median AUC is 0.369. Both counts are reported:
+
+| Zone | CV | persist. median | **model median** | IQR | > persist. | **> both floors** |
+|---|---|---|---|---|---|---|
+| AEGEAN | 1.56 | 0.5396 | **0.6609** | [0.532, 0.763] | 8/12 | **6/12** |
+| EAFZ | 1.46 | 0.4463 | **0.6500** | [0.523, 0.724] | 10/12 | **7/12** |
+| NAFZ | 1.04 | 0.3414 | 0.4469 | [0.334, 0.571] | 6/12 | 3/12 |
+| CENTRAL | 1.02 | 0.1830 | 0.3686 | [0.311, 0.589] | 9/12 | 4/12 |
+
+**Three things change.**
+
+1. **AEGEAN's 0.798 was near the top of its own distribution, not the middle.**
+   The honest central estimate is **0.66, with an IQR spanning 0.23** — and it
+   clears both floors at only 6 of 12 origins, which is exactly half. The
+   direction of the result survives; the confidence in the specific number does
+   not.
+2. **EAFZ is forecastable, and §4.2 said otherwise.** Its median is 0.650 and it
+   clears both floors more often than AEGEAN does (7/12). The single cut put it
+   at 0.570 and §4.3 read that as "clustered, but no usable recency signal."
+   That reading was an artifact of one era.
+3. **NAFZ and CENTRAL are confirmed not forecastable** — both medians sit below
+   chance across origins, not just in one test window.
+
+Correction (2) **strengthens** §4.3 rather than undermining it. The clustering
+story predicted that the two high-CV zones (1.56, 1.46) should work and the two
+near-Poisson ones (1.04, 1.02) should not. The single cut broke that pattern by
+putting EAFZ at chance; the backtest restores it. The physical explanation now
+matches the data in all four zones instead of three.
+
+Sliding vs. expanding training windows split 2–2, so there is no evidence here
+that older data actively hurts.
+
+### 4.5 Sensitivity to threshold and horizon
+
+Median AUC over the same 12 origins, for M ≥ 4.0/4.5/5.0 × 15/30/60 days:
+
+| M ≥ | 15 d | 30 d | 60 d |
+|---|---|---|---|
+| **AEGEAN** 4.0 / 4.5 / 5.0 | 0.597 / 0.696 / 0.605 | 0.680 / 0.661 / 0.636 | 0.661 / 0.600 / 0.524 |
+| **EAFZ** | 0.624 / 0.535 / 0.549 | 0.529 / 0.650 / 0.561 | 0.668 / 0.466 / 0.599 |
+| **NAFZ** | 0.529 / 0.516 / 0.395 | 0.496 / 0.447 / 0.328 | 0.476 / 0.432 / 0.359 |
+| **CENTRAL** | 0.544 / 0.449 / 0.548 | 0.492 / 0.369 / 0.475 | 0.657 / 0.360 / 0.566 |
+
+**AEGEAN clears chance in all nine cells** (0.524–0.696), so its result is not an
+artifact of the M ≥ 4.5 / 30-day choice. **NAFZ clears it in none but two
+marginal cells.** EAFZ is above chance in seven of nine. CENTRAL swings from
+0.360 to 0.657 across cells, which is the signature of noise rather than a
+horizon-dependent signal.
+
+> **Do not read the M ≥ 5.0 rows as large wins.** At that threshold persistence
+> scores *exactly* 0.0000 for CENTRAL and NAFZ — a perfectly inverted ranking,
+> which happens because M ≥ 5.0 events are rare enough that
+> `days_since_prev_major` is degenerate. The apparent "+0.55 over persistence"
+> is a broken floor, not a good model. Those cells also rest on 7–10 usable
+> origins rather than 12.
+
+**The defensible claim**, restated to match the backtest: *M ≥ 4.5 within 30
+days is forecastable in the two clustered zones — AEGEAN (median AUC 0.66,
+IQR 0.53–0.76) and EAFZ (0.65, IQR 0.52–0.72) — and is not forecastable in the
+near-Poisson NAFZ and Cyprus-arc zones, whose medians sit below chance. The
+previously reported 0.798 for AEGEAN was the top of a wide distribution.*
+
+### 4.6 Operating point
+
+AUC is threshold-free; a forecast someone acts on is not. Following Başar &
+Çelik (2026) — the only paper in `literature_review.md` that calibrates its
+operating point rather than defaulting to 0.5 — the threshold is now chosen on
+each origin's own validation slice. The selected value is **0.137, not 0.5**,
+giving precision 0.317 at recall 0.679. Thresholding at 0.5, as the earlier
+scripts did, was far too conservative for a target with this base rate.
 
 ## 5. Limitations
 
-- **Below-chance AUC in two zones is not just "no signal"** — it indicates the
-  relationship *inverts* between the 2010–2021 training era and the 2023–2026
-  test era. Non-stationarity, not merely absence of signal.
-- **The test era contains the 2023 Kahramanmaraş sequence**, which is why the
-  validation window has a 0.782 positive rate against training's 0.414. A
-  chronological split cannot avoid this, and it disproportionately affects EAFZ.
-- **CENTRAL and NAFZ test sets are small** (142 and 320 windows), so their
-  figures carry wide uncertainty.
-- **Single split, single seed, single threshold/horizon.** No sensitivity
-  analysis over M ≥ 4.5 or 30 days, and `report.md` §6.6 showed concretely that
+- **Below-chance AUC in NAFZ and CENTRAL persists across all 12 origins**, so it
+  is not an artifact of one era. Whether it reflects a genuinely inverted
+  relationship or simply no signal plus small samples is not resolved here;
+  §4.5 shows CENTRAL swinging 0.360–0.657 across grid cells, which favours
+  noise.
+- **Even the zones that work are wide.** AEGEAN's IQR spans 0.23 AUC and it
+  clears both floors at only 6 of 12 origins. This is a weak, real effect, not
+  a reliable forecast — a single origin's number should never be quoted alone,
+  which is the mistake §4.1–4.3 made.
+- **Kahramanmaraş is now handled structurally**, since it falls in train for
+  some origins and test for others, but it still dominates EAFZ's later origins.
+- **Single seed, single model family.** The backtest fixes the split, threshold
+  and horizon, but every cell is one logistic fit; `report.md` §6.6 showed
   single-seed margins on this project can reverse.
 - **No neural model has been run on the reformulated target.** Given that
   logistic beats gradient boosting here, and the §8.5 precedent, the priors are
   not favourable — but it is untested.
+- **`lyapunov` is computed but unused.** `catalog.py:174`
+  (`max_lyapunov_rosenstein`) is in `AUX_FEATURES` but was dropped from
+  `forecast.py:FEATURES` during the reformulation. That was an unaudited
+  omission rather than a decision, and it has not yet been measured against the
+  backtest distribution.
 
 ## 6. Reproduction
 

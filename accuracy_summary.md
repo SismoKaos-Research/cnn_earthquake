@@ -79,27 +79,37 @@ predictable part of seismicity — leaving mainshock timing that is near-Poisson
 
 **4b. M ≥ 4.5 within 30 days, per fault zone** — *the working forecaster*
 
-| Zone | CV | Persistence AUC | Best model AUC |
-|---|---|---|---|
-| **AEGEAN** | 1.56 | 0.640 | **0.798** |
-| EAFZ | 1.46 | 0.499 | 0.570 |
-| NAFZ | 1.04 | 0.380 | 0.409 |
-| CENTRAL | 1.02 | 0.270 | 0.424 |
-| *pooled (window-weighted)* | — | *0.634* | *0.723* |
+Medians over **12 rolling origins**, not a single cut. The bar is
+`max(chance, persistence)`, since persistence is *below* chance in two zones.
 
-**Forecastable in the Aegean (AUC 0.798 vs a 0.640 persistence floor); not
-forecastable in the near-Poisson zones**, where even zone-specific models stay
-below chance. Forecastability tracks clustering: where CV ≈ 1 the process is
-memoryless and no model of this kind can work. The pooled 0.723 is AEGEAN's
-number in disguise — macro-averaged across zones it falls to 0.544.
+| Zone | CV | Persistence | **Model (median)** | IQR | Clears both floors |
+|---|---|---|---|---|---|
+| **AEGEAN** | 1.56 | 0.540 | **0.661** | [0.532, 0.763] | 6/12 |
+| **EAFZ** | 1.46 | 0.446 | **0.650** | [0.523, 0.724] | 7/12 |
+| NAFZ | 1.04 | 0.341 | 0.447 | [0.334, 0.571] | 3/12 |
+| CENTRAL | 1.02 | 0.183 | 0.369 | [0.311, 0.589] | 4/12 |
+
+**Forecastable in the two clustered zones, not in the two near-Poisson ones.**
+Forecastability tracks clustering: where CV ≈ 1 the process is memoryless and no
+model of this kind can work.
+
+> **These numbers replace a single-cut headline of 0.798 for AEGEAN.** The
+> rolling-origin backtest showed that figure sat near the *top* of a
+> distribution whose IQR spans 0.23 AUC. It also promoted EAFZ from "not
+> forecastable" (single-cut 0.570) to the most consistent zone of the four.
+> The effect is real but weak — AEGEAN clears both floors at exactly half its
+> origins. See `catalog_report.md` §4.4.
 
 > Two floors here are traps, not baselines. The per-fold majority-class figure
 > both LOEO scripts originally reported (8.53 %) is *anti-predictive*: with
 > balanced classes, removing a fold tips the pool away from that fold's own
 > dominant class, so the "majority" is the class it has *least* of — matching
 > the fold's true mode in 2 of 264 folds. And for 4b, the base rate is far
-> weaker than **persistence**, which is the floor that actually has to be
-> beaten. See `catalog_report.md`.
+> weaker than **persistence** — but persistence itself scores 0.18–0.34 in NAFZ
+> and CENTRAL, i.e. *below chance*, so beating it there proves nothing. Counted
+> against persistence alone, CENTRAL "wins" 9 of 12 origins while sitting at
+> AUC 0.369. The bar has to be `max(chance, persistence)`. See
+> `catalog_report.md` §4.4.
 
 ---
 
