@@ -26,10 +26,13 @@ narrower, related question: can *event class* (a coarse magnitude bin) be
 predicted directly from a single 3-second window, reusing the same amplitude
 auxiliary machinery. The fourth records the project's status and its
 redirection back toward its original objective — forecasting event onset
-time and class from catalog data, not waveform classification — and points
-at the concrete, dormant code that objective already has.
+time and class from catalog data, not waveform classification — which is
+carried out and reported separately in `catalog_report.md`. A fifth part
+(Section 13) returns to waveforms for one bounded question: predicting peak
+ground motion from a 3-second window, as a replication of Nurtas et al.
+(2025) supplied with the non-neural floor that paper omits.
 
-Six findings carry the report:
+Seven findings carry the report:
 
 - **The amplitude auxiliary input is the single largest contributor to
   classification performance measured in this work** (test AUC 0.836 → 0.923
@@ -76,6 +79,17 @@ Six findings carry the report:
   accuracy points. This report's most transferable finding may be
   methodological rather than seismological: on this data, the failure mode
   is almost never a crash.
+- **On peak ground motion, the network wins — and the paper's own target
+  definition is why that is not obvious.** A Conv1D–BiLSTM–attention model
+  beats the strongest scalar floor (amplitude + distance + station) by 0.075
+  MAE_log at ~50× the seed spread, in both metric spaces, and the recurrent
+  branch earns its parameters — the first architectural addition in this
+  project to do so. But the paper's target window *contains* its own input
+  window: the input's peak amplitude is a mathematical lower bound on that
+  target in 100% of rows and exactly equals it in a third of them. On that
+  degenerate target the network adds almost nothing (+0.011). The value
+  appears on the corrected target and evaporates on the original
+  (Section 13).
 
 Every numerical claim in this report is drawn directly from a measurement
 taken against the code in this repository. Where a result has not been
@@ -1464,19 +1478,26 @@ this dataset have been shown concretely to overstate an effect, understate
 it, or report the wrong sign (Section 6.6), and that a held-out split too
 poor in stations can rank models backwards outright (Section 8.4b).
 
-**Where the project goes next.** `data_downloader/seismic_cli/catalog.py`
-already builds chronologically-split, embargoed sliding-window datasets from
-a catalog (feature channels in `SEQ_FEATURES`/`IMAGE_FEATURES`/
-`AUX_FEATURES`, three-class time-to-next-event labels in
-`RISK_CLASSES = [lt_1y, 1_5y, gt_5y]`), reachable via the
-`generate-catalog-dataset` CLI command; `cnn_earthquake/src/
-cnn_lstm_loeo.py` implements `DualChannelRiskNet`, the corresponding model.
-Both predate this report and use the same dual-channel `{seq, img, aux}`
-pattern documented in Section 4 — the architecture work here is not wasted,
-even though its focus was elsewhere — but neither the dataset generation nor
-the model has been exercised end-to-end. The next phase starts from "does
-this run at all and what does a first result look like," not from a
-refinement question.
+**What happened next — this paragraph supersedes the plan that stood here, which
+described the catalog code as never having been exercised end-to-end.** That
+work has since been carried out and is reported separately in
+`catalog_report.md`. Its outcome, in brief: the three-class time-to-next-event
+formulation was replaced by a binary one — "will a M ≥ 4.5 event occur in this
+fault zone within the next 30 days?" — reaching block-level AUC 0.62 (East
+Anatolian) and 0.60 (Aegean) over ~190 independent 30-day blocks, both 95 %
+confidence intervals excluding chance, while the North Anatolian and Cyprus
+zones are indistinguishable from chance. Only one zone yields calibrated
+probabilities beating climatology by a usable margin. Reaching that number
+required two corrections that each *shrank* the claim, both measurement defects
+rather than model failures: a single-cut headline of 0.798 proved to sit near
+the top of a distribution spanning 0.23 AUC across rolling origins, and
+consecutive sliding windows were found to overlap 11–46×, overstating every
+earlier confidence statement by up to ~7× in its standard error.
+
+Section 13 then returns to waveforms for a bounded, specific question — peak
+ground motion from a 3-second window — chosen because it tests the same "does
+the encoded window beat two scalars" pattern as Section 8, on a task where the
+network turns out to win.
 
 ---
 
@@ -1487,7 +1508,8 @@ identified and corrected during development. Defects 1–5 predate the
 dual-channel extension (Section 4.2 onward); defects 6–13 were found during
 a systematic audit of the full repository; defect 14 was found while
 preparing this rewrite; defects 15–17 were found while investigating the
-three-class model's validation/test gap (Section 8.4). Defects 15–17 are
+three-class model's validation/test gap (Section 8.4); defects 18–22 were
+found during the peak-ground-motion work (Section 13). Defects 15–17 are
 worth reading together: each would have caused a *wrong number to be
 reported* rather than a crash, and two of them (16, 17) would have made a
 losing model look like a winning one.
@@ -1512,12 +1534,249 @@ losing model look like a winning one.
 | 15 | Stuck-instrument windows entering the risk dataset as valid "quiet noise" | `6G.MADM`'s traces span ~58 counts on a ~5.38-million-count DC offset with ~50 unique values across 30,001 samples; gap rejection catches telemetry gaps but not a digitizer stuck at a constant | 199 windows at log SNR ≈ −6, far outside the training range, supplied 58% of one class's test errors and created a 24-point validation/test gap. Corrected by `--min-log-snr` (Section 8.4a); the gap closes to ~1 point |
 | 16 | Multi-class baseline crashed silently *past* the model's own numbers | `LogisticRegression(multi_class=...)` was removed in scikit-learn 1.9; the exception was caught by a broad `except` that printed a warning and returned `None`, after which the reporting code skipped the comparison line | The 3-class run reported the CNN's 71.71% accuracy with **no floor beneath it**. The floor, once computed, was 90.37% — the model was losing to two scalars, and the output as printed suggested the opposite |
 | 17 | `distance_km` undefined for noise leaks the noise class | There is no event to measure distance from for a noise window, so "distance is missing" identifies the noise class by construction in a flat multi-class model | Worth ~10 accuracy points of pure inflation (91.72% vs 81.55%). Corrected structurally by the two-stage split (Section 8.5). The equivalent check on the Section 7 binary task was negative, so reusing that task's reasoning would not have caught it |
+| 18 | Ground-motion label window entirely contained the model's input window | `groundmotion.py` originally took the peak over `[record_start + 3 s, end]`. The arrival lands ~10–12 s into a 60 s record and the input window sits at `[arrival − 0.6 s, arrival + 2.4 s]`, so the target interval enclosed the input interval completely | The model could have read its own target off its own input, with nothing to signal it. Corrected by replaying `anchor.py`'s deterministic STA/LTA pick to recover the arrival — verified to reproduce the stored anchored corpus bit-exactly on 532 stations, worst absolute sample difference 0 — and opening the label at `arrival + 2.4 s`, where the input closes |
+| 19 | `remove_response` silently rejected every station on a placeholder timestamp | StationXML responses carry validity epochs. Traces were stamped `UTCDateTime(0)`, which falls outside every epoch, so `remove_response` refused the correction and raised nothing | First smoke test returned `response_ok=False` for 13 of 13 stations with no error. Had the flag not existed, the result would have been an all-NaN dataset resembling a data problem rather than a code one. Corrected by threading the real trace `starttime` through; it is now a required argument that raises on `None` |
+| 20 | Instrument responses whose stage gains contradict their reported sensitivity | Across 828 cached channel-epochs the disagreement between the reported overall sensitivity and the product of stage gains is cleanly bimodal: 97.1 % agree to within 0.01 %, and 2.9 % disagree by a factor of ~690,000. All of the latter are 6G stations (ATIM, BOZM, BUYM, GBZM, IGDM, KMRM, MADM, YNKM). obspy emits a warning and continues | An amplitude wrong by six orders of magnitude would enter the dataset as a plausible number. Surfaced as a `sens_mismatch` column with an explicit tolerance rather than left to appear downstream as an inexplicable R² |
+| 21 | Quality flags computed over the survivors of their own filter | Windows without a usable response produce no input tensor and were skipped with a bare `continue`, before the manifest was written. The manifest then reported `response_ok` 100.0 % and `sens_mismatch` 0.0 % | Both rates were true by construction and conveyed nothing. Worse, the 6G stations carrying defect 20's sensitivity error are largely the same ones failing the response lookup, so the flag built to expose them read a clean 0 % *because they had already been removed*. Found by reconciling the manifest's 49,680 rows against the 51,408 the anchored corpus should yield; the 1,728-row gap is entirely 6G and IJ. Corrected by counting drops per station and reporting them by network ahead of the flag table. Data was unaffected — the defect was purely in what the report claimed |
+| 22 | Anchored windows carry their parent record's start time | `anchor.py` builds each sliced window with `tr.copy()` and replaces `.data`, but never advances `stats.starttime` to match the slice offset | Every window in `window_post_{3,6,10}s_anchored` is stamped with the start time of the 60 s record it came from. Harmless for the classifiers, which never used absolute time, which is why it went unnoticed; it destroys the arrival time, and is the reason the ground-motion work had to re-derive the pick rather than read it. Not corrected in place — the anchored corpus would need regenerating — but documented and routed around |
 
 Two items were suspected as defects but confirmed not to be: the RAM
 mathematics as implemented transcribes the source paper correctly,
 including guards the paper itself omits (the $\varepsilon$ floor on
 $\sigma$, and clipping before the inverse cosine); and the manifest's
 window-index-to-sample mapping is exact.
+
+---
+
+## 13. Results: Peak Ground Motion from a 3-Second Window
+
+### 13.1 Motivation
+
+Nurtas et al. (ACDSA 2025) predict peak ground acceleration from the first
+three seconds of three-component waveform, reporting validation MAE 2.61 gal
+and R² 0.714 for a CNN–BiLSTM+attention model. Their input tensor is
+$(300, 3)$ — identical in shape to this project's existing
+`window_post_3s_anchored` windows — so the input side of a replication required
+nothing new.
+
+The paper compares its model against an ANN and an LSTM. All three are neural.
+Peak ground motion is fundamentally an amplitude, and the input window contains
+amplitude, so the obvious floor — regress the target on the peak amplitude of
+the input window — is absent. Section 8.5 of this report found a two-scalar
+model beating a CNN by nine accuracy points on a related task, and Section 12
+defect 16 records what happens when a floor is computed *after* a headline
+rather than before it. The floor was therefore measured and committed before
+any network for this task existed.
+
+### 13.2 The label, and two defects in defining it
+
+Raw counts cannot serve as the label. Counts are proportional to ground motion
+only within a single instrument; KOERI's HH\* channels run ~2.5×10⁹
+counts/(m/s), and sensitivities differ station to station, so a model trained on
+raw peaks would partly be learning which station recorded the event. Instrument
+response removal converts to physical units and makes the target comparable
+across the network — 154 stations here.
+
+**Our sensors are the wrong class for a like-for-like replication, and this is
+stated rather than absorbed.** Effectively all channels are HH\*, high-gain
+broadband *velocity* seismometers; K-NET, the paper's source, is a strong-motion
+*accelerometer* network. Obtaining acceleration requires differentiating
+velocity, which amplifies high-frequency noise exactly where broadband data is
+weakest. Both `pgv_cms` (physically native, and a standard early-warning
+intensity measure) and `pga_gal` (for numerical comparability with the paper)
+are therefore emitted.
+
+Defining *when* the label window opens produced defect 18. The first
+implementation took the peak over `[record_start + 3 s, end]`. Arrivals land
+~10–12 s into a 60 s record and the input window sits at
+`[arrival − 0.6 s, arrival + 2.4 s]`, so the target interval **enclosed the
+input interval entirely** — the model could have read its own answer off its own
+input. The arrival is not recoverable from the anchored files (defect 22), but
+is recoverable by replaying `anchor.py`'s deterministic STA/LTA pick, which
+reproduces the stored corpus bit-exactly across 532 stations. The label now
+opens where the input closes.
+
+Two targets are emitted rather than one being chosen silently:
+
+* `*_fwd` — peak over `[arrival + 2.4 s, +25 s]`, strictly after everything the
+  model saw. Zero overlap with the input.
+* `*_full` — peak over the whole record. This is the paper's quantity, retained
+  for comparability, but it overlaps the input.
+
+### 13.3 Neither target is a clean task, and both flaws are measured
+
+**The `_full` target is degenerate against an amplitude baseline.** The peak
+amplitude of the input window is ≤ the full-record target in **100.00 %** of
+rows and **exactly equal in 33–34 %**. It is a mathematical lower bound on the
+target, not a predictor of it; for a third of the corpus the "baseline" *is* the
+answer. Results on `_full` are reported separately and are not comparable to
+`_fwd`.
+
+**The `_fwd` target is contaminated by S–P moveout.** Fitting
+$\log_{10}(\text{target}) \sim a M + b \log_{10}(\text{distance})$ over 43,091
+windows:
+
+| target | $a$ (magnitude) | $b$ (distance) | R² |
+|---|---|---|---|
+| `log_pgv_full` | +0.874 | **−1.455** | 0.596 |
+| `log_peak_input_vel` | +0.813 | −0.761 | 0.365 |
+| `log_pgv_fwd` | +0.935 | **+0.226** | 0.501 |
+
+$b \approx -1$ is what geometric spreading predicts, and `log_pgv_full`
+delivers it, confirming the station coordinates and the response correction are
+sound. The `_fwd` inversion has a specific cause: the input window closes at a
+fixed +2.4 s while the S wave, which carries the peak, moves out with distance.
+
+| distance | `peak_in_input` | median peak time rel. arrival |
+|---|---|---|
+| 22 km | 34.0 % | −1.26 s |
+| 35 km | 45.6 % | +0.42 s |
+| 47 km | 16.5 % | +5.87 s |
+| 53 km | 11.7 % | +7.09 s |
+
+corr(distance, peak time) = **+0.501**. At near stations the forward window sees
+only coda; at far stations it sees the whole S wave. That window-capture effect
+opposes geometric spreading and, over this corpus's 5–56 km range, wins.
+`pgv_cms_fwd` is therefore partly a measurement of whether S landed in the
+window — a distance question. This does not invalidate the CNN-versus-scalar
+comparison, since both face the identical confound, but it does mean the result
+cannot be called ground-motion forecasting skill without qualification.
+
+### 13.4 The floor
+
+49,680 windows across 154 stations, M 2.0–7.7, event-disjoint splits (0 events
+shared). Test n = 5,768 after label-independent quality rules. Predictors are
+restricted to what is knowable at inference: magnitude appears only as a marked
+oracle, since the point of early warning is to characterise shaking before the
+source is characterised.
+
+| target | amplitude only | + log distance | GBM (same 2) |
+|---|---|---|---|
+| `pgv_fwd` | +0.5694 | +0.6471 | +0.6749 |
+| `pga_fwd` | +0.6705 | **+0.7318** | +0.7473 |
+| `pgv_full` *(degenerate)* | +0.7606 | +0.7721 | +0.7968 |
+| `pga_full` *(degenerate)* | +0.8242 | +0.8282 | +0.8468 |
+
+*(R²_log, test split.)* On the honest forward target, **two scalars reach
+0.7318** — already above the paper's 0.714 headline. On the paper's own target
+definition a single scalar reaches 0.8242, but that target is the degenerate one.
+
+**A third floor is required for attribution.** Site response is a per-station
+additive term in log space, and 149 of 154 stations appear in more than one
+split with ~173 training windows each. A linear model structurally cannot
+express that term, so part of any network margin over it is per-station
+calibration rather than waveform shape. Adding station as a categorical takes
+the `pgv_fwd` floor from MAE_log 0.2816 to **0.2616**. That is the floor quoted
+against below.
+
+### 13.5 The paper's unexplained R² of −10.08, reproduced
+
+The paper's ANN scores R² −10.08 with no explanation offered. The mechanism is
+training in log space and reporting R² in *linear* space on a heavy-tailed
+target, and it reproduces here exactly — the same model, the same rows, the same
+predictions, scored two ways:
+
+| model | R²_log | R²_linear |
+|---|---|---|
+| oracle, `pgv_fwd` | **+0.7489** *(best)* | **−23.1753** |
+| oracle, `pgv_full` | **+0.8273** *(best)* | **−12.8951** |
+
+Reporting both spaces is what makes this visible rather than mysterious. It is
+also a live trap for this project's own results: an undertrained checkpoint of
+the model below won in log space and lost in linear space, and would have been
+reported as a win had only one space been printed.
+
+### 13.6 The model
+
+`cnn_groundmotion.py`: a Conv1D trunk over the $(3, 300)$ sequence, an optional
+BiLSTM+attention block (`LSTMAttentionBranch`, reused from Section 4.4), and a
+head over the concatenation of pooled features and auxiliary scalars. A 1D trunk
+rather than `RegressionSeismicCNN`'s Conv2d stack, because the input is a
+genuine time series and a $3\times3$ kernel over a height-1 tensor is mostly
+padding. 210,017 parameters.
+
+**Input normalisation is the design decision that makes the comparison sharp.**
+By default each window is divided by its own peak vector magnitude, and
+$\log_{10}$ of that peak is passed in as an auxiliary scalar, recomputed from
+the tensor rather than read from the manifest. Under this arrangement the linear
+floor is a *strict special case* of the network — ignore the convolutional
+features and use the auxiliary path. Confirmed empirically: a linear model on
+the auxiliary scalars alone scores R²_log 0.6471, reproducing the
+amplitude+distance floor exactly. Any margin above that is therefore
+attributable to waveform shape, not to amplitude the model was handed.
+
+Test is touched once; early stopping and checkpoint selection use validation
+only — which is precisely what the paper does not do, reporting its headline on
+the split it early-stopped on. Three seeds throughout, with the spread printed
+beside every mean, because Section 6.6 showed single-seed margins on this
+project reversing sign.
+
+### 13.7 Result
+
+| run | target | arch | aux | MAE_log | R²_log | R²_lin |
+|---|---|---|---|---|---|---|
+| A main | `pgv_fwd` | cnn+lstm | 2 | **0.1864** ±0.0014 | 0.8258 | 0.5290 |
+| B no LSTM | `pgv_fwd` | cnn | 2 | 0.2113 ±0.0029 | 0.7824 | 0.4723 |
+| C no distance | `pgv_fwd` | cnn+lstm | 1 | 0.1848 ±0.0034 | 0.8270 | 0.5725 |
+| D waveform only | `pgv_fwd` | cnn+lstm | 0 | 0.2192 ±0.0071 | 0.7608 | 0.4887 |
+| E | `pga_fwd` | cnn+lstm | 2 | 0.1769 ±0.0009 | 0.8513 | 0.3647 |
+| F *(degenerate)* | `pga_full` | cnn+lstm | 2 | 0.1667 ±0.0017 | 0.8668 | 0.3963 |
+
+Floors: `pgv_fwd` 0.2616, `pga_fwd` 0.2265, `pga_full` 0.1779 (MAE_log,
+amplitude + distance + station).
+
+**(a) Waveform shape carries information beyond its own peak.** A beats the
+station-augmented floor by +0.0752 MAE_log, in *both* metric spaces, at roughly
+50× the seed spread. The physical reading is straightforward: after the S
+arrival ground motion decays, the decay rate is visible in the window's envelope
+and frequency content, and a single peak amplitude cannot express it.
+
+**(b) The recurrent branch earns its parameters** — B loses 0.0249 without it,
+~9× the seed spread. This is a genuine departure from Section 6.7, where no
+architectural addition tested had ever exceeded the simplest model. It is
+reported as a single-dataset result, not a general claim.
+
+**(c) Distance is redundant given shape.** C matches A within noise, so the
+network recovers distance from the waveform rather than needing it supplied —
+consistent with the 3 s window containing S–P timing. This matters
+operationally: a single station in an early-warning setting does not yet know
+its distance.
+
+**(d) Amplitude too.** D, with no scalars at all and raw unnormalised physical
+input, still beats the floor (0.2192 vs 0.2616).
+
+**(e) On PGA the two metric spaces disagree.** E wins in log space (+0.0496) and
+is fractionally *worse* in linear space (R²_lin 0.3647 vs 0.3709). PGA is the
+noisier target here — differentiating a velocity sensor amplifies high-frequency
+noise — so its tail is heavier and linear R² is dominated by a few large values.
+This is the same mechanism as Section 13.5, now operating on our own result.
+
+**(f) On the paper's degenerate target the network adds almost nothing.** F
+beats its floor by only +0.0112, loses linear space by −0.2815, and is *worse*
+than the floor on M ≥ 3.0 (−0.0211). That is the expected shape of a task where
+amplitude is already a lower bound on the answer and equals it outright for a
+third of rows.
+
+**(a) and (f) together are the finding.** The network's value appears on the
+honest target and evaporates on the paper's. A replication that had adopted the
+paper's target definition unexamined — and run no amplitude floor, as the paper
+does not — would have reported a strong R² produced mostly by the target
+containing its own input.
+
+### 13.8 Caveats
+
+The `_fwd` target's S–P moveout contamination (13.3) is not removed by any of
+this; both the network and the floor face it, so the *comparison* is sound while
+the *interpretation* is limited — this is not demonstrated ground-motion
+forecasting skill. Stations are shared across splits (149 of 154); the
+station-augmented floor controls for the linear part of site response but a
+network may still exploit more of it than a per-station intercept can express, so
+a station-disjoint retrain remains the outstanding check. Single architecture
+family, single window length, single corpus; M ≥ 4 is 100 test windows, so the
+strong-motion regime the application cares about is thinly sampled. The
+back-transform $10^{\hat{y}}$ is the median rather than the mean of the implied
+lognormal and is deliberately left uncorrected, since correcting it would change
+what the log-space model claims.
 
 ---
 
