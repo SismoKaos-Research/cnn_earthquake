@@ -259,17 +259,52 @@ def train_one(args, data, n_aux, device, seed):
             break
 
     model.load_state_dict(best_state)
-    return metrics(te[2].numpy(), predict(model, test_loader, device)), best
+    p = predict(model, test_loader, device)
+    return metrics(te[2].numpy(), p), best, p
 
 
 def floor_on_same_rows(tr_df, te_df, target_col, amp_col):
-    """The two baselines, refit on exactly the rows the network was given."""
-    out = {}
+    """
+    The baselines, refit on exactly the rows the network was given.
+
+    The third is the one that matters for attribution. Site response is a
+    per-station additive term in log space, and a network can identify a station
+    from its noise floor and spectral character even inside a peak-normalised
+    window -- 149 of 154 stations appear in more than one split, with ~173 train
+    windows each. A plain linear model structurally CANNOT express that term, so
+    part of any CNN margin over it is per-station calibration rather than
+    waveform shape. Adding station as a categorical gives the floor the same
+    ability and makes the remaining margin attributable.
+
+    Returns (metrics_by_name, predictions_by_name) so the delta can be
+    stratified per row afterwards.
+    """
+    out, preds = {}, {}
+    y_te = te_df[target_col].to_numpy()
+
     for name, feats in (("log peak amplitude", [amp_col]),
                         ("amplitude + log distance", [amp_col, "log_dist"])):
         m = LinearRegression().fit(tr_df[feats], tr_df[target_col])
-        out[name] = metrics(te_df[target_col].to_numpy(), m.predict(te_df[feats]))
-    return out
+        p = m.predict(te_df[feats])
+        out[name], preds[name] = metrics(y_te, p), p
+
+    cats = sorted(set(tr_df.station_key))
+    idx = {s: i for i, s in enumerate(cats)}
+
+    def design(df):
+        X = np.zeros((len(df), 2 + len(cats)))
+        X[:, 0] = df[amp_col].to_numpy()
+        X[:, 1] = df["log_dist"].to_numpy()
+        for r, s in enumerate(df.station_key):
+            if s in idx:                    # unseen station -> zero effect
+                X[r, 2 + idx[s]] = 1.0
+        return X
+
+    m = LinearRegression().fit(design(tr_df), tr_df[target_col])
+    p = m.predict(design(te_df))
+    name = "amplitude + distance + station"
+    out[name], preds[name] = metrics(y_te, p), p
+    return out, preds
 
 
 # ---------------------------------------------------------------------------
@@ -331,55 +366,107 @@ def main():
           f"test {len(parts['test'][2])}  n_aux {n_aux}")
 
     tr_df, te_df = d[d.split == "train"], d[d.split == "test"]
-    floor = floor_on_same_rows(tr_df, te_df, log_col, amp_col)
+    floor, floor_preds = floor_on_same_rows(tr_df, te_df, log_col, amp_col)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     nparam = sum(p.numel() for p in
                  GroundMotionNet(args.arch, n_aux, args.width, args.hidden).parameters())
     print(f"  device {device} | parameters {nparam:,}")
 
-    rows, runs = [], []
+    rows, runs, preds = [], [], []
     for seed in [int(s) for s in args.seeds.split(",")]:
         print(f"\n  --- seed {seed} ---")
-        m, vbest = train_one(args, (parts["train"], parts["val"], parts["test"]),
-                             n_aux, device, seed)
+        m, vbest, p = train_one(args, (parts["train"], parts["val"], parts["test"]),
+                                n_aux, device, seed)
         print(f"      test MAE_log {m['MAE_log']:.4f}  R2_log {m['R2_log']:.4f}")
         runs.append(m)
+        preds.append(p)
         rows.append({"target": args.target, "arch": args.arch, "seed": seed,
                      "input_norm": args.input_norm, "n_aux": n_aux,
                      "val_MAE_log": vbest, **m})
+
+    # Seed-averaged predictions, so the stratification describes the reported
+    # mean model rather than one arbitrary seed.
+    cnn_pred = np.mean(preds, axis=0) if preds else None
 
     print(f"\n{'='*88}")
     print(f"RESULT  target {args.target}   arch {args.arch}   "
           f"{len(runs)} seeds   test n={len(parts['test'][2])}")
     print(f"{'='*88}")
-    print(f"{'model':30s} {'MAE_log':>18s} {'R2_log':>18s} {'R2_lin':>12s}")
+    print(f"{'model':32s} {'MAE_log':>16s} {'R2_log':>16s} {'R2_lin':>12s}")
     print("-" * 88)
     for name, f in floor.items():
-        print(f"{name:30s} {f['MAE_log']:18.4f} {f['R2_log']:18.4f} {f['R2_lin']:12.4f}")
+        print(f"{name:32s} {f['MAE_log']:16.4f} {f['R2_log']:16.4f} {f['R2_lin']:12.4f}")
     mae = np.array([r["MAE_log"] for r in runs])
     r2 = np.array([r["R2_log"] for r in runs])
     r2l = np.array([r["R2_lin"] for r in runs])
     label = f"CNN ({args.arch})"
-    print(f"{label:30s} {mae.mean():10.4f} +-{mae.std():5.4f} "
-          f"{r2.mean():10.4f} +-{r2.std():5.4f} {r2l.mean():12.4f}")
+    print(f"{label:32s} {mae.mean():8.4f} +-{mae.std():5.4f} "
+          f"{r2.mean():8.4f} +-{r2.std():5.4f} {r2l.mean():12.4f}")
     print("-" * 88)
 
-    best_floor = min(f["MAE_log"] for f in floor.values())
+    # The floor to beat is the STRONGEST one, which is the station-augmented
+    # model -- comparing against the weakest available reference is the habit
+    # this project exists to avoid.
     best_name = min(floor, key=lambda k: floor[k]["MAE_log"])
-    delta = best_floor - mae.mean()
-    verdict = ("BEATS" if delta > 0 else "LOSES TO") + f" the floor ({best_name})"
-    print(f"  CNN mean MAE_log {mae.mean():.4f} vs floor {best_floor:.4f}  "
-          f"=> delta {delta:+.4f}  {verdict}")
+    best_floor = floor[best_name]
+    delta = best_floor["MAE_log"] - mae.mean()
+    print(f"  vs strongest floor ({best_name}):")
+    print(f"    MAE_log  CNN {mae.mean():.4f} vs {best_floor['MAE_log']:.4f}"
+          f"   delta {delta:+.4f}  {'CNN better' if delta > 0 else 'CNN worse'}")
+    print(f"    R2_lin   CNN {r2l.mean():.4f} vs {best_floor['R2_lin']:.4f}"
+          f"   delta {r2l.mean() - best_floor['R2_lin']:+.4f}"
+          f"  {'CNN better' if r2l.mean() > best_floor['R2_lin'] else 'CNN worse'}")
+
+    # Both spaces are reported because they can disagree, and when they do the
+    # disagreement IS the finding -- this is the same log-vs-linear inversion
+    # that produced the paper's unexplained ANN R2 of -10.08.
+    if (delta > 0) != (r2l.mean() > best_floor["R2_lin"]):
+        print("\n  !! THE TWO METRIC SPACES DISAGREE. The winner in log space is the")
+        print("     loser in linear space, on identical rows and predictions. Do NOT")
+        print("     report 'the CNN beats the floor' unqualified -- state both. This is")
+        print("     the same inversion diagnosed in the paper's -10.08 ANN result, and")
+        print("     linear R2 is the space the paper reports its headline in.")
+
     if abs(delta) < 2 * mae.std() and len(runs) > 1:
-        print(f"  NOTE: |delta| is within 2 seed-sigma ({2*mae.std():.4f}); "
+        print(f"\n  NOTE: |delta| is within 2 seed-sigma ({2 * mae.std():.4f}); "
               f"report.md 6.6 says a margin this size is not established.")
     if args.input_norm == "peak" and not args.no_aux:
         print("  The linear floor is a strict special case of this model (aux path"
               "\n  alone), so a shortfall is optimisation, not missing information.")
 
+    _stratify_delta(te_df, te_df[log_col].to_numpy(), cnn_pred, floor_preds[best_name])
+
     pd.DataFrame(rows).to_csv(args.out_csv, index=False)
     print(f"\n[write] {args.out_csv}")
+
+
+def _stratify_delta(te_df, y, cnn_pred, floor_pred):
+    """
+    Where the CNN's advantage actually comes from.
+
+    `peak_in_input` matters most. The window spans [arr-0.6, arr+2.4], so at
+    short distance it CONTAINS the S arrival -- the network can read directly
+    whether the forward window will catch S or only coda. That is real
+    information, but it is information about the S-P moveout confound rather
+    than about ground motion, so a gain concentrated in one stratum means
+    something different from a gain spread evenly.
+    """
+    if cnn_pred is None:
+        return
+    e_cnn = np.abs(cnn_pred - y)
+    e_flr = np.abs(floor_pred - y)
+    print("\n  Where the CNN's advantage sits (MAE_log, CNN vs strongest floor):")
+    print(f"     {'stratum':28s} {'n':>6s} {'CNN':>8s} {'floor':>8s} {'delta':>8s}")
+    strata = [("peak inside input window", te_df.peak_in_input.astype(bool).to_numpy()),
+              ("peak after input window", ~te_df.peak_in_input.astype(bool).to_numpy())]
+    if "magnitude" in te_df:
+        strata += [("M < 3.0", (te_df.magnitude < 3.0).to_numpy()),
+                   ("M >= 3.0", (te_df.magnitude >= 3.0).to_numpy())]
+    for name, m in strata:
+        if m.sum() > 30:
+            print(f"     {name:28s} {int(m.sum()):6d} {e_cnn[m].mean():8.4f} "
+                  f"{e_flr[m].mean():8.4f} {e_flr[m].mean() - e_cnn[m].mean():+8.4f}")
 
 
 if __name__ == "__main__":
