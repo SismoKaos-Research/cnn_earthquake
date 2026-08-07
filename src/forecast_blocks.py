@@ -54,6 +54,7 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data_downloader"))
+from seismic_cli.catalog import load_catalog  # noqa: E402
 from seismic_cli.forecast import FAULT_ZONES, FEATURES, build_dataset  # noqa: E402
 
 from forecast_backtest import CHANCE, auc_or_nan, fit_logistic  # noqa: E402
@@ -61,22 +62,23 @@ from forecast_backtest import CHANCE, auc_or_nan, fit_logistic  # noqa: E402
 EPS = 1e-6   # keeps log-loss finite when a model is confidently wrong
 
 
-def build_blocks(d, zone, horizon_days, catalog_end):
+def build_blocks(d, zone, horizon_days, catalog_end, major_times):
     """
     Disjoint consecutive blocks for one zone, each with one forecast time and
     one outcome.
 
-    A block [t, t+H) is positive iff a qualifying event occurred inside it. The
-    forecast for it is the score of the last window ending STRICTLY BEFORE t --
-    which is the whole point: it is the information a forecaster would actually
-    have at the moment the block opens.
+    A block [t, t+H) is positive iff a qualifying event's ORIGIN TIME falls
+    inside it. The forecast for it is the score of the last window ending
+    STRICTLY BEFORE t -- the information a forecaster would actually hold at the
+    moment the block opens.
 
-    Outcomes are read from the window labels rather than recomputed. A window
-    ending at `e` is labelled "M>=thr within H days of e", so the union over
-    windows whose horizon lies inside the block recovers whether the block
-    contains an event. Windows are dense enough (0.35-1.7 day spacing) that
-    this loses nothing, and it guarantees the block outcome uses the identical
-    definition as the training labels.
+    `major_times` comes straight from the catalog rather than from window
+    labels. Inheriting the labels would be wrong: a window ending at
+    `block_start + 25d` carries a horizon reaching `block_start + 55d`, so
+    aggregating window labels marks a block positive for events occurring up to
+    a full horizon AFTER it closes. That inflates the base rate, and the base
+    rate is the reference for both Brier skill and information gain -- so the
+    "usable / not usable" verdicts would be computed against a moved goalpost.
     """
     g = d[d.region == zone].sort_values("end_time").reset_index(drop=True)
     if g.empty:
@@ -91,6 +93,7 @@ def build_blocks(d, zone, horizon_days, catalog_end):
         t = t + H
 
     ends = g.end_time.to_numpy()
+    mt = np.sort(np.asarray(major_times, dtype="datetime64[ns]"))
     rows = []
     for lo in edges:
         hi = lo + H
@@ -98,16 +101,13 @@ def build_blocks(d, zone, horizon_days, catalog_end):
         prior = np.searchsorted(ends, np.datetime64(lo), side="left") - 1
         if prior < 0:
             continue
-        inside = g[(g.end_time >= lo) & (g.end_time < hi)]
-        if inside.empty:
-            continue
-        # Block is positive if any window opening inside it saw an event in its
-        # horizon that also falls inside the block window family.
+        i0 = np.searchsorted(mt, np.datetime64(lo), side="left")
+        i1 = np.searchsorted(mt, np.datetime64(hi), side="left")
         rows.append(dict(
             region=zone, block_start=lo, block_end=hi,
             fc_index=int(prior), fc_time=g.end_time.iloc[prior],
-            label=int(inside.label.max()),
-            n_windows_inside=len(inside),
+            label=int(i1 > i0),
+            n_major=int(i1 - i0),
         ))
     return pd.DataFrame(rows)
 
@@ -248,7 +248,15 @@ def main():
     zones = [z for z in FAULT_ZONES if (d.region == z).any()]
     catalog_end = d.end_time.max()
 
-    all_blocks = pd.concat([build_blocks(d, z, args.horizon_days, catalog_end)
+    # Block outcomes come from the catalog directly, never from window labels.
+    cat = load_catalog(args.catalog, min_magnitude=args.threshold)
+    major = {}
+    for z in zones:
+        la0, la1, lo0, lo1 = FAULT_ZONES[z]
+        major[z] = cat[cat.lat.between(la0, la1) & cat.lon.between(lo0, lo1)] \
+            .time.to_numpy()
+
+    all_blocks = pd.concat([build_blocks(d, z, args.horizon_days, catalog_end, major[z])
                             for z in zones], ignore_index=True)
 
     # --- correctness assertions: this is the leak that would fabricate a result
@@ -267,7 +275,7 @@ def main():
     print(f"\n{'='*94}")
     print("BLOCK-LEVEL RESULTS  (one forecast per disjoint 30-day block)")
     print(f"{'='*94}")
-    print(f"{'zone':9s} {'blocks':>6s} {'pos':>6s} | {'window AUC':>10s} | "
+    print(f"{'zone':9s} {'blocks':>6s} {'pos':>6s} | "
           f"{'BLOCK AUC':>9s} {'95% CI':>16s} | {'BSS':>7s} {'IG bits':>8s}")
     print("-" * 94)
 
@@ -283,14 +291,8 @@ def main():
         bss = brier_skill(y, s, base)
         ig = information_gain(y, s, base)
 
-        # window-level AUC on the same span, for the inflation comparison
-        gz = d[(d.region == z) & (d.end_time >= bz.block_start.min())]
-        w_auc = auc_or_nan(gz.label.to_numpy(),
-                           np.interp(gz.end_time.astype("int64"),
-                                     bz.block_start.astype("int64"), s))
-
         sig = "" if (lo <= CHANCE <= hi) else "  *"
-        print(f"{z:9s} {len(bz):6d} {base:6.3f} | {w_auc:10.4f} | "
+        print(f"{z:9s} {len(bz):6d} {base:6.3f} | "
               f"{auc:9.4f} [{lo:.3f}, {hi:.3f}]{sig:3s} | {bss:+7.3f} {ig:+8.3f}")
 
         # Prospective recalibration -- fixes the probabilities without touching

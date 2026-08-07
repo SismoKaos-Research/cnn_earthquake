@@ -13,7 +13,7 @@ detour.
 The result is a **weak but statistically real forecast in two zones, a clean
 failure in the other two, and — for one zone only — probabilities worth acting
 on**. Reformulated as "will a M ≥ 4.5 event occur in this fault zone within the
-next 30 days?", the forecaster reaches **block-level AUC 0.61 (EAFZ) and 0.59
+next 30 days?", the forecaster reaches **block-level AUC 0.62 (EAFZ) and 0.60
 (AEGEAN) over ~190 independent 30-day blocks, both 95 % CIs excluding chance**.
 NAFZ and the Cyprus arc are indistinguishable from chance.
 
@@ -25,14 +25,15 @@ Getting to that number took two corrections, each of which shrank the claim:
    EAFZ from "not forecastable" to the most consistent zone of the four.
 2. **Block-level evaluation (§4.7)** found that consecutive windows overlap
    11–46×, so every earlier confidence statement was overstated by up to ~7× in
-   its standard error. At the honest sample size the effect survives, at 0.59
-   and 0.61 rather than 0.66 and 0.65.
+   its standard error. At the honest sample size the effect survives, at 0.60
+   and 0.62 rather than 0.66 and 0.65.
 
 A third finding is invisible to AUC entirely (§4.8): the raw model's
 **probabilities were worse than climatology in every zone**, despite ranking
 above chance. Prospective recalibration repairs this, but only **EAFZ** ends up
-with probabilities that beat the base rate (BSS +0.031). AEGEAN discriminates
-measurably yet carries no usable probabilistic value.
+with probabilities that beat the base rate by a usable margin (BSS +0.032).
+AEGEAN discriminates measurably yet sits within +0.005 of climatology — real
+ranking, almost no value.
 
 The reason is physical rather than architectural, and it is the same reason
 throughout. **Forecastability tracks clustering.** The two zones that work are
@@ -358,16 +359,25 @@ block opens, asserted on timestamps — and one outcome:
 
 | Zone | blocks | base | **block AUC** | 95 % CI | verdict |
 |---|---|---|---|---|---|
-| EAFZ | 188 | 0.543 | **0.6129** | [0.532, 0.690] | **established** |
-| AEGEAN | 192 | 0.620 | **0.5934** | [0.514, 0.675] | **established** |
-| NAFZ | 190 | 0.442 | 0.5204 | [0.441, 0.606] | not established |
-| CENTRAL | 180 | 0.306 | 0.4429 | [0.352, 0.529] | not established |
+| EAFZ | 188 | 0.356 | **0.6209** | [0.529, 0.706] | **established** |
+| AEGEAN | 192 | 0.432 | **0.5987** | [0.522, 0.674] | **established** |
+| NAFZ | 190 | 0.274 | 0.4519 | [0.367, 0.540] | not established |
+| CENTRAL | 180 | 0.189 | 0.4778 | [0.378, 0.578] | not established |
 
 **The effect survives, smaller.** AEGEAN and EAFZ still exclude chance at
-n ≈ 190, so this is a real result — but at 0.593 and 0.613, not the 0.661/0.650
-window-level medians, and AEGEAN's lower bound is 0.514. NAFZ and CENTRAL now
+n ≈ 190, so this is a real result — but at 0.599 and 0.621, not the 0.661/0.650
+window-level medians, and AEGEAN's lower bound is 0.522. NAFZ and CENTRAL now
 include chance, which is a *weaker* statement than §4.4's "below chance" and the
 correct one.
+
+> **Block outcomes are read from the catalog, not inherited from window
+> labels.** A window ending at `block_start + 25d` carries a horizon reaching
+> `block_start + 55d`, so aggregating window labels marks a block positive for
+> events happening up to a full horizon *after* it closes. A first version did
+> exactly that and inflated every base rate by roughly 30 % (AEGEAN 0.620 rather
+> than 0.432). Because the base rate is the reference for both Brier skill and
+> information gain, that error moved the goalposts rather than the scores — and
+> correcting it flipped AEGEAN's verdict in §4.8.
 
 ### 4.8 Discrimination without value: the probabilities were unusable
 
@@ -389,24 +399,29 @@ construction, since Platt is monotone:
 
 | Zone | BSS raw | BSS cal | IG raw | IG cal | usable? |
 |---|---|---|---|---|---|
-| **EAFZ** | −0.152 | **+0.031** | −0.165 | **+0.023** | **yes** |
-| AEGEAN | −0.406 | −0.004 | −0.375 | −0.003 | no |
-| NAFZ | −0.218 | −0.017 | −0.209 | −0.013 | no |
-| CENTRAL | −0.214 | −0.014 | −0.278 | −0.010 | no |
+| **EAFZ** | +0.045 | **+0.032** | +0.014 | **+0.022** | **yes** |
+| AEGEAN | −0.088 | **+0.005** | −0.109 | **+0.003** | marginally |
+| NAFZ | −0.130 | −0.019 | −0.096 | −0.016 | no |
+| CENTRAL | −0.116 | −0.015 | −0.106 | −0.010 | no |
 
-**Only EAFZ produces probabilities worth acting on.** AEGEAN discriminates
-measurably (AUC 0.593, CI excluding chance) yet after calibration its
-probabilities land within 0.004 BSS of simply quoting the base rate — the
-ranking is real but too weak to carry any economic value. That distinction is
-completely invisible to AUC and is the single most useful thing this evaluation
-produced.
+**EAFZ is the only zone with clearly usable probabilities**, and it is the only
+one positive even *before* recalibration. AEGEAN crosses into positive territory
+only after calibration and only by +0.005 BSS — which is to say its
+probabilities are, for practical purposes, the base rate. It discriminates
+measurably (AUC 0.599, CI excluding chance) while carrying almost no
+probabilistic value.
+
+That gap between **discrimination and value** is completely invisible to AUC,
+and is the single most useful thing this evaluation produced. A zone can rank
+better than chance and still tell you nothing you did not already know from
+climatology.
 
 **Final claim, at the honest sample size:** *M ≥ 4.5 within 30 days is weakly
 but measurably forecastable in the East Anatolian and Aegean zones (block AUC
-0.61 and 0.59 over ~190 independent blocks, both CIs excluding chance). Only
-EAFZ yields calibrated probabilities that beat climatology, and then only
-slightly (BSS +0.031). NAFZ and the Cyprus arc are indistinguishable from
-chance.*
+0.62 and 0.60 over ~190 independent blocks, both CIs excluding chance). Only
+EAFZ yields calibrated probabilities that beat climatology by a usable margin
+(BSS +0.032); AEGEAN's are within +0.005 of the base rate. NAFZ and the Cyprus
+arc are indistinguishable from chance.*
 
 ## 5. Limitations
 
