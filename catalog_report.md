@@ -10,19 +10,29 @@ This is the project's stated objective — forecasting earthquake occurrence fro
 catalog data — as distinct from the waveform work in `report.md`, which was a
 detour.
 
-The result is a **weak but real forecast in two zones, and a well-explained
-failure in the other two**. Reformulated as "will a M ≥ 4.5 event occur in this
-fault zone within the next 30 days?", the forecaster reaches a **median test AUC
-of 0.66 in the Aegean and 0.65 in the East Anatolian zone across 12 rolling
-origins**, against persistence floors of 0.54 and 0.45. In the two near-Poisson
-zones it does not work at all, scoring **below chance at almost every origin**.
+The result is a **weak but statistically real forecast in two zones, a clean
+failure in the other two, and — for one zone only — probabilities worth acting
+on**. Reformulated as "will a M ≥ 4.5 event occur in this fault zone within the
+next 30 days?", the forecaster reaches **block-level AUC 0.61 (EAFZ) and 0.59
+(AEGEAN) over ~190 independent 30-day blocks, both 95 % CIs excluding chance**.
+NAFZ and the Cyprus arc are indistinguishable from chance.
 
-Those medians replace an earlier single-cut headline of 0.798 for the Aegean.
-A rolling-origin backtest (§4.4) showed that figure sat near the **top** of a
-distribution with an interquartile range spanning 0.23 AUC — the direction of
-the result survived, the precision of the number did not. The same backtest
-promoted EAFZ from "not forecastable" to the zone with the most consistent
-signal of the four.
+Getting to that number took two corrections, each of which shrank the claim:
+
+1. **A rolling-origin backtest (§4.4)** showed the original single-cut headline
+   of 0.798 for AEGEAN sat near the **top** of a distribution spanning 0.23 AUC.
+   The direction survived; the precision did not. The same backtest *promoted*
+   EAFZ from "not forecastable" to the most consistent zone of the four.
+2. **Block-level evaluation (§4.7)** found that consecutive windows overlap
+   11–46×, so every earlier confidence statement was overstated by up to ~7× in
+   its standard error. At the honest sample size the effect survives, at 0.59
+   and 0.61 rather than 0.66 and 0.65.
+
+A third finding is invisible to AUC entirely (§4.8): the raw model's
+**probabilities were worse than climatology in every zone**, despite ranking
+above chance. Prospective recalibration repairs this, but only **EAFZ** ends up
+with probabilities that beat the base rate (BSS +0.031). AEGEAN discriminates
+measurably yet carries no usable probabilistic value.
 
 The reason is physical rather than architectural, and it is the same reason
 throughout. **Forecastability tracks clustering.** The two zones that work are
@@ -322,6 +332,81 @@ operating point rather than defaulting to 0.5 — the threshold is now chosen on
 each origin's own validation slice. The selected value is **0.137, not 0.5**,
 giving precision 0.317 at recall 0.679. Thresholding at 0.5, as the earlier
 scripts did, was far too conservative for a target with this base rate.
+
+### 4.7 Block-level evaluation — the honest sample size
+
+Everything above is measured **per window**, and windows are not independent.
+`forecast.py` slides a 64-event window with `stride_events=8`, so consecutive
+windows share 56 of 64 events, and in AEGEAN they end **0.35 days apart while
+the label looks forward 30 days** — consecutive labels share ~99 % of their
+horizon.
+
+| Zone | windows | independent 30-day blocks | inflation |
+|---|---|---|---|
+| AEGEAN | 9,193 | ~200 | **46×** |
+| EAFZ | 6,224 | ~200 | 31× |
+| NAFZ | 3,828 | ~199 | 19× |
+| CENTRAL | 2,094 | ~199 | 11× |
+
+The point estimates are not necessarily biased, but **any confidence read off
+`n` is wrong** — by ~√46 ≈ 7× for AEGEAN. "n_test = 862, AUC 0.8035" rested on
+roughly **ten** independent forecast opportunities.
+
+`forecast_blocks.py` partitions each zone into disjoint 30-day blocks, giving
+one forecast per block — made from the last window ending *strictly before* the
+block opens, asserted on timestamps — and one outcome:
+
+| Zone | blocks | base | **block AUC** | 95 % CI | verdict |
+|---|---|---|---|---|---|
+| EAFZ | 188 | 0.543 | **0.6129** | [0.532, 0.690] | **established** |
+| AEGEAN | 192 | 0.620 | **0.5934** | [0.514, 0.675] | **established** |
+| NAFZ | 190 | 0.442 | 0.5204 | [0.441, 0.606] | not established |
+| CENTRAL | 180 | 0.306 | 0.4429 | [0.352, 0.529] | not established |
+
+**The effect survives, smaller.** AEGEAN and EAFZ still exclude chance at
+n ≈ 190, so this is a real result — but at 0.593 and 0.613, not the 0.661/0.650
+window-level medians, and AEGEAN's lower bound is 0.514. NAFZ and CENTRAL now
+include chance, which is a *weaker* statement than §4.4's "below chance" and the
+correct one.
+
+### 4.8 Discrimination without value: the probabilities were unusable
+
+AUC is rank-only. Adding the CSEP-standard probabilistic scores — none of which
+appears in any of the seven papers in `literature_review.md` — showed every zone
+scoring **negative** Brier skill and negative information gain against its own
+base rate. The raw model ranks better than chance while its probabilities are
+*worse than climatology*. Reliability curves showed the cause: AEGEAN emits
+0.089 where 0.410 is observed and 0.211 where 0.684 is observed — systematically
+far too low.
+
+Part of this is structural rather than a bug: the model is trained on **window**
+labels but scored against **block** outcomes, which aggregate by `max` and so
+carry a different base rate (AEGEAN 0.563 vs 0.620).
+
+Prospective Platt recalibration — refit at every block on prior blocks only,
+never on the block being calibrated — fixes most of it. AUC is unchanged by
+construction, since Platt is monotone:
+
+| Zone | BSS raw | BSS cal | IG raw | IG cal | usable? |
+|---|---|---|---|---|---|
+| **EAFZ** | −0.152 | **+0.031** | −0.165 | **+0.023** | **yes** |
+| AEGEAN | −0.406 | −0.004 | −0.375 | −0.003 | no |
+| NAFZ | −0.218 | −0.017 | −0.209 | −0.013 | no |
+| CENTRAL | −0.214 | −0.014 | −0.278 | −0.010 | no |
+
+**Only EAFZ produces probabilities worth acting on.** AEGEAN discriminates
+measurably (AUC 0.593, CI excluding chance) yet after calibration its
+probabilities land within 0.004 BSS of simply quoting the base rate — the
+ranking is real but too weak to carry any economic value. That distinction is
+completely invisible to AUC and is the single most useful thing this evaluation
+produced.
+
+**Final claim, at the honest sample size:** *M ≥ 4.5 within 30 days is weakly
+but measurably forecastable in the East Anatolian and Aegean zones (block AUC
+0.61 and 0.59 over ~190 independent blocks, both CIs excluding chance). Only
+EAFZ yields calibrated probabilities that beat climatology, and then only
+slightly (BSS +0.031). NAFZ and the Cyprus arc are indistinguishable from
+chance.*
 
 ## 5. Limitations
 

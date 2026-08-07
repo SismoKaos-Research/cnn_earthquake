@@ -197,6 +197,41 @@ def walk_forward_blocks(d, blocks, zone, horizon_days, min_train=400, step=4):
     return b[np.isfinite(b.score)]
 
 
+def calibrate_prospective(b, min_hist=40):
+    """
+    Map raw scores to usable probabilities using only PAST blocks.
+
+    The raw model is trained on WINDOW labels but scored against BLOCK outcomes,
+    which aggregate by max and therefore carry a different base rate (AEGEAN
+    0.563 vs 0.620). That mismatch alone guarantees miscalibration, and it is
+    invisible to AUC because AUC is rank-only -- ranking survives any monotone
+    transform, calibration does not.
+
+    Platt scaling (a 1-D logistic on the raw score) rather than isotonic: with
+    ~190 blocks and only ~40 of history before the first calibrated prediction,
+    isotonic would overfit its own step function. Refit at every block on all
+    prior blocks, so the calibrator never sees the block it is calibrating.
+
+    Blocks before `min_hist` get no calibrated probability rather than a
+    fallback -- a silently-defaulted probability is exactly the kind of number
+    this project keeps finding.
+    """
+    from sklearn.linear_model import LogisticRegression
+
+    b = b.sort_values("block_start").reset_index(drop=True)
+    out = np.full(len(b), np.nan)
+    s, y = b.score.to_numpy(), b.label.to_numpy()
+    for i in range(min_hist, len(b)):
+        ys, ss = y[:i], s[:i]
+        if len(np.unique(ys)) < 2:
+            continue
+        m = LogisticRegression(max_iter=1000).fit(ss.reshape(-1, 1), ys)
+        out[i] = m.predict_proba(s[i].reshape(1, 1))[0, 1]
+    b = b.copy()
+    b["p_cal"] = out
+    return b
+
+
 def main():
     p = argparse.ArgumentParser(description="Block-level (non-overlapping) forecaster evaluation.")
     p.add_argument("--catalog", required=True)
@@ -257,21 +292,54 @@ def main():
         sig = "" if (lo <= CHANCE <= hi) else "  *"
         print(f"{z:9s} {len(bz):6d} {base:6.3f} | {w_auc:10.4f} | "
               f"{auc:9.4f} [{lo:.3f}, {hi:.3f}]{sig:3s} | {bss:+7.3f} {ig:+8.3f}")
+
+        # Prospective recalibration -- fixes the probabilities without touching
+        # the ranking, so AUC is unchanged by construction and only BSS/IG move.
+        bc = calibrate_prospective(bz)
+        bc = bc[np.isfinite(bc.p_cal)]
+        if len(bc) > 20 and bc.label.nunique() > 1:
+            yc, pc = bc.label.to_numpy(), bc.p_cal.to_numpy()
+            base_c = float(yc.mean())
+            bss_c, ig_c = brier_skill(yc, pc, base_c), information_gain(yc, pc, base_c)
+        else:
+            yc = pc = None
+            bss_c = ig_c = float("nan")
+
         summary.append(dict(zone=z, n=len(bz), base=base, auc=auc, lo=lo, hi=hi,
-                            bss=bss, ig=ig, rel=reliability(y, s)))
+                            bss=bss, ig=ig, bss_cal=bss_c, ig_cal=ig_c,
+                            n_cal=len(bc),
+                            rel=reliability(y, s),
+                            rel_cal=(reliability(yc, pc) if yc is not None else [])))
 
     print("-" * 94)
     print("  * = 95 % CI excludes chance. No star means the effect is NOT")
     print("      statistically established at the honest sample size.")
     print("  BSS > 0 and IG > 0 mean the probabilities beat the base rate.")
 
+    print(f"\n{'='*94}")
+    print("PROSPECTIVE RECALIBRATION (Platt on prior blocks only; ranking untouched)")
+    print(f"{'='*94}")
+    print(f"{'zone':9s} {'n_cal':>6s} | {'BSS raw':>8s} {'BSS cal':>8s} | "
+          f"{'IG raw':>7s} {'IG cal':>7s} | usable?")
+    print("-" * 94)
+    for s in summary:
+        usable = "YES" if (s["bss_cal"] > 0 and s["ig_cal"] > 0) else "no"
+        print(f"{s['zone']:9s} {s['n_cal']:6d} | {s['bss']:+8.3f} {s['bss_cal']:+8.3f} | "
+              f"{s['ig']:+7.3f} {s['ig_cal']:+7.3f} | {usable}")
+    print("-" * 94)
+    print("  'usable' = calibrated probabilities beat the base rate on BOTH scores.")
+    print("  AUC is identical before and after: Platt is monotone, so this changes")
+    print("  only whether the numbers mean anything, not how well they rank.")
+
     print(f"\n{'='*94}\nRELIABILITY (are the probabilities calibrated?)\n{'='*94}")
     for s in summary:
         print(f"\n  {s['zone']}  (base rate {s['base']:.3f})")
-        print(f"    {'predicted':>10s} {'observed':>9s} {'n':>5s}")
-        for pred, obs, n in s["rel"]:
-            flag = "" if abs(pred - obs) < 0.15 else "   <- off"
-            print(f"    {pred:10.3f} {obs:9.3f} {n:5d}{flag}")
+        print(f"    {'predicted':>10s} {'observed':>9s} {'n':>5s}   |  after calibration")
+        rc = {i: r for i, r in enumerate(s["rel_cal"])}
+        for i, (pred, obs, n) in enumerate(s["rel"]):
+            flag = "" if abs(pred - obs) < 0.15 else " <- off"
+            c = (f"   {rc[i][0]:.3f} -> {rc[i][1]:.3f}" if i in rc else "")
+            print(f"    {pred:10.3f} {obs:9.3f} {n:5d}{flag:8s}{c}")
 
     print(f"\n{'='*94}\nVERDICT\n{'='*94}")
     for s in summary:
