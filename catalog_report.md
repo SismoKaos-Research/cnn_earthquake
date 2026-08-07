@@ -259,6 +259,31 @@ matches the data in all four zones instead of three.
 Sliding vs. expanding training windows split 2–2, so there is no evidence here
 that older data actively hurts.
 
+**Cross-check: the two pipelines agree, which is what makes this diagnosis
+safe.** The last origin (2025-05-28) covers roughly the same test period as
+§4.2's single cut, and reproduces it:
+
+| | n_test | positive rate | pooled AUC | per-zone AUC |
+|---|---|---|---|---|
+| §4.2 single cut, AEGEAN | 1129 | 0.782 | 0.7984 | 0.7773 |
+| backtest origin 2025-05-28, AEGEAN | 862 | 0.881 | **0.8035** | 0.7787 |
+
+So the earlier result was **not a bug** — it was a correct measurement of an
+unrepresentative era. AEGEAN's positive rate at that origin is 0.881 against an
+across-origin mean of 0.501. That is the "one lucky era" hypothesis confirmed by
+measurement rather than argued from the calendar.
+
+EAFZ's promotion survives the same check: it is not one spike but a spread —
+0.762 at the 2023-03 origin (the Kahramanmaraş aftermath), 0.530 at 2024-04,
+0.634 at 2025-05. The single cut sampled the low end.
+
+**Phase-2 feature work is deliberately not being started.** The rule set before
+seeing these numbers was that features would only be measured if the signal
+survived a majority of origins. AEGEAN clears both floors at 6/12 — exactly the
+boundary, not a majority — so `lyapunov` and sample entropy stay unmeasured.
+Adding them now would mean comparing new point estimates against a distribution
+this wide, which is how `report.md` §6.6's single-seed reversal happened.
+
 ### 4.5 Sensitivity to threshold and horizon
 
 Median AUC over the same 12 origins, for M ≥ 4.0/4.5/5.0 × 15/30/60 days:
@@ -317,11 +342,13 @@ scripts did, was far too conservative for a target with this base rate.
 - **No neural model has been run on the reformulated target.** Given that
   logistic beats gradient boosting here, and the §8.5 precedent, the priors are
   not favourable — but it is untested.
-- **`lyapunov` is computed but unused.** `catalog.py:174`
-  (`max_lyapunov_rosenstein`) is in `AUX_FEATURES` but was dropped from
-  `forecast.py:FEATURES` during the reformulation. That was an unaudited
-  omission rather than a decision, and it has not yet been measured against the
-  backtest distribution.
+- **`lyapunov` is computed but unused, and is staying that way for now.**
+  `catalog.py:174` (`max_lyapunov_rosenstein`) is in `AUX_FEATURES` but was
+  dropped from `forecast.py:FEATURES` during the reformulation — an unaudited
+  omission rather than a decision. It is *not* a pending TODO: per §4.4, the
+  backtest did not clear the bar that was set in advance for starting feature
+  work, so this and sample entropy remain unmeasured on purpose. Reopen only if
+  the underlying signal strengthens.
 
 ## 6. Reproduction
 
