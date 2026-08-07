@@ -423,6 +423,54 @@ EAFZ yields calibrated probabilities that beat climatology by a usable margin
 (BSS +0.032); AEGEAN's are within +0.005 of the base rate. NAFZ and the Cyprus
 arc are indistinguishable from chance.*
 
+### 4.9 Zone-relative features — tested, not adopted
+
+§4.3 diagnosed a problem it never fixed: a pooled model "must represent two
+opposite temporal dependences at once." The features are all *absolute*
+(`log_rate`, `log_total_energy`, …) while baseline seismicity differs
+several-fold between zones, so the model partly learns *which zone this is*
+rather than whether a zone is unusual **for itself**. The fix is a trailing
+z-score — `.expanding().shift(1)` within each zone, so a window is never part of
+the statistics that normalise it.
+
+Judged by **paired bootstrap** on the same blocks (both models scored on
+identical resamples, so shared variance cancels and only the difference
+remains), not against §4.7's interval, which would be badly underpowered:
+
+| Zone | feature set | block AUC | Δ vs absolute | 95 % CI on Δ | BSS cal |
+|---|---|---|---|---|---|
+| **EAFZ** | absolute | 0.6209 | — | — | +0.032 |
+| | relative only | 0.5911 | −0.0299 | [−0.073, +0.014] | +0.009 |
+| | absolute + relative | 0.6161 | −0.0048 | [−0.040, +0.029] | +0.036 |
+| **AEGEAN** | absolute | 0.5987 | — | — | +0.005 |
+| | relative only | 0.6211 | +0.0224 | [−0.002, +0.048] | +0.021 |
+| | absolute + relative | 0.5004 | **−0.0983** | **[−0.157, −0.042]** | −0.019 |
+| NAFZ | relative only | 0.4848 | +0.0329 | [−0.019, +0.084] | −0.019 |
+| CENTRAL | relative only | 0.5056 | +0.0278 | [−0.025, +0.079] | −0.015 |
+
+**Verdict: do not adopt.** The rule was fixed before running — adopt only if the
+paired CI excludes zero in a zone that is *itself* established (EAFZ or AEGEAN).
+No such interval does.
+
+Three things are worth recording anyway:
+
+1. **Relative-only beats absolute in 3 of 4 zones** (+0.033, +0.022, +0.028) and
+   loses in EAFZ (−0.030). A consistent direction in three zones with no
+   individually significant interval is a hint, not evidence — and this project
+   has already been burned once by treating a sub-0.02 margin as real
+   (`report.md` §6.6).
+2. **The one significant result is that combining both sets *hurts*.** AEGEAN
+   drops 0.0983 AUC with a CI excluding zero. Doubling to 22 features against
+   ~190 independent blocks is straightforward overfitting, and it is the
+   clearest demonstration yet of how little data this problem actually has once
+   the overlap is removed.
+3. **Relative-only improved AEGEAN's calibration** (BSS +0.005 → +0.021), the
+   one zone whose probabilities were borderline useless in §4.8. Not significant
+   on AUC, but the direction is consistent with the diagnosis in §4.3.
+
+The honest summary is that the structural criticism in §4.3 was probably
+correct and this dataset is too small to demonstrate it.
+
 ## 5. Limitations
 
 - **Below-chance AUC in NAFZ and CENTRAL persists across all 12 origins**, so it
