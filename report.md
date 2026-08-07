@@ -88,8 +88,11 @@ Seven findings carry the report:
   window: the input's peak amplitude is a mathematical lower bound on that
   target in 100% of rows and exactly equals it in a third of them. On that
   degenerate target the network adds almost nothing (+0.011). The value
-  appears on the corrected target and evaporates on the original
-  (Section 13).
+  appears on the corrected target and evaporates on the original. Under a
+  doubly station- and event-disjoint split the margin survives in all three
+  station partitions (mean +0.071), though roughly a quarter of the headline
+  proved to be site familiarity, and partition variance was six times seed
+  variance (Section 13).
 
 Every numerical claim in this report is drawn directly from a measurement
 taken against the code in this repository. Where a result has not been
@@ -1763,17 +1766,64 @@ paper's target definition unexamined — and run no amplitude floor, as the pape
 does not — would have reported a strong R² produced mostly by the target
 containing its own input.
 
-### 13.8 Caveats
+### 13.8 Station-disjoint verification
+
+Section 13.7's results use event-disjoint splits, under which 149 of 154
+stations appear in more than one split. Site response is a per-station term, so
+part of the network's margin could be site memorisation rather than waveform
+shape — and the station-augmented floor controls only for the *linear* part of
+that term.
+
+Neither obvious grouping is clean, because the label belongs to the (event,
+station) pair: making stations disjoint makes *events* shared, so one earthquake
+recorded at a train station and a test station leaks its source term instead.
+All three groupings were therefore run, with `both` being station-disjoint *and*
+event-disjoint — every val/test row whose event also appears in train is dropped
+— so that neither term can leak. Because the doubly-disjoint test set holds only
+23 stations, `both` was repeated over three independent station partitions.
+
+| run | grouping | leaks | MAE_log | seed sd | floor | delta | R²_lin |
+|---|---|---|---|---|---|---|---|
+| A | event | site response | 0.1864 | 0.0014 | 0.2616 | +0.0752 | 0.5290 |
+| G | station | source term | 0.2174 | 0.0060 | 0.2728 | +0.0554 | 0.3869 |
+| H s42 | both | **neither** | 0.2302 | 0.0008 | 0.2797 | +0.0495 | 0.2678 |
+| H s43 | both | **neither** | 0.2293 | 0.0042 | 0.2857 | +0.0564 | 0.4983 |
+| H s44 | both | **neither** | 0.1725 | 0.0035 | 0.2790 | +0.1065 | 0.5650 |
+
+**The margin survives.** All three doubly-disjoint partitions favour the network
+in log space, mean delta +0.0708 (range +0.0495 to +0.1065). The advantage is
+therefore not primarily station memorisation: it holds when the network has
+never seen the test station *or* the test event.
+
+**But roughly a quarter of the headline was site familiarity.** Absolute error
+degrades from 0.1864 to ~0.23 on two of the three partitions. Section 13.7's
+number should not be read as generalisation to a new site.
+
+**Partition variance dwarfs seed variance.** Seed spread within a partition is
+0.0008–0.0042; the spread of the delta *across* partitions is 0.0254, roughly
+six times larger. With 23 test stations the station draw, not the seed, is the
+dominant source of uncertainty — a single station-disjoint run would have been
+reported with an error bar an order of magnitude too small. This is the same
+lesson as Section 6.6, arriving through a different door.
+
+**The linear-space verdict is partition-dependent** (+0.081 and +0.289 for s43
+and s44, −0.048 for s42) while the log-space verdict is unanimous. Both are
+reported.
+
+The scalar floor is stable across every partition (0.2728–0.2857 against 0.2816
+event-disjoint), so site response is a small term for a *linear* model —
+consistent with the network exploiting more of it than a per-station intercept
+can express.
+
+### 13.9 Caveats
 
 The `_fwd` target's S–P moveout contamination (13.3) is not removed by any of
 this; both the network and the floor face it, so the *comparison* is sound while
 the *interpretation* is limited — this is not demonstrated ground-motion
-forecasting skill. Stations are shared across splits (149 of 154); the
-station-augmented floor controls for the linear part of site response but a
-network may still exploit more of it than a per-station intercept can express, so
-a station-disjoint retrain remains the outstanding check. Single architecture
-family, single window length, single corpus; M ≥ 4 is 100 test windows, so the
-strong-motion regime the application cares about is thinly sampled. The
+forecasting skill. Single architecture family, single window length, single
+corpus; M ≥ 4 is 100 test windows on the event-disjoint split, so the
+strong-motion regime the application cares about is thinly sampled, and the
+doubly-disjoint partitions reach only M 5.3–5.9 rather than 7.7. The
 back-transform $10^{\hat{y}}$ is the median rather than the mean of the implied
 lognormal and is deliberately left uncorrected, since correcting it would change
 what the log-space model claims.
