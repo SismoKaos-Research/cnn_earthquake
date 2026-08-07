@@ -471,6 +471,40 @@ Three things are worth recording anyway:
 The honest summary is that the structural criticism in §4.3 was probably
 correct and this dataset is too small to demonstrate it.
 
+### 4.10 Operational output
+
+`seismic-cli forecast-now` emits the forecast the evaluation above licenses, and
+nothing beyond it. Catalog through 2026-05-28:
+
+| Zone | forecast | climatology | lift | status |
+|---|---|---|---|---|
+| **EAFZ** | **0.524** | 0.356 | **1.47** | **usable — act on this** |
+| AEGEAN | 0.393 | 0.432 | 0.91 | ranks > chance, no usable skill |
+| NAFZ | 0.274 | 0.274 | 1.00 | not established |
+| CENTRAL | 0.193 | 0.189 | 1.02 | not established |
+
+Three design choices carry the honesty of this output:
+
+1. **Raw scores are never surfaced as probabilities.** §4.8 showed the
+   uncalibrated model ranking above chance while emitting probabilities worse
+   than climatology. Every number here is Platt-calibrated on that zone's own
+   historical blocks, all strictly in the past.
+2. **The unusable zones are printed, not hidden.** A forecaster that silently
+   drops the zones it cannot handle is worse than one that names them. Each row
+   carries its measured block AUC, CI, and status.
+3. **Scope is stated with the number**: zone-scale only — no location within the
+   zone, no magnitude above the threshold, no timing inside the 30-day window.
+
+**The no-skill zones returning almost exactly climatology (lift 1.00 and 1.02)
+is the correctness check, not a bug.** A correctly calibrated model with no
+information should reproduce the base rate, and it does. Only EAFZ deviates
+meaningfully from it.
+
+`build_blocks` was moved into `seismic_cli/forecast.py` so the evaluation script
+and the operational command share one definition — a divergence between "how it
+was scored" and "how it is run" is exactly the defect class this report keeps
+documenting.
+
 ## 5. Limitations
 
 - **Below-chance AUC in NAFZ and CENTRAL persists across all 12 origins**, so it
