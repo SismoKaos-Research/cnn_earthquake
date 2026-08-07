@@ -65,6 +65,7 @@ Usage:
 """
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -85,6 +86,72 @@ from training import seed_everything
 # Data
 # ---------------------------------------------------------------------------
 
+def respilt(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
+    """
+    Re-partition rows without moving any tensor on disk.
+
+    The manifest's original `split` names the DIRECTORY a tensor lives in, so it
+    is preserved as `file_split` and only the LOGICAL split changes.
+
+    **Neither grouping is clean, and that is the point of offering both.**
+    The label is a property of the (event, station) pair, so:
+
+      * `event`   -- the generator's default. Events are disjoint, so the source
+                     term cannot leak, but 149 of 154 stations appear in more
+                     than one split, and site response is a per-station term a
+                     network can learn and reuse.
+      * `station` -- stations are disjoint, so site response cannot leak, but now
+                     ONE EARTHQUAKE recorded at a train station and a test
+                     station shares its source term across the split. That is
+                     the leak `regression.py` warns is usually the worse one for
+                     a regression target.
+      * `both`    -- station-disjoint, then every val/test row whose event also
+                     appears in train is DROPPED. Neither term can leak. Costs
+                     rows, and the count dropped is reported rather than hidden.
+    """
+    d = d.copy()
+    if "file_split" not in d:
+        d["file_split"] = d["split"]
+    if how == "event":
+        return d
+
+    rng = random.Random(seed)
+    stations = sorted(set(d.station_key))
+    rng.shuffle(stations)
+    size = d.station_key.value_counts().to_dict()
+    total = len(d)
+    targets = {s: r * total for s, r in zip(("train", "val", "test"), ratios)}
+    running = {s: 0 for s in targets}
+    assign = {}
+    for st in stations:
+        best = max(targets, key=lambda s: (targets[s] - running[s]) / max(targets[s], 1.0))
+        assign[st] = best
+        running[best] += size[st]
+    d["split"] = d.station_key.map(assign)
+
+    if how == "both":
+        train_events = set(d.loc[d.split == "train", "event_id"])
+        clash = (d.split != "train") & d.event_id.isin(train_events)
+        print(f"[split] doubly-disjoint: dropping {int(clash.sum())} val/test rows whose "
+              f"event also appears in train")
+        d = d[~clash].copy()
+    return d
+
+
+def report_split(d, how):
+    tr, te = d[d.split == "train"], d[d.split == "test"]
+    shared_ev = len(set(tr.event_id) & set(te.event_id))
+    shared_st = len(set(tr.station_key) & set(te.station_key))
+    print(f"[split] grouping='{how}'  train {len(tr)}  val {int((d.split=='val').sum())}  "
+          f"test {len(te)}")
+    print(f"[split]   events shared train/test : {shared_ev}"
+          f"   ({'LEAK: source term' if shared_ev else 'clean'})")
+    print(f"[split]   stations shared          : {shared_st}"
+          f"   ({'LEAK: site response' if shared_st else 'clean'})")
+    print(f"[split]   test stations unseen in train: "
+          f"{len(set(te.station_key) - set(tr.station_key))}/{te.station_key.nunique()}")
+
+
 def preload(df, dataset_dir, input_norm):
     """
     Load every window into one array up front.
@@ -100,7 +167,7 @@ def preload(df, dataset_dir, input_norm):
     n = len(df)
     X = np.empty((n, 3, 300), dtype=np.float32)
     log_peak = np.empty(n, dtype=np.float32)
-    for i, (split, fname) in enumerate(zip(df.split, df.filename)):
+    for i, (split, fname) in enumerate(zip(df.file_split, df.filename)):
         t = torch.load(Path(dataset_dir) / split / fname, weights_only=True).numpy()
         mag = np.sqrt((t.astype(np.float64) ** 2).sum(axis=0))
         pk = float(mag.max())
@@ -320,6 +387,9 @@ def parse_args():
                    help="Ablation: waveform only, no scalars at all.")
     p.add_argument("--no-distance", action="store_true",
                    help="Drop log_dist from aux, keeping only the amplitude scalar.")
+    p.add_argument("--split-by", default="event", choices=["event", "station", "both"],
+                   help="event: generator default. station: site response cannot leak, but "
+                        "events become shared. both: neither leaks, at the cost of rows.")
     p.add_argument("--seeds", default="0,1,2")
     p.add_argument("--epochs", type=int, default=60)
     p.add_argument("--patience", type=int, default=12)
@@ -330,6 +400,8 @@ def parse_args():
     p.add_argument("--hidden", type=int, default=64)
     p.add_argument("--dropout", type=float, default=0.2)
     p.add_argument("--log-every", type=int, default=10)
+    p.add_argument("--seed-split", type=int, default=42,
+                   help="Seed for the station partition (--split-by station/both).")
     p.add_argument("--out-csv", default="groundmotion_cnn_results.csv")
     return p.parse_args()
 
@@ -341,6 +413,8 @@ def main():
     manifest = Path(args.dataset_dir) / "manifest.csv"
     d = load(manifest)                       # identical rows to the baselines
     d = d.dropna(subset=[log_col, amp_col, "log_dist"]).reset_index(drop=True)
+    d = respilt(d, args.split_by, seed=args.seed_split).reset_index(drop=True)
+    report_split(d, args.split_by)
 
     print(f"\n=== target {args.target} ({unit})  arch {args.arch}  "
           f"input-norm {args.input_norm} ===")
@@ -382,6 +456,7 @@ def main():
         runs.append(m)
         preds.append(p)
         rows.append({"target": args.target, "arch": args.arch, "seed": seed,
+                     "split_by": args.split_by,
                      "input_norm": args.input_norm, "n_aux": n_aux,
                      "val_MAE_log": vbest, **m})
 
