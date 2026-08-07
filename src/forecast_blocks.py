@@ -55,61 +55,12 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data_downloader"))
 from seismic_cli.catalog import load_catalog  # noqa: E402
-from seismic_cli.forecast import FAULT_ZONES, FEATURES, build_dataset  # noqa: E402
+from seismic_cli.forecast import (FAULT_ZONES, FEATURES, build_blocks,  # noqa: E402
+                                  build_dataset)
 
 from forecast_backtest import CHANCE, auc_or_nan, fit_logistic  # noqa: E402
 
 EPS = 1e-6   # keeps log-loss finite when a model is confidently wrong
-
-
-def build_blocks(d, zone, horizon_days, catalog_end, major_times):
-    """
-    Disjoint consecutive blocks for one zone, each with one forecast time and
-    one outcome.
-
-    A block [t, t+H) is positive iff a qualifying event's ORIGIN TIME falls
-    inside it. The forecast for it is the score of the last window ending
-    STRICTLY BEFORE t -- the information a forecaster would actually hold at the
-    moment the block opens.
-
-    `major_times` comes straight from the catalog rather than from window
-    labels. Inheriting the labels would be wrong: a window ending at
-    `block_start + 25d` carries a horizon reaching `block_start + 55d`, so
-    aggregating window labels marks a block positive for events occurring up to
-    a full horizon AFTER it closes. That inflates the base rate, and the base
-    rate is the reference for both Brier skill and information gain -- so the
-    "usable / not usable" verdicts would be computed against a moved goalpost.
-    """
-    g = d[d.region == zone].sort_values("end_time").reset_index(drop=True)
-    if g.empty:
-        return pd.DataFrame()
-
-    t0 = g.end_time.min()
-    H = pd.Timedelta(days=horizon_days)
-    edges = []
-    t = t0
-    while t + H <= min(g.end_time.max(), catalog_end):
-        edges.append(t)
-        t = t + H
-
-    ends = g.end_time.to_numpy()
-    mt = np.sort(np.asarray(major_times, dtype="datetime64[ns]"))
-    rows = []
-    for lo in edges:
-        hi = lo + H
-        # Forecast made from the last window ending strictly before the block.
-        prior = np.searchsorted(ends, np.datetime64(lo), side="left") - 1
-        if prior < 0:
-            continue
-        i0 = np.searchsorted(mt, np.datetime64(lo), side="left")
-        i1 = np.searchsorted(mt, np.datetime64(hi), side="left")
-        rows.append(dict(
-            region=zone, block_start=lo, block_end=hi,
-            fc_index=int(prior), fc_time=g.end_time.iloc[prior],
-            label=int(i1 > i0),
-            n_major=int(i1 - i0),
-        ))
-    return pd.DataFrame(rows)
 
 
 def bootstrap_auc(y, s, n_boot=2000, seed=0):
