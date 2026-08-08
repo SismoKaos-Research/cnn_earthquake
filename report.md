@@ -27,7 +27,7 @@ predicted directly from a single 3-second window, reusing the same amplitude
 auxiliary machinery. The fourth records the project's status and its
 redirection back toward its original objective — forecasting event onset
 time and class from catalog data, not waveform classification — which is
-carried out and reported separately in `catalog_report.md`. A fifth part
+carried out separately, and covered in Section 11 below. A fifth part
 (Section 13) returns to waveforms for one bounded question: predicting peak
 ground motion from a 3-second window, as a replication of Nurtas et al.
 (2025) supplied with the non-neural floor that paper omits.
@@ -1483,19 +1483,21 @@ poor in stations can rank models backwards outright (Section 8.4b).
 
 **What happened next — this paragraph supersedes the plan that stood here, which
 described the catalog code as never having been exercised end-to-end.** That
-work has since been carried out and is reported separately in
-`catalog_report.md`. Its outcome, in brief: the three-class time-to-next-event
-formulation was replaced by a binary one — "will a M ≥ 4.5 event occur in this
-fault zone within the next 30 days?" — reaching block-level AUC 0.62 (East
-Anatolian) and 0.60 (Aegean) over ~190 independent 30-day blocks, both 95 %
-confidence intervals excluding chance, while the North Anatolian and Cyprus
-zones are indistinguishable from chance. Only one zone yields calibrated
-probabilities beating climatology by a usable margin. Reaching that number
-required two corrections that each *shrank* the claim, both measurement defects
-rather than model failures: a single-cut headline of 0.798 proved to sit near
-the top of a distribution spanning 0.23 AUC across rolling origins, and
-consecutive sliding windows were found to overlap 11–46×, overstating every
-earlier confidence statement by up to ~7× in its standard error.
+work was carried out and, for a time, was reported separately in
+`catalog_report.md`: a three-class time-to-next-event formulation measured at
+chance and was replaced by a binary one — "will a M ≥ 4.5 event occur in this
+fault zone within the next 30 days?" — under a logistic-regression / gradient-
+boosting scalar model, reaching block-level AUC 0.62 (East Anatolian) and 0.60
+(Aegean) over ~190 independent 30-day blocks, with the North Anatolian and
+Cyprus zones indistinguishable from chance. That scalar forecaster has since
+been retired — it does not meet this project's neural-architecture mandate —
+in favor of retargeting a dual-channel CNN+LSTM+attention model already built
+for this task (`cnn_lstm.py`/`cnn_lstm_loeo.py`), which had only ever been
+tried against the abandoned three-class target, never the reformulated
+(dense, learnable) one. Retargeting it onto that validated target, and
+folding in `Sismokaos-featureExtract`'s auto-extracted waveform features, is
+the in-progress replacement for this section; `catalog_report.md` no longer
+exists.
 
 Section 13 then returns to waveforms for a bounded, specific question — peak
 ground motion from a 3-second window — chosen because it tests the same "does

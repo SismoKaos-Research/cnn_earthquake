@@ -63,53 +63,16 @@ so "distance is missing" identifies the noise class by construction.
 
 ## Task 4 — Catalog forecasting
 
-Two formulations were tried. The first is a clean negative result; the second
-works, but only in some zones.
-
-**4a. Time to next mainshock** (3 balanced classes, 264-event LOEO) — *abandoned*
-
-| Model | Accuracy | Kappa |
-|---|---|---|
-| Gradient boosting on 9 seismicity indicators | 31.49 % | −0.028 |
-| *floor:* chance (3 balanced classes) | *33.33 %* | *0.000* |
-
-At chance with negative kappa. Declustering removes aftershocks — the most
-predictable part of seismicity — leaving mainshock timing that is near-Poisson
-(gap CV 0.67–1.17). Near-unlearnable by construction.
-
-**4b. M ≥ 4.5 within 30 days, per fault zone** — *the working forecaster*
-
-Medians over **12 rolling origins**, not a single cut. The bar is
-`max(chance, persistence)`, since persistence is *below* chance in two zones.
-
-| Zone | CV | Persistence | **Model (median)** | IQR | Clears both floors |
-|---|---|---|---|---|---|
-| **AEGEAN** | 1.56 | 0.540 | **0.661** | [0.532, 0.763] | 6/12 |
-| **EAFZ** | 1.46 | 0.446 | **0.650** | [0.523, 0.724] | 7/12 |
-| NAFZ | 1.04 | 0.341 | 0.447 | [0.334, 0.571] | 3/12 |
-| CENTRAL | 1.02 | 0.183 | 0.369 | [0.311, 0.589] | 4/12 |
-
-**Forecastable in the two clustered zones, not in the two near-Poisson ones.**
-Forecastability tracks clustering: where CV ≈ 1 the process is memoryless and no
-model of this kind can work.
-
-> **These numbers replace a single-cut headline of 0.798 for AEGEAN.** The
-> rolling-origin backtest showed that figure sat near the *top* of a
-> distribution whose IQR spans 0.23 AUC. It also promoted EAFZ from "not
-> forecastable" (single-cut 0.570) to the most consistent zone of the four.
-> The effect is real but weak — AEGEAN clears both floors at exactly half its
-> origins. See `catalog_report.md` §4.4.
-
-> Two floors here are traps, not baselines. The per-fold majority-class figure
-> both LOEO scripts originally reported (8.53 %) is *anti-predictive*: with
-> balanced classes, removing a fold tips the pool away from that fold's own
-> dominant class, so the "majority" is the class it has *least* of — matching
-> the fold's true mode in 2 of 264 folds. And for 4b, the base rate is far
-> weaker than **persistence** — but persistence itself scores 0.18–0.34 in NAFZ
-> and CENTRAL, i.e. *below chance*, so beating it there proves nothing. Counted
-> against persistence alone, CENTRAL "wins" 9 of 12 origins while sitting at
-> AUC 0.369. The bar has to be `max(chance, persistence)`. See
-> `catalog_report.md` §4.4.
+*Redo in progress.* The previous version of this section reported a
+logistic-regression / gradient-boosting scalar forecaster (a real but weak
+signal in 2 of 4 fault zones). That code has been retired — it doesn't meet
+the project's neural-architecture mandate — in favor of retargeting the
+already-built dual-channel CNN+LSTM+attention model
+(`cnn_lstm.py`/`cnn_lstm_loeo.py`) onto the same validated dense target
+("will M ≥ 4.5 occur in this fault zone within 30 days?"), which it was never
+previously tested against. This section will be filled in with the neural
+model's numbers, reported next to the same base-rate and persistence floors,
+once that run completes.
 
 ---
 
