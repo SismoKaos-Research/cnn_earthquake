@@ -1492,12 +1492,15 @@ boosting scalar model, reaching block-level AUC 0.62 (East Anatolian) and 0.60
 Cyprus zones indistinguishable from chance. That scalar forecaster has since
 been retired — it does not meet this project's neural-architecture mandate —
 in favor of retargeting a dual-channel CNN+LSTM+attention model already built
-for this task (`cnn_lstm.py`/`cnn_lstm_loeo.py`), which had only ever been
-tried against the abandoned three-class target, never the reformulated
-(dense, learnable) one. Retargeting it onto that validated target, and
-folding in `Sismokaos-featureExtract`'s auto-extracted waveform features, is
-the in-progress replacement for this section; `catalog_report.md` no longer
-exists.
+for this task (`cnn_lstm.py`), which had only ever been tried against the
+abandoned three-class target, never the reformulated (dense, learnable) one.
+Retargeted (`cnn_lstm_forecast.py`) and evaluated at 3 seeds, it ties the
+retired scalar model at the pooled level (mean AUC 0.733 vs. 0.723) and
+matches it zone-by-zone to within seed noise, with AEGEAN remaining the one
+zone where both architectures agree real signal exists. Full results in
+`catalog_forecast_report.md`; `catalog_report.md` no longer exists. Folding
+in `Sismokaos-featureExtract`'s auto-extracted waveform features remains a
+further step, not yet done.
 
 Section 13 then returns to waveforms for a bounded, specific question — peak
 ground motion from a 3-second window — chosen because it tests the same "does

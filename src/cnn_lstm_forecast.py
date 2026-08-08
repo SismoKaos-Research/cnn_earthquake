@@ -1,0 +1,420 @@
+"""
+Dual-channel CNN + LSTM/self-attention model, retargeted onto the validated
+dense per-zone forecasting target: will a M >= threshold event occur in this
+fault zone within horizon_days?
+
+**Why this script exists instead of editing `cnn_lstm.py` in place.**
+`cnn_lstm.py`/`cnn_lstm_loeo.py` were built for the ABANDONED three-class
+"days until the next major earthquake" target, which measured at chance
+(kappa -0.028) -- see `report.md`'s catalog work. A dense reformulation of
+the target ("will M >= threshold occur within horizon_days?", no
+declustering, every window has a label) was later validated to carry real
+signal in 2 of 4 fault zones, but only ever under a logistic-regression /
+gradient-boosting scalar model (the now-retired `forecast_eval.py` and
+friends) -- the dual-channel network built for exactly this task was never
+retried against it. This script does that: same architecture (LSTM+attention
+1D branch, CNN 2D branch over the RAM image, auxiliary physical scalars),
+binary head instead of 3-class, trained and evaluated against the dataset
+`seismic-cli generate-catalog-forecast-dataset` produces.
+
+**Why `cnn_lstm_loeo.py` isn't retargeted too.** LOEO forms one fold per
+distinct (region, target_time) pair -- it needs a single discrete event each
+window is "about". The dense target has no such event: every window's label
+is its own horizon-bounded outcome, so there is nothing to hold out one of.
+The single chronological split this script uses is the only evaluation mode
+that applies to a dense target, which is also why `forecast.py` (the
+retired scalar version) never had a LOEO variant either.
+
+**Floors, printed on every run** (this project's standing rule -- IP4's 70%
+target is reachable by a model that has learned nothing, on a task this
+imbalanced):
+  * base rate  -- always predict the training period's majority class.
+  * persistence -- predict positive iff a qualifying event occurred in the
+    PREVIOUS horizon_days (available directly as the `days_since_prev_major`
+    aux feature). This is the honest domain floor: earthquakes cluster, so
+    "it happened recently, predict another" is free.
+
+**Evaluation is block-level, not raw per-window**, via
+`data_downloader/seismic_cli/forecast.py`'s `build_blocks`: consecutive
+windows overlap 11-46x (stride 8 of a 64-event window), so per-window AUC
+overstates confidence in its own value by up to ~7x in standard error. Block
+evaluation needs the sibling repo importable; pass --data-downloader-root if
+it isn't at the default relative location, or block-level results are simply
+skipped and only per-window numbers are printed.
+
+Usage:
+    python cnn_lstm_forecast.py \\
+        --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
+        --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import matthews_corrcoef, roc_auc_score
+from torch.utils.data import DataLoader, Dataset
+
+from cnn_lstm import CNNBranch, LSTMAttentionBranch
+from training import seed_everything
+
+AUX_FEATURES = ["log_duration_days", "log_rate", "log_rate_recent", "rate_accel",
+               "mean_mag", "max_mag", "mag_std", "log_total_energy",
+               "log_energy_recent_frac", "b_value", "days_since_prev_major"]
+
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+class DenseWindowDataset(Dataset):
+    """
+    Loads the {seq, img, aux} tensors written by
+    `seismic-cli generate-catalog-forecast-dataset`.
+
+    seq/aux are standardized with TRAIN statistics only, NaNs ignored when
+    computing the stats (days_since_prev_major is NaN when no qualifying
+    event precedes a window) and zero-filled after standardization -- same
+    convention `cnn_lstm.py`'s CatalogWindowDataset uses, so the two datasets'
+    numbers stay comparable.
+    """
+
+    def __init__(self, manifest: pd.DataFrame, root: Path, split: str, stats=None):
+        self.rows = manifest[manifest.split == split].reset_index(drop=True)
+        self.dir = Path(root) / split
+        if self.rows.empty:
+            raise ValueError(f"Split '{split}' is empty.")
+        self.labels = self.rows.label.to_numpy(dtype=np.int64)
+        self.days_since_prev_major = self.rows.days_since_prev_major.to_numpy(dtype=np.float64)
+
+        sample = torch.load(self.dir / self.rows.filename.iloc[0], weights_only=True)
+        self.seq_dim = sample["seq"].shape[-1]
+        self.seq_len = sample["seq"].shape[0]
+        self.img_shape = tuple(sample["img"].shape)
+        self.aux_dim = sample["aux"].numel()
+
+        if stats is None:
+            seqs, auxs = [], []
+            for fn in self.rows.filename:
+                d = torch.load(self.dir / fn, weights_only=True)
+                seqs.append(d["seq"].numpy())
+                auxs.append(d["aux"].numpy())
+            S = np.concatenate(seqs, axis=0)
+            A = np.stack(auxs, axis=0)
+            with np.errstate(invalid="ignore"):
+                stats = (np.nanmean(S, 0), np.nanstd(S, 0) + 1e-6,
+                        np.nanmean(A, 0), np.nanstd(A, 0) + 1e-6)
+            stats = tuple(np.where(np.isfinite(s), s, 0.0 if i % 2 == 0 else 1.0)
+                         for i, s in enumerate(stats))
+        self.stats = stats
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, i):
+        d = torch.load(self.dir / self.rows.filename.iloc[i], weights_only=True)
+        sm, ss, am, asd = self.stats
+        seq = (d["seq"].numpy() - sm) / ss
+        aux = (d["aux"].numpy() - am) / asd
+        return (torch.from_numpy(np.nan_to_num(seq, nan=0.0)).float(),
+               d["img"].float(),
+               torch.from_numpy(np.nan_to_num(aux, nan=0.0)).float(),
+               torch.tensor(self.labels[i], dtype=torch.float32))
+
+
+# ---------------------------------------------------------------------------
+# Model -- same branches as cnn_lstm.py, binary head
+# ---------------------------------------------------------------------------
+
+class DualChannelForecastNet(nn.Module):
+    """Same 1D/2D/aux architecture as `cnn_lstm.py`'s DualChannelRiskNet, with
+    a single-logit binary head instead of a 3-class one."""
+
+    def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
+                dropout=0.3, channels="all"):
+        super().__init__()
+        self.channels = channels
+        self.use_1d = channels in ("all", "1d", "1d+aux")
+        self.use_2d = channels in ("all", "2d", "2d+aux")
+        self.use_aux = channels in ("all", "aux", "1d+aux", "2d+aux")
+        if not (self.use_1d or self.use_2d or self.use_aux):
+            raise ValueError(f"--channels {channels} disables every branch")
+
+        if self.use_1d:
+            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
+            self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
+        if self.use_2d:
+            self.b2 = CNNBranch(img_channels, dropout=dropout)
+            self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
+        self.w1 = nn.Parameter(torch.tensor(1.0))
+        self.w2 = nn.Parameter(torch.tensor(1.0))
+
+        head_in = (fusion_dim if (self.use_1d or self.use_2d) else 0) + \
+                 (aux_dim if self.use_aux else 0)
+        self.head = nn.Sequential(
+            nn.LayerNorm(head_in),
+            nn.Dropout(dropout),
+            nn.Linear(head_in, fusion_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(fusion_dim, 1),
+        )
+
+    def forward(self, seq, img, aux):
+        feats = []
+        fused = None
+        if self.use_1d:
+            fused = self.w1 * self.p1(self.b1(seq))
+        if self.use_2d:
+            f2 = self.w2 * self.p2(self.b2(img))
+            fused = f2 if fused is None else fused + f2
+        if fused is not None:
+            feats.append(fused)
+        if self.use_aux:
+            feats.append(aux)
+        return self.head(torch.cat(feats, dim=1)).squeeze(-1)
+
+
+# ---------------------------------------------------------------------------
+# Floors
+# ---------------------------------------------------------------------------
+
+def persistence_prediction(days_since_prev_major: np.ndarray, horizon_days: float) -> np.ndarray:
+    """Predict positive iff a qualifying event occurred in the PREVIOUS
+    horizon_days. NaN (no prior qualifying event on record) predicts negative --
+    there is nothing to persist from."""
+    d = days_since_prev_major
+    return np.where(np.isnan(d), 0, (d <= horizon_days).astype(int)).astype(np.int64)
+
+
+def safe_auc(y, score):
+    if len(np.unique(y)) < 2:
+        return float("nan")
+    return float(roc_auc_score(y, score))
+
+
+def safe_mcc(y, pred):
+    if len(np.unique(pred)) < 2 or len(np.unique(y)) < 2:
+        return float("nan")
+    return float(matthews_corrcoef(y, pred))
+
+
+def report_row(name: str, y: np.ndarray, score: np.ndarray) -> dict:
+    pred = (score >= 0.5).astype(np.int64)
+    auc, acc, mcc = safe_auc(y, score), float((pred == y).mean()), safe_mcc(y, pred)
+    print(f"  {name:28s} AUC {auc:.4f}   acc {acc:.4f}   MCC {mcc:+.4f}   n={len(y)}")
+    return {"name": name, "auc": auc, "acc": acc, "mcc": mcc, "n": len(y)}
+
+
+# ---------------------------------------------------------------------------
+# Block-level evaluation (optional -- needs the sibling repo importable)
+# ---------------------------------------------------------------------------
+
+def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: str,
+                   data_downloader_root: str, horizon_days: float, threshold: float) -> None:
+    """
+    Re-scores the test predictions at the honest (block) sample size using
+    `seismic_cli.forecast.build_blocks` -- the same partitioning
+    `catalog_report.md` used, so this number is directly comparable to the
+    retired scalar forecaster's. Skipped with a clear message, not a crash,
+    if the sibling repo isn't importable from here.
+    """
+    root = Path(data_downloader_root).resolve()
+    if not (root / "seismic_cli").is_dir():
+        print(f"\n[block-eval] skipped: {root} has no seismic_cli/ -- pass "
+             f"--data-downloader-root to enable.")
+        return
+    sys.path.insert(0, str(root))
+    try:
+        from seismic_cli.forecast import FAULT_ZONES, build_blocks, load_catalog
+    except ImportError as e:
+        print(f"\n[block-eval] skipped: could not import seismic_cli.forecast ({e}).")
+        return
+
+    d = test_rows.copy()
+    d["end_time"] = pd.to_datetime(d["end_time"])
+    d["score"] = scores
+    cat = load_catalog(catalog_path, min_magnitude=threshold)
+
+    print(f"\n--- Block-level evaluation ({horizon_days:.0f}-day disjoint blocks) ---")
+    print("  (honest sample size -- consecutive windows overlap 11-46x, so the")
+    print("   per-window numbers above overstate confidence in themselves)")
+    for zone in sorted(d.region.unique()):
+        if zone not in FAULT_ZONES:
+            print(f"  {zone:9s} skipped: not one of forecast.FAULT_ZONES")
+            continue
+        la0, la1, lo0, lo1 = FAULT_ZONES[zone]
+        zcat = cat[cat.lat.between(la0, la1) & cat.lon.between(lo0, lo1)]
+        if zcat.empty:
+            print(f"  {zone:9s} skipped: no catalog events in this bbox")
+            continue
+        major_times = np.sort(zcat.time.to_numpy().astype("datetime64[ns]"))
+        catalog_end = zcat.time.max()
+
+        blocks = build_blocks(d, zone, horizon_days, catalog_end, major_times)
+        if blocks.empty:
+            print(f"  {zone:9s} 0 blocks (too little test-period data)")
+            continue
+        g = d[d.region == zone].sort_values("end_time").reset_index(drop=True)
+        blocks["score"] = g["score"].to_numpy()[blocks.fc_index.to_numpy()]
+        auc = safe_auc(blocks.label.to_numpy(), blocks.score.to_numpy())
+        pred = (blocks.score.to_numpy() >= 0.5).astype(np.int64)
+        acc = float((pred == blocks.label.to_numpy()).mean())
+        print(f"  {zone:9s} n_blocks={len(blocks):4d}  positive rate "
+             f"{blocks.label.mean():.3f}  AUC {auc:.4f}  acc {acc:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Dual-channel CNN+LSTM, retargeted onto the dense per-zone forecast target.")
+    p.add_argument("--dataset-dir", required=True,
+                  help="Directory from `seismic-cli generate-catalog-forecast-dataset`.")
+    p.add_argument("--save-dir", default="trained_model_cnnlstm_forecast")
+    p.add_argument("--channels", default="all",
+                  choices=["all", "1d", "2d", "aux", "1d+aux", "2d+aux"],
+                  help="Ablation switch: which branches to enable.")
+    p.add_argument("--epochs", type=int, default=80)
+    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight-decay", type=float, default=1e-2)
+    p.add_argument("--hidden", type=int, default=64)
+    p.add_argument("--fusion-dim", type=int, default=128)
+    p.add_argument("--dropout", type=float, default=0.3)
+    p.add_argument("--patience", type=int, default=12)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--num-workers", type=int, default=2)
+    p.add_argument("--horizon-days", type=float, default=30.0,
+                  help="Must match --horizon-days used at dataset-generation time.")
+    p.add_argument("--threshold", type=float, default=4.5,
+                  help="Must match --threshold used at dataset-generation time.")
+    p.add_argument("--catalog-path", default=None,
+                  help="Earthquake catalog CSV, for block-level evaluation. "
+                       "Skipped if not given.")
+    p.add_argument("--data-downloader-root", default="../../data_downloader",
+                  help="Path to the sibling data_downloader repo, for block-level eval.")
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    seed_everything(args.seed)
+
+    root = Path(args.dataset_dir)
+    manifest = pd.read_csv(root / "manifest.csv")
+    train_ds = DenseWindowDataset(manifest, root, "train")
+    val_ds = DenseWindowDataset(manifest, root, "val", stats=train_ds.stats)
+    test_ds = DenseWindowDataset(manifest, root, "test", stats=train_ds.stats)
+
+    print("=" * 64)
+    print(f"Dual-channel forecast model | channels='{args.channels}' | "
+         f"M>={args.threshold} within {args.horizon_days:.0f}d")
+    print(f"  seq ({train_ds.seq_len}, {train_ds.seq_dim}) | img {train_ds.img_shape} "
+         f"| aux ({train_ds.aux_dim},)")
+    for name, ds in (("train", train_ds), ("val", val_ds), ("test", test_ds)):
+        print(f"  {name:5s}: n={len(ds):5d}  positive rate {ds.labels.mean():.3f}")
+    print("=" * 64)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = DualChannelForecastNet(train_ds.seq_dim, train_ds.img_shape[0], train_ds.aux_dim,
+                                   hidden=args.hidden, fusion_dim=args.fusion_dim,
+                                   dropout=args.dropout, channels=args.channels).to(device)
+    print(f"Device: {device} | parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
+                                   num_workers=args.num_workers)
+    train_loader, val_loader, test_loader = dl(train_ds, True), dl(val_ds, False), dl(test_ds, False)
+
+    pos = train_ds.labels.mean()
+    pos_weight = torch.tensor((1 - pos) / max(pos, 1e-6), dtype=torch.float32, device=device)
+    print(f"pos_weight (train): {pos_weight.item():.3f}  (train positive rate {pos:.3f})")
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+    os.makedirs(args.save_dir, exist_ok=True)
+    save_path = os.path.join(args.save_dir, "best_cnnlstm_forecast.pth")
+    best, no_improve = -1.0, 0
+
+    def evaluate(loader):
+        model.eval()
+        ys, ss = [], []
+        with torch.no_grad():
+            for seq, img, aux, y in loader:
+                logit = model(seq.to(device), img.to(device), aux.to(device))
+                ss.extend(torch.sigmoid(logit).cpu().tolist())
+                ys.extend(y.tolist())
+        return np.array(ys, dtype=np.int64), np.array(ss)
+
+    for epoch in range(args.epochs):
+        model.train()
+        tot = 0.0
+        for seq, img, aux, y in train_loader:
+            seq, img, aux, y = seq.to(device), img.to(device), aux.to(device), y.to(device)
+            loss = criterion(model(seq, img, aux), y)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step(); optimizer.zero_grad()
+            tot += loss.item() * y.size(0)
+        scheduler.step()
+
+        yv, sv = evaluate(val_loader)
+        val_auc = safe_auc(yv, sv)
+        print(f"Epoch {epoch+1}/{args.epochs} | loss {tot/len(train_ds):.4f} | val AUC {val_auc:.4f}")
+        if val_auc > best:
+            best, no_improve = val_auc, 0
+            torch.save(model.state_dict(), save_path)
+            print(f"  => saved (val AUC {best:.4f})")
+        else:
+            no_improve += 1
+            if no_improve >= args.patience:
+                print(f"\nEarly stopping: val AUC flat for {args.patience} epochs.")
+                break
+
+    model.load_state_dict(torch.load(save_path, weights_only=True))
+    yt, st = evaluate(test_loader)
+
+    print("\n--- Floors (test set) ---")
+    base_pred = np.full_like(yt, int(round(pos)))
+    report_row("base-rate (majority)", yt, base_pred.astype(np.float64))
+    pers_pred = persistence_prediction(test_ds.days_since_prev_major, args.horizon_days)
+    report_row("persistence", yt, pers_pred.astype(np.float64))
+
+    print(f"\n--- Dual-channel forecast model (channels='{args.channels}') ---")
+    model_row = report_row("model", yt, st)
+
+    print("\n--- Per zone (test set, pooled window level) ---")
+    test_rows = test_ds.rows.copy()
+    for zone in sorted(test_rows.region.unique()):
+        m = (test_rows.region == zone).to_numpy()
+        report_row(zone, yt[m], st[m])
+
+    if getattr(model, "use_1d", False) and getattr(model, "use_2d", False):
+        print(f"\n  learned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}")
+
+    if model_row["auc"] <= max(0.5, safe_auc(yt, pers_pred.astype(np.float64))) + 1e-9:
+        print("\n  [!] The model does NOT clear max(chance, persistence). Its AUC is not")
+        print("      evidence of forecasting skill, whatever the value is -- report it as such.")
+    else:
+        print("\n  Beats max(chance, persistence) at the pooled window level (see block-level")
+        print("  numbers below for the honest sample size before trusting this).")
+
+    if args.catalog_path:
+        try_block_eval(test_rows, st, args.catalog_path, args.data_downloader_root,
+                       args.horizon_days, args.threshold)
+    else:
+        print("\n[block-eval] skipped: pass --catalog-path to enable "
+             "(consecutive windows overlap 11-46x; per-window AUC above overstates confidence).")
+
+
+if __name__ == "__main__":
+    main()

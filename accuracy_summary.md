@@ -61,18 +61,33 @@ so "distance is missing" identifies the noise class by construction.
 
 ---
 
-## Task 4 — Catalog forecasting
+## Task 4 — Catalog forecasting: M ≥ 4.5 within 30 days, per fault zone
 
-*Redo in progress.* The previous version of this section reported a
-logistic-regression / gradient-boosting scalar forecaster (a real but weak
-signal in 2 of 4 fault zones). That code has been retired — it doesn't meet
-the project's neural-architecture mandate — in favor of retargeting the
-already-built dual-channel CNN+LSTM+attention model
-(`cnn_lstm.py`/`cnn_lstm_loeo.py`) onto the same validated dense target
-("will M ≥ 4.5 occur in this fault zone within 30 days?"), which it was never
-previously tested against. This section will be filled in with the neural
-model's numbers, reported next to the same base-rate and persistence floors,
-once that run completes.
+Full detail in `catalog_forecast_report.md`. The previously-reported
+logistic-regression / gradient-boosting scalar forecaster is retired; this is
+the same validated dense target under the project's dual-channel
+CNN+LSTM+attention architecture (`cnn_lstm_forecast.py`), 3 seeds.
+
+**Pooled, window-level** (test set, 2,414 windows, positive rate 0.589):
+
+| Model | AUC (mean of 3 seeds) | seed spread |
+|---|---|---|
+| **Dual-channel CNN+LSTM+attention** | **0.7331** | 0.7229–0.7398 |
+| *retired:* logistic regression (scalar) | *0.7228* | — |
+| *floor:* persistence | *0.5945* | — |
+| *floor:* base rate | *0.5000* | — |
+
+Ties the retired scalar model at the pooled level. Per-zone, the network
+matches AEGEAN (0.794) and EAFZ (0.565) to within seed noise, and nudges
+NAFZ/CENTRAL upward at the window level — but both zones' 3-seed spreads
+(0.061 and 0.173) are too wide to call that an improvement. At the honest
+(block-level, single test era) sample size, only AEGEAN is directionally
+above chance in all 3 seeds; NAFZ and CENTRAL sit below chance in every
+seed, matching the retired report's physical diagnosis that these two
+near-Poisson zones (CV ≈ 1) aren't forecastable by a model of this kind,
+architecture included. See `catalog_forecast_report.md` for the full
+per-zone tables and caveats (this is not the retired report's rolling-origin
+backtest — that remains future work).
 
 ---
 
