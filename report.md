@@ -1119,6 +1119,73 @@ signal is coming from very few effective time steps, not rich temporal
 structure. Neither a per-component-aux variant nor a threshold-sensitivity
 sweep has been tried.
 
+### 7.5 A Dual-Channel Extension: Spectrogram + Raw-Waveform LSTM
+
+A natural follow-up to 7.1–7.4: does pairing the spectrogram with a second
+branch reading the raw waveform through an LSTM + multi-head self-attention
+— this project's own dual-channel architecture (Section 4.2, Wang & Zhao
+2025, already used for detection) — add anything to continuous magnitude
+regression? No paper surveyed for this project combines the two for
+magnitude specifically (the closest, Shen et al. 2025, is pure 1D CNN+Bi-LSTM
+with no image channel at all); this retargets an architecture this project
+already has at a task it had not been tried on.
+
+`seismic-cli generate-regression-dataset --dual` reuses the SAME
+event-disjoint split and window construction as 7.2, adding a `--dual` flag
+that swaps in the detection pipeline's already-built `SpectrogramDualEncoder`
+— which already implements the identical per-window encoder protocol the
+regression orchestrator calls — instead of `SpectrogramEncoder`, so no new
+dataset-generation code was needed for this, only the choice of encoder. The
+comparison to 7.3 is therefore apples-to-apples except for the added
+raw-waveform channel.
+
+**Result, 3 seeds** (`cnn_lstm_regression.py`, same `LSTMAttentionBranch` and
+learned-fusion pattern as `cnn_lstm.py`'s `DualChannelRiskNet`, regression
+head in place of the classification one):
+
+| Model | MAE (mean of 3 seeds) | seed range |
+|---|---|---|
+| Single-channel spectrogram + aux (7.3's architecture) | 0.205 | 0.204–0.206 |
+| Dual-channel, all branches | 0.202 | 0.202–0.203 |
+| *floor:* ridge(log_snr, log_distance) | 0.308 | — |
+
+The dual-channel model ties (very slightly edges) the single-channel one —
+a 0.003 MAE difference sitting inside the seed-to-seed spread of either
+model, not an established effect (Section 6.6's standing caution about
+close margins on this dataset applies here too). Both clear the ridge floor
+by essentially the same margin (~0.10 MAE).
+
+**Branch ablation, same CNN backbone, isolates what each channel
+contributes** (single seed):
+
+| Channels | MAE |
+|---|---|
+| 2D (spectrogram) + aux, no LSTM branch | **0.197** |
+| All (1D + 2D + aux) | 0.202 |
+| 1D (raw waveform) + aux, no spectrogram branch | 0.250 |
+
+**The spectrogram-only branch is the best model tested; adding the LSTM
+branch makes the result slightly worse, not better.** This is the same
+conclusion Section 6's detection work reached (no architectural addition
+beat the single best branch), now reproduced on magnitude regression. The
+full model's own learned fusion weights already pointed this way across
+every seed tried: the 2D branch's weight (0.89–0.94) consistently exceeded
+the 1D branch's (0.78–0.84).
+
+### 7.6 Caveats (7.5)
+
+The branch ablation is a single seed, not three — reported without a
+multi-seed repeat because its direction (the 2D branch alone beating the
+joint-fusion model) matches every other fusion-vs-single-branch comparison
+in this project (Section 6.4, Section 8.3), not because it has been
+independently verified to the same standard as the 3-seed headline number
+above it. The dual-channel dataset (`--dual`) writes both a spectrogram and
+a raw-waveform tensor per window, roughly doubling storage and per-window
+encoding cost for a model that, on this evidence, should not be built this
+way in the first place — 7.3's plain single-channel spectrogram+aux CNN,
+or 7.5's own 2D-only ablation, is the model to use for magnitude regression
+from a short window, not the dual-channel one.
+
 ---
 
 ## 8. Results: Three-Class Risk Classification, and Why the Best Model Has No Image

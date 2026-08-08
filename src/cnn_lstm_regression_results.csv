@@ -1,0 +1,9 @@
+seed,model,channels,MAE,RMSE,R2
+42,single-channel,image+aux,0.204,0.274,0.665
+43,single-channel,image+aux,0.206,0.280,0.649
+44,single-channel,image+aux,0.204,0.275,0.661
+42,dual-channel,all,0.202,0.279,0.651
+43,dual-channel,all,0.203,0.280,0.649
+44,dual-channel,all,0.202,0.278,0.655
+42,dual-channel,2d+aux,0.197,0.271,0.671
+42,dual-channel,1d+aux,0.250,0.353,0.444

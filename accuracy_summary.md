@@ -43,6 +43,24 @@ model.
 **The encoded window adds real signal here** — +0.106 AUC over amplitude and
 distance alone.
 
+**Continuous magnitude regression, dual-channel extension (report.md §7.5).**
+A related question on the same data: does pairing the spectrogram with a
+raw-waveform LSTM+attention branch (this project's dual-channel detection
+architecture, retargeted) beat the single-channel spectrogram+aux regressor
+above? 3-seed comparison (MAE, lower is better):
+
+| Model | MAE (mean of 3 seeds) |
+|---|---|
+| Single-channel spectrogram + aux | 0.205 |
+| Dual-channel (spectrogram + raw waveform + aux) | 0.202 |
+| *floor:* ridge(log_snr, log_distance) | 0.308 |
+
+Branch ablation (single seed) shows why the tie happens: **spectrogram alone
+(no LSTM branch) is the best model tested, at 0.197 MAE** — adding the
+raw-waveform LSTM branch makes it slightly worse (0.202), and the
+raw-waveform branch alone is the weakest (0.250). Same conclusion as the
+detection work: no architectural addition beats the single best branch.
+
 ---
 
 ## Task 3 — Three-class risk: noise / M<4 / M≥4 (2,970 test windows)
