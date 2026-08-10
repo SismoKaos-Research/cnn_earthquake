@@ -32,7 +32,7 @@ model.
 
 ---
 
-## Task 2 — Magnitude class from one 3-second window (M ≥ 2.5 vs. below; 5,594 test)
+## Task 2 — Magnitude from a short window (classification: 3s; regression: 3s and 6s)
 
 | Model | Accuracy | AUC | MCC |
 |---|---|---|---|
@@ -60,6 +60,57 @@ Branch ablation (single seed) shows why the tie happens: **spectrogram alone
 raw-waveform LSTM branch makes it slightly worse (0.202), and the
 raw-waveform branch alone is the weakest (0.250). Same conclusion as the
 detection work: no architectural addition beats the single best branch.
+
+**Pushing on 0.197, still at 3 seconds (report.md §7.7).** Two more levers
+were tried against this same spectrogram-only model: finer spectrogram time
+resolution (`hop_length` 64→32→16, decoupled from `n_fft` for the first
+time) and per-component amplitude aux (log_snr per Z/N/E instead of one
+averaged scalar). The 0.197 MAE figure above was single-seed; it is now
+3-seed confirmed at 0.1973 MAE. The best configuration found (hop=32)
+reaches 0.1960 MAE — nominally better in all 3 paired seeds, but by only
+0.001–0.002 MAE, the same size as normal seed-to-seed spread. Per-component
+aux made no further difference (0.196), and the LSTM branch still lost with
+the richer aux (0.205). **Neither lever produced a real improvement**;
+0.1960–0.1973 MAE is the ceiling *at 3 seconds* — see below, this is not the
+ceiling for the task overall.
+
+**Window length, 3s vs. 6s (report.md §7.8).** Widening the same
+architecture's window from 3s to 6s (`window_post_6s_anchored`, same event
+anchoring used for detection) is a different lever from either of the two
+above — more waveform, not a better encoding of the same waveform — and it
+is the one that actually worked:
+
+| window | MAE (3-seed mean) | seed spread | *floor:* ridge(log_snr, log_dist) |
+|---|---|---|---|
+| 3s | 0.1973 | 0.197–0.198 | 0.308 |
+| **6s** | **0.1817** | **0.181–0.182** | 0.318 |
+
+An 0.014–0.016 MAE gap, roughly ten times the size of anything the
+hop-length/aux sweep produced, and this is not an easier test population
+doing the work — both floors (predict-the-mean and ridge) get *worse* at
+6s, while the model's margin over the ridge floor still widens
+(+0.111 → +0.136). A useful internal control: 6s at the default hop
+produces the same 10 time-frame count as 3s at hop=32, and still wins by
+0.014 MAE, isolating window *length* as the active ingredient rather than
+finer time resolution (already ruled out just above). **6s is now this
+project's best magnitude-regression result at any window length tested**
+(event-disjoint split) — see below for what survives a stricter split.
+
+**Station-disjoint verification (report.md §7.9).** Both 3s and 6s above
+use event-disjoint splits with most stations shared across train/test
+(175/181 and 148/152), the exact setup that inflated a different task's
+headline via site memorisation elsewhere in this project (§13.8). Checked
+here with the same doubly-disjoint method (3 independent station
+partitions per window length): **site memorisation is ruled out** — every
+partition at both window lengths still beats its own ridge floor by a wide
+margin on stations never seen in training. What does **not** survive is the
+6s-vs-3s margin specifically: doubly-disjoint MAE is 0.226 (range
+0.201–0.247) at 3s vs. 0.218 (range 0.195–0.236) at 6s — the 0.016 gap
+above is smaller than the spread within either window length under this
+noisier, few-test-station protocol. Read together: **the model's skill at
+both window lengths is real and generalizes past specific sites; whether
+6s specifically beats 3s is established under the clean event-disjoint
+comparison and unresolved (not refuted) under this stricter one.**
 
 ---
 
@@ -106,6 +157,25 @@ near-Poisson zones (CV ≈ 1) aren't forecastable by a model of this kind,
 architecture included. See `catalog_forecast_report.md` for the full
 per-zone tables and caveats (this is not the retired report's rolling-origin
 backtest — that remains future work).
+
+**Magnitude, alongside "when" (catalog_forecast_report.md §5).** The full
+deliverable needs both when *and* how big. A magnitude head was added to the
+same network (shared trunk, second output) and tested three ways — higher
+loss weight, more training patience, twice the training data — all three
+lost to a simple ridge floor on recent-activity statistics (MAE 0.29–0.34
+model vs. 0.24–0.25 floor, 3-seed confirmed), the same pattern Task 3 already
+found. **Recommended system: the network above for "when," `ridge(max_mag,
+mean_mag, b_value, log_rate)` for "how big"** — two tools for two
+sub-questions, not a compromise. Combined prediction:
+`src/catalog_forecast_predict.py`.
+
+**Where this is actually good: AEGEAN.** Per-zone, the recommended system
+gets AUC 0.79 for "when" and magnitude MAE 0.215 (beats the 0.247 pooled
+floor) — both halves working, on the one zone this project has consistently
+found real signal in (scalar or neural, §3/§4). The other 3 zones don't
+share it: NAFZ/CENTRAL sit below chance on "when" (near-Poisson, unchanged
+diagnosis), so a magnitude number attached to an unreliable event
+probability isn't a useful forecast there regardless of its own MAE.
 
 ---
 

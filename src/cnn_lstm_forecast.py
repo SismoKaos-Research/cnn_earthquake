@@ -58,6 +58,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.linear_model import Ridge
 from sklearn.metrics import matthews_corrcoef, roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 
@@ -92,6 +93,10 @@ class DenseWindowDataset(Dataset):
             raise ValueError(f"Split '{split}' is empty.")
         self.labels = self.rows.label.to_numpy(dtype=np.int64)
         self.days_since_prev_major = self.rows.days_since_prev_major.to_numpy(dtype=np.float64)
+        # Magnitude of the next qualifying event, NaN where label == 0 (kept
+        # as a raw array like days_since_prev_major -- it's a target, not a
+        # standardized model input, so the masked loss handles the NaNs).
+        self.next_magnitude = self.rows.next_magnitude.to_numpy(dtype=np.float64)
 
         sample = torch.load(self.dir / self.rows.filename.iloc[0], weights_only=True)
         self.seq_dim = sample["seq"].shape[-1]
@@ -117,6 +122,15 @@ class DenseWindowDataset(Dataset):
     def __len__(self):
         return len(self.rows)
 
+    def standardized_aux_matrix(self) -> np.ndarray:
+        """Loads and standardizes aux for every row in this split -- used
+        only for the magnitude head's ridge floor (a one-time, end-of-run
+        computation), not the hot training path, which loads per-item."""
+        am, asd = self.stats[2], self.stats[3]
+        A = np.stack([torch.load(self.dir / fn, weights_only=True)["aux"].numpy()
+                     for fn in self.rows.filename], axis=0)
+        return np.nan_to_num((A - am) / asd, nan=0.0)
+
     def __getitem__(self, i):
         d = torch.load(self.dir / self.rows.filename.iloc[i], weights_only=True)
         sm, ss, am, asd = self.stats
@@ -125,7 +139,8 @@ class DenseWindowDataset(Dataset):
         return (torch.from_numpy(np.nan_to_num(seq, nan=0.0)).float(),
                d["img"].float(),
                torch.from_numpy(np.nan_to_num(aux, nan=0.0)).float(),
-               torch.tensor(self.labels[i], dtype=torch.float32))
+               torch.tensor(self.labels[i], dtype=torch.float32),
+               torch.tensor(self.next_magnitude[i], dtype=torch.float32))
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +149,13 @@ class DenseWindowDataset(Dataset):
 
 class DualChannelForecastNet(nn.Module):
     """Same 1D/2D/aux architecture as `cnn_lstm.py`'s DualChannelRiskNet, with
-    a single-logit binary head instead of a 3-class one."""
+    a shared trunk feeding two heads: `binary_out` (will M>=threshold occur
+    within horizon_days -- the original, validated task) and `magnitude_out`
+    (point estimate of that event's magnitude, meaningful only when the
+    binary answer is yes). A shared trunk rather than two separate networks:
+    most of the representation-learning is already proven for "does
+    something happen," and "how big" conditional on "something happens" is
+    related enough to share it, not a good reason to duplicate the backbone."""
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all"):
@@ -157,14 +178,15 @@ class DualChannelForecastNet(nn.Module):
 
         head_in = (fusion_dim if (self.use_1d or self.use_2d) else 0) + \
                  (aux_dim if self.use_aux else 0)
-        self.head = nn.Sequential(
+        self.trunk = nn.Sequential(
             nn.LayerNorm(head_in),
             nn.Dropout(dropout),
             nn.Linear(head_in, fusion_dim),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(fusion_dim, 1),
         )
+        self.binary_out = nn.Linear(fusion_dim, 1)
+        self.magnitude_out = nn.Linear(fusion_dim, 1)
 
     def forward(self, seq, img, aux):
         feats = []
@@ -178,7 +200,8 @@ class DualChannelForecastNet(nn.Module):
             feats.append(fused)
         if self.use_aux:
             feats.append(aux)
-        return self.head(torch.cat(feats, dim=1)).squeeze(-1)
+        trunk_out = self.trunk(torch.cat(feats, dim=1))
+        return self.binary_out(trunk_out).squeeze(-1), self.magnitude_out(trunk_out).squeeze(-1)
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +214,18 @@ def persistence_prediction(days_since_prev_major: np.ndarray, horizon_days: floa
     there is nothing to persist from."""
     d = days_since_prev_major
     return np.where(np.isnan(d), 0, (d <= horizon_days).astype(int)).astype(np.int64)
+
+
+def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Mean absolute error over rows where target is not NaN (i.e. label==1
+    windows) only. Returns 0 (no gradient contribution) for a batch with no
+    such rows, rather than NaN -- a real edge case per-zone even though rare
+    pooled, given batch_size=64 against this task's ~0.59 pooled positive
+    rate."""
+    mask = ~torch.isnan(target)
+    if not mask.any():
+        return pred.sum() * 0.0
+    return (pred[mask] - target[mask]).abs().mean()
 
 
 def safe_auc(y, score):
@@ -297,6 +332,9 @@ def parse_args():
                   help="Must match --horizon-days used at dataset-generation time.")
     p.add_argument("--threshold", type=float, default=4.5,
                   help="Must match --threshold used at dataset-generation time.")
+    p.add_argument("--mag-loss-weight", type=float, default=1.0,
+                  help="Weight on the magnitude head's masked L1 loss relative to the "
+                       "binary head's BCE loss.")
     p.add_argument("--catalog-path", default=None,
                   help="Earthquake catalog CSV, for block-level evaluation. "
                        "Skipped if not given.")
@@ -347,27 +385,32 @@ def main():
 
     def evaluate(loader):
         model.eval()
-        ys, ss = [], []
+        ys, ss, mag_true, mag_pred = [], [], [], []
         with torch.no_grad():
-            for seq, img, aux, y in loader:
-                logit = model(seq.to(device), img.to(device), aux.to(device))
+            for seq, img, aux, y, mag in loader:
+                logit, mag_out = model(seq.to(device), img.to(device), aux.to(device))
                 ss.extend(torch.sigmoid(logit).cpu().tolist())
                 ys.extend(y.tolist())
-        return np.array(ys, dtype=np.int64), np.array(ss)
+                mag_true.extend(mag.tolist())
+                mag_pred.extend(mag_out.cpu().tolist())
+        return (np.array(ys, dtype=np.int64), np.array(ss),
+               np.array(mag_true), np.array(mag_pred))
 
     for epoch in range(args.epochs):
         model.train()
         tot = 0.0
-        for seq, img, aux, y in train_loader:
-            seq, img, aux, y = seq.to(device), img.to(device), aux.to(device), y.to(device)
-            loss = criterion(model(seq, img, aux), y)
+        for seq, img, aux, y, mag in train_loader:
+            seq, img, aux, y, mag = (seq.to(device), img.to(device), aux.to(device),
+                                     y.to(device), mag.to(device))
+            logit, mag_out = model(seq, img, aux)
+            loss = criterion(logit, y) + args.mag_loss_weight * masked_l1_loss(mag_out, mag)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step(); optimizer.zero_grad()
             tot += loss.item() * y.size(0)
         scheduler.step()
 
-        yv, sv = evaluate(val_loader)
+        yv, sv, _, _ = evaluate(val_loader)
         val_auc = safe_auc(yv, sv)
         print(f"Epoch {epoch+1}/{args.epochs} | loss {tot/len(train_ds):.4f} | val AUC {val_auc:.4f}")
         if val_auc > best:
@@ -381,7 +424,7 @@ def main():
                 break
 
     model.load_state_dict(torch.load(save_path, weights_only=True))
-    yt, st = evaluate(test_loader)
+    yt, st, mag_true, mag_pred = evaluate(test_loader)
 
     print("\n--- Floors (test set) ---")
     base_pred = np.full_like(yt, int(round(pos)))
@@ -414,6 +457,49 @@ def main():
     else:
         print("\n[block-eval] skipped: pass --catalog-path to enable "
              "(consecutive windows overlap 11-46x; per-window AUC above overstates confidence).")
+
+    # -------------------------------------------------------------------
+    # Magnitude head (test set, POSITIVE windows only -- next_magnitude is
+    # only defined where an event actually occurs within the horizon).
+    # -------------------------------------------------------------------
+    print("\n" + "=" * 64)
+    print("--- Magnitude head (test set, positive windows only) ---")
+    test_pos = test_ds.labels.astype(bool)
+    n_pos = int(test_pos.sum())
+    if n_pos < 10:
+        print(f"  only {n_pos} positive test windows -- too few to report a floor comparison")
+    else:
+        y_mag = mag_true[test_pos]
+        p_mag = mag_pred[test_pos]
+        mae_model = float(np.mean(np.abs(y_mag - p_mag)))
+
+        train_pos = train_ds.labels.astype(bool)
+        train_mag = train_ds.next_magnitude[train_pos]
+        mae_mean = float(np.mean(np.abs(y_mag - train_mag.mean())))
+        print(f"  predict-the-mean (train positives)   MAE {mae_mean:.3f}   n={n_pos}")
+
+        floor_cols = [AUX_FEATURES.index(c) for c in ("max_mag", "mean_mag", "b_value", "log_rate")]
+        train_aux = train_ds.standardized_aux_matrix()[train_pos][:, floor_cols]
+        test_aux = test_ds.standardized_aux_matrix()[test_pos][:, floor_cols]
+        try:
+            ridge = Ridge(alpha=1.0).fit(train_aux, train_mag)
+            mae_ridge = float(np.mean(np.abs(y_mag - ridge.predict(test_aux))))
+            print(f"  ridge(max_mag, mean_mag, b_value, log_rate)  MAE {mae_ridge:.3f}   n={n_pos}"
+                 "   <- fitted statistical relation; the model must beat this")
+        except Exception as e:
+            mae_ridge = None
+            print(f"  [WARN] ridge floor failed: {e}")
+
+        print(f"\n  model                                 MAE {mae_model:.3f}   n={n_pos}")
+
+        floors = [m for m in (mae_mean, mae_ridge) if m is not None]
+        if floors and mae_model < min(floors):
+            print(f"\n  Beats both floors by {min(floors) - mae_model:+.3f} MAE.")
+        elif floors:
+            print(f"\n  [!] Does NOT beat {'both floors' if len(floors) > 1 else 'the floor'} "
+                 "-- the magnitude head is not adding information beyond the simpler baseline(s).")
+        print("\n  [!] Single-seed result -- re-seed before treating a close margin as final "
+             "(report.md 6.6).")
 
 
 if __name__ == "__main__":

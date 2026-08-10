@@ -1,0 +1,7 @@
+seed,variant,mag_loss_weight,patience,stride_events,n_test_windows,binary_auc,mag_mae_model,mag_mae_mean_floor,mag_mae_ridge_floor,n_positive_test
+42,default,1.0,12,8,2414,0.7318,0.289,0.239,0.247,1423
+43,default,1.0,12,8,2414,0.7326,0.248,0.239,0.247,1423
+44,default,1.0,12,8,2414,0.7265,0.280,0.239,0.247,1423
+42,higher_mag_weight,3.0,12,8,2414,0.7323,0.341,0.239,0.247,1423
+42,more_patience,1.0,30,8,2414,0.7318,0.289,0.239,0.247,1423
+42,denser_dataset,1.0,12,4,4826,0.7253,0.300,0.239,0.248,2845

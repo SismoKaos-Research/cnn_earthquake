@@ -1186,6 +1186,248 @@ way in the first place — 7.3's plain single-channel spectrogram+aux CNN,
 or 7.5's own 2D-only ablation, is the model to use for magnitude regression
 from a short window, not the dual-channel one.
 
+### 7.7 Pushing on 0.197: Finer Time Resolution and Per-Component Amplitude
+
+7.5's branch ablation left an unresolved single-seed number (2D+aux,
+0.197 MAE) and two structural gaps worth closing before treating it as a
+ceiling: the spectrogram has almost no time resolution (`hop_length`
+defaults to `n_fft // 4 = 64`, giving only 5 frames from a 3 s window,
+never exposed as a CLI flag), and the aux vector collapses Z/N/E into one
+averaged `log_snr` rather than the per-component form
+(`ram_aux.RamAuxEncoderV2`) already validated elsewhere in this project.
+Both were added as CLI flags (`--hop-length`, `--per-component-aux` on
+`generate-regression-dataset`) and tested against the identical
+event-disjoint split (51,408 windows; 35,984/7,711/7,713;
+distance_km present for 43,341/51,408 rows either way) so the only
+difference between runs is the lever under test.
+
+**First, 7.5's own headline number gets a 3-seed confirmation it never
+had** — the 0.197 MAE in the table above was a single seed:
+
+| hop_length | seed 42 | seed 43 | seed 44 | mean |
+|---|---|---|---|---|
+| 64 (unchanged default) | 0.197 | 0.197 | 0.198 | 0.1973 |
+
+Confirmed: 2D+aux at the default hop length is **0.1973 MAE, 3-seed mean**,
+not just a lucky single draw.
+
+**Hop-length sweep** (`--channels 2d+aux`, single-seed screening first):
+
+| hop_length | time frames | MAE (seed 42) |
+|---|---|---|
+| 64 (baseline) | ~5 | 0.197 |
+| 32 | ~10 | 0.195 |
+| 16 | ~19 | 0.197 |
+
+hop=32 screened best, so it got the same 3-seed confirmation as the
+baseline, paired seed-for-seed against it:
+
+| seed | hop=64 | hop=32 | Δ |
+|---|---|---|---|
+| 42 | 0.197 | 0.195 | −0.002 |
+| 43 | 0.197 | 0.196 | −0.001 |
+| 44 | 0.198 | 0.197 | −0.001 |
+| **mean** | **0.1973** | **0.1960** | **−0.0013** |
+
+hop=32 was nominally better in all three paired seeds, but by only
+0.001–0.002 MAE — a margin the same size as the within-configuration seed
+spread (hop64: 0.197–0.198; hop32: 0.195–0.197). Too small to matter for
+any downstream use, and not the kind of gap this project treats as an
+established effect (Section 6.6). hop=16 was not carried to 3 seeds: its
+single-seed screening result (0.197) already sat behind hop=32 with no
+indication finer-than-32 resolution helps further.
+
+**Per-component aux**, layered on the hop=32 dataset (single-seed
+screening, since neither lever showed a 3-seed-worthy signal to build on):
+
+| channels | aux | MAE (seed 42) |
+|---|---|---|
+| 2d+aux | averaged (2 scalars) | 0.195 |
+| 2d+aux | per-component (4 scalars: log_snr × Z/N/E + log_distance) | 0.196 |
+| all | per-component | 0.205 |
+
+Per-component aux made no measurable difference to the 2D+aux model
+(0.195 → 0.196, inside noise) — the ridge floor moved slightly
+(0.308 → 0.306 MAE, reflecting that the per-component signal is real) but
+the CNN was already recovering that information from the station-normalized
+spectrogram itself, so giving it explicitly bought nothing further. The
+`all`-channels model with the richer aux still lost to 2D+aux (0.205 vs.
+0.196) — the same LSTM-branch-hurts finding from 7.5, now re-checked with a
+richer aux vector in case that changed which branch earned its parameters.
+It didn't.
+
+**Conclusion: neither lever moved the needle.** The ceiling from 7.5
+(0.197 MAE, single seed) is now a 3-seed-confirmed **0.1973 MAE**, and the
+best configuration found in this section (hop=32, 2D+aux, averaged aux) is
+**0.1960 MAE** — a real but negligible refinement, not a second win. For a
+magnitude regressor from a *3-second* window, this project has not found an
+architectural or spectrogram-resolution change that beats the plain
+2D+aux spectrogram CNN by a margin worth acting on. 7.8 asks the same
+question a different way — not finer resolution of the same 3 seconds, but
+more seconds — and gets a very different answer.
+
+### 7.8 Window Length: 3s vs 6s
+
+7.7's hop-length sweep bought finer time *resolution* of the same 3-second
+window and got nothing (0.1973 → 0.1960 MAE, inside noise). This section
+asks whether more time *extent* — the window itself doubled to 6s, using
+the same event-anchored data (`window_post_6s_anchored`, already used for
+detection in Section 6) and the identical 2D+aux architecture from 7.5/7.7,
+default `hop_length` — does any better.
+
+A useful control falls out of 7.7 for free: 6s at `hop_length=64` produces
+`1 + 600 // 64 = 10` time frames, the *same* frame count as 3s at
+`hop_length=32` (`1 + 300 // 32 = 10`). If time resolution were the active
+ingredient, these two configurations should score about the same. They do
+not.
+
+**Result, 3 seeds, `--channels 2d+aux`:**
+
+| window | frames (at its hop) | seed 42 | seed 43 | seed 44 | mean MAE |
+|---|---|---|---|---|---|
+| 3s (hop=64, 7.5/7.7 baseline) | 5 | 0.197 | 0.197 | 0.198 | 0.1973 |
+| 3s (hop=32, 7.7's best) | 10 | 0.195 | 0.196 | 0.197 | 0.1960 |
+| **6s (hop=64)** | **10** | **0.182** | **0.182** | **0.181** | **0.1817** |
+
+Same frame count as 3s/hop=32, but 6s beats it by 0.014 MAE — roughly ten
+times the gain (or lack of one) that finer resolution of the same 3 seconds
+produced. **The lever that works is more waveform, not a better picture of
+the same waveform.** 7.7 and 7.8 together are one result: resolution was
+tested and ruled out first, so the 6s gain cannot be attributed to it.
+
+The two 3-second models and the two 6-second seeds are each internally as
+tight as anything reported in this project (3-seed spread ≤0.001), so this
+is not a seed-noise artifact.
+
+**The 6-second test set is a *different*, and if anything *harder*,
+population — which cuts in favour of the result, not against it.** Fewer
+events have a full 6 seconds of clean post-arrival data than 3, so the
+dataset shrinks (35,836 windows / 16,247 train events vs. 51,408 windows /
+21,870 train events) and both floors get *worse*, not better:
+
+| window | predict-the-mean | ridge(log_snr, log_distance) | 2D+aux model |
+|---|---|---|---|
+| 3s | 0.350 | 0.308 | 0.1973 |
+| 6s | 0.376 | 0.318 | 0.1817 |
+
+Both floors move against the model — the 6s test population is not simply
+"easier." The model's margin over the ridge floor still widens (+0.111 at
+3s vs. +0.136 at 6s; model/ridge ratio 0.641 → 0.571), a floor-controlled
+comparison on each population's own split, which is the strongest evidence
+here that the extra 3 seconds carries real information rather than an
+easier draw of events.
+
+**A physical candidate mechanism, not just "more data helps":** for
+near-station recordings, the S arrival typically lands within a few seconds
+of the P pick (S–P moveout ≈ distance / 8 km/s, the same relation Section
+13's ground-motion work uses); a 3-second window anchored on the arrival
+plausibly captures P and early coda only, while 6 seconds crosses the S
+arrival for a meaningful fraction of stations — and S-wave amplitude is
+where most of an event's radiated energy, and its correlation with
+magnitude, actually is. This is offered as a plausible mechanism, not
+verified here (would require per-window S–P timing, not attempted).
+
+**Branch choice re-checked at 6s, not just carried over:** the raw-waveform
+branch now sees a 600-sample sequence instead of 300 (self-attention's cost
+is quadratic in that length), so 2D+aux beating the LSTM branch at 3s did
+not guarantee the same at 6s. It does: `--channels all` at 6s (single seed
+42) scores 0.189 MAE — worse than 2D+aux's 0.182 — with near-balanced
+learned fusion weights (1D +0.904, 2D +0.916). Same conclusion, re-verified
+at the new window length rather than assumed.
+
+**Remaining caveats.** Distance coverage is proportionally similar
+(30,496/35,836 = 85.1% vs. 43,341/51,408 = 84.3%), so the missing-distance
+mechanism (Section 7.2) is not obviously different between the two window
+lengths. Hop-length was not re-swept at 6s; 7.7's finding that finer
+resolution of a fixed window does nothing does not guarantee the same
+holds once the window itself is longer. `window_post_10s_anchored` already
+exists in this project's data and is the obvious next point on this
+curve, but the anchored-window population keeps shrinking as the window
+grows, and moving further from "first few seconds" trades away the
+early-warning framing that motivated this task in the first place — an
+open question, not attempted here. One caveat *is* addressed next: every
+number above uses an event-disjoint split under which most stations are
+shared across train/val/test (175/181 at 3s, 148/152 at 6s), so part of
+either headline could be site memorisation rather than waveform shape —
+Section 13.8 found exactly this for a different task on this project's
+data. 7.9 runs that check here.
+
+### 7.9 Station-Disjoint Verification
+
+Section 13.8 found that a related task's (peak ground motion) event-disjoint
+headline was inflated by site memorisation — roughly a quarter of it,
+recovered only once a **doubly-disjoint** split (station-disjoint, then
+every val/test row whose event also appears in train dropped, so neither
+the magnitude label nor site identity can leak) was tried. The same risk
+applies to 7.5-7.8: event-disjoint splits leave 175/181 (3s) and 148/152
+(6s) stations shared across train/val/test. This section runs the identical
+check on the magnitude-regression task, re-partitioning each dataset's
+manifest in memory (`cnn_lstm_regression.py --split-by station|both`,
+tensors untouched on disk) rather than regenerating data — exactly
+`cnn_groundmotion.py`'s `respilt`/`report_split` pattern, reused here.
+
+Because a doubly-disjoint split holds few stations back for test (17-38 in
+what follows), Section 13.8's own lesson — a single station partition is
+not enough — is applied from the start: **three independent partitions**
+per window length (`--seed-split 42/43/44`), one model seed each (`--channels
+2d+aux`, the 7.5-7.8 architecture throughout):
+
+| window | grouping | leaks | MAE | ridge floor | model/ridge |
+|---|---|---|---|---|---|
+| 3s | event (3-seed mean, 7.5-7.7) | site response | 0.197 | 0.308 | 0.641 |
+| 3s | station | source term | 0.215 | 0.311 | 0.691 |
+| 3s | both, p42 | **neither** | 0.230 | 0.320 | 0.719 |
+| 3s | both, p43 | **neither** | 0.247 | 0.296 | 0.834 |
+| 3s | both, p44 | **neither** | 0.201 | 0.384 | 0.523 |
+| 6s | event (3-seed mean, 7.8) | site response | 0.182 | 0.318 | 0.571 |
+| 6s | station | source term | 0.215 | 0.340 | 0.632 |
+| 6s | both, p42 | **neither** | 0.195 | 0.363 | 0.537 |
+| 6s | both, p43 | **neither** | 0.236 | 0.335 | 0.704 |
+| 6s | both, p44 | **neither** | 0.222 | 0.358 | 0.620 |
+
+**(a) Site memorisation does not explain the result.** Every doubly-disjoint
+partition, at both window lengths, beats its own ridge floor by a wide
+margin (ratio 0.52-0.83, always well under 1) on stations the network never
+saw in training. Whatever the model is doing, it generalises past the
+specific sites it trained on — the question this section exists to answer.
+
+**(b) The 6s-beats-3s margin does not survive this stress test, and that is
+a different finding from "it's wrong."** Doubly-disjoint means: 3s
+0.226 ± 0.023 (range 0.201-0.247), 6s 0.218 ± 0.021 (range 0.195-0.236). The
+7.8 gap (0.016 MAE, 3-seed, same grouping both sides) is smaller than the
+spread *within* either window length here. The doubly-disjoint check is a
+different, noisier protocol (17-38 test stations and one model seed per
+partition, so its spread is partition variance *and* seed variance
+combined, not partition variance alone — Section 13.8 could separate the
+two with three seeds per partition; this does not). A 0.016 effect falling
+below this protocol's resolution is not the same as the effect being
+shown absent under the original, tighter one. Both statements are true at
+once: 7.8's comparison is controlled and 3-seed-tight; this section's is
+real but too coarse to confirm or overturn it.
+
+**(c) Mean degradation from event- to doubly-disjoint is comparable at both
+lengths** (mean ratio across the 3 partitions: 0.641→0.692 at 3s, a +0.051
+shift; 0.571→0.620 at 6s, +0.049) — individual partitions swing well
+above and below their own mean (point (d)), but averaged over three, site
+familiarity is not disproportionately propping up the 6s number
+specifically, which is the thing this section set out to rule out for 7.8.
+
+**(d) The single-partition trap, demonstrated rather than just described.**
+p42 alone would have supported a *different* conclusion: 6s's ratio
+improves doubly-disjoint (0.571→0.537) while 3s's worsens (0.641→0.719),
+suggesting 6s's advantage is the *more* robust one. Running p43 and p44
+erases that pattern — 3s's best partition (p44, ratio 0.523) beats 6s's
+worst (p43, ratio 0.704). A single partition, at either window length,
+would have been reported with an error bar an order of magnitude too
+small. This is Section 13.8's own lesson, reproduced on a second task.
+
+**Conclusion.** Magnitude regression from a short window is not a
+station-memorisation artifact at either window length tested — that was
+the open risk, and it is closed. Whether 6s is *reliably* better than 3s
+remains open: real under the clean, matched 3-seed event-disjoint
+comparison (7.8), not confirmable or refutable under the noisier
+doubly-disjoint one run here.
+
 ---
 
 ## 8. Results: Three-Class Risk Classification, and Why the Best Model Has No Image
@@ -2032,6 +2274,62 @@ seismic-cli generate-regression-dataset \
 cd ../cnn_earthquake/src
 python cnn_magclass.py --dataset-dir ../../data_downloader/data/dataset_magclass_3s \
     --window-seconds 3 --save-dir trained_model_magclass_3s   # --mag-threshold to change the split point
+```
+
+**Magnitude regression, dual-channel + hop-length + per-component aux
+(Sections 7.5-7.7):**
+
+```bash
+# --dual adds the raw-waveform 'seq' channel; --hop-length overrides the
+# default n_fft//4=64 (5 time frames from a 3s window); omit for the 7.5
+# baseline. --per-component-aux emits log_snr_0/1/2 instead of one averaged
+# log_snr (7.7).
+seismic-cli generate-regression-dataset \
+    --eq-dir data/batched_waveforms/window_post_3s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --station-catalog catalogs/istasyon_katalog.csv \
+    --output-dir data/dataset_magclass_dual_3s_hop32 \
+    --window-seconds 3 --encoding spectrogram --split-by event \
+    --dual --hop-length 32                      # 32/16 for the sweep, omit for hop=64
+
+cd ../cnn_earthquake/src
+python cnn_lstm_regression.py \
+    --dataset-dir ../../data_downloader/data/dataset_magclass_dual_3s_hop32 \
+    --channels 2d+aux --seed 42                 # --seed 43/44 for the 3-seed confirmation
+```
+
+**Magnitude regression, 6-second window (Section 7.8):**
+
+```bash
+# Same architecture and --channels 2d+aux as above; only the window and
+# source directory change. window_post_6s_anchored has fewer usable events
+# than the 3s directory, so this is a smaller, not-strictly-comparable
+# population (7.8's caveats) -- both floors move too, which is why they are
+# reported alongside the model rather than assumed constant.
+seismic-cli generate-regression-dataset \
+    --eq-dir data/batched_waveforms/window_post_6s_anchored \
+    --noise-dir data/batched_noise_waveforms/noise_pre_3h \
+    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --station-catalog catalogs/istasyon_katalog.csv \
+    --output-dir data/dataset_magclass_dual_6s \
+    --window-seconds 6 --encoding spectrogram --split-by event --dual
+
+cd ../cnn_earthquake/src
+python cnn_lstm_regression.py \
+    --dataset-dir ../../data_downloader/data/dataset_magclass_dual_6s \
+    --channels 2d+aux --seed 42                 # --seed 43/44 for the 3-seed confirmation
+```
+
+**Station-disjoint verification (Section 7.9):** same trained-on-disk
+tensors as above; `--split-by` re-partitions the manifest in memory, no
+regeneration needed.
+
+```bash
+python cnn_lstm_regression.py \
+    --dataset-dir ../../data_downloader/data/dataset_magclass_dual_3s \
+    --channels 2d+aux --seed 42 --split-by both --seed-split 42   # 43/44 for the other partitions
+# swap in dataset_magclass_dual_6s for the 6s rows
 ```
 
 **Three-class risk classification (Section 8):**

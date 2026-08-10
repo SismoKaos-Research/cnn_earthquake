@@ -43,6 +43,14 @@ from torch.utils.data import DataLoader, Dataset
 from training import ImprovedSeismicCNN, seed_everything
 
 AUX_COLUMNS = ["log_snr", "log_distance"]
+PER_COMPONENT_AUX_COLUMNS = ["log_snr_0", "log_snr_1", "log_snr_2", "log_distance"]
+
+
+def detect_aux_columns(manifest: pd.DataFrame) -> list:
+    """seismic-cli's --per-component-aux writes log_snr_0/1/2 (one per Z/N/E)
+    instead of one Z/N/E-averaged log_snr; detect which schema this manifest
+    actually has rather than assuming the original 2-column layout."""
+    return PER_COMPONENT_AUX_COLUMNS if "log_snr_0" in manifest.columns else AUX_COLUMNS
 
 
 # ---------------------------------------------------------------------------
@@ -166,17 +174,18 @@ def regression_metrics(y_true, y_pred):
     }
 
 
-def report_baselines(train_ds, test_ds):
+def report_baselines(train_ds, test_ds, aux_names=None):
     """Predict-the-mean, and ridge on the auxiliary scalars alone."""
     y_tr, y_te = train_ds.targets, test_ds.targets
     print("\n--- Reference points (test set) ---")
     m = regression_metrics(y_te, np.full_like(y_te, y_tr.mean()))
     print(f"  predict-the-mean      MAE {m['MAE']:.3f}  RMSE {m['RMSE']:.3f}  R2 {m['R2']:+.3f}")
 
+    label = ", ".join(aux_names) if aux_names else "aux scalars"
     try:
         ridge = Ridge(alpha=1.0).fit(train_ds.aux, y_tr)
         m2 = regression_metrics(y_te, ridge.predict(test_ds.aux))
-        print(f"  ridge(log_snr, log_dist)  MAE {m2['MAE']:.3f}  RMSE {m2['RMSE']:.3f}  R2 {m2['R2']:+.3f}"
+        print(f"  ridge({label})  MAE {m2['MAE']:.3f}  RMSE {m2['RMSE']:.3f}  R2 {m2['R2']:+.3f}"
               "   <- a fitted local-magnitude relation; the CNN must beat this")
         return m2["MAE"]
     except Exception as e:
@@ -231,13 +240,19 @@ def main():
 
     root = Path(args.dataset_dir)
     manifest = pd.read_csv(root / "manifest.csv")
-    for col in ("magnitude", "log_snr"):
-        if col not in manifest.columns:
-            raise ValueError(f"manifest.csv is missing '{col}'. Regenerate it with "
-                             f"`seismic-cli generate-regression-dataset`.")
+    if "magnitude" not in manifest.columns:
+        raise ValueError("manifest.csv is missing 'magnitude'. Regenerate it with "
+                         "`seismic-cli generate-regression-dataset`.")
     if "distance_km" not in manifest.columns:
         manifest["distance_km"] = np.nan
     manifest["log_distance"] = np.log(manifest["distance_km"].clip(lower=1.0))
+
+    global AUX_COLUMNS
+    AUX_COLUMNS = detect_aux_columns(manifest)
+    missing = [c for c in AUX_COLUMNS if c not in manifest.columns]
+    if missing:
+        raise ValueError(f"manifest.csv is missing {missing}. Regenerate it with "
+                         f"`seismic-cli generate-regression-dataset`.")
 
     parts = {}
     for split in ("train", "val", "test"):
@@ -342,7 +357,7 @@ def main():
     yt, yp = evaluate(test_loader)
     tm = regression_metrics(yt, yp)
 
-    ridge_mae = report_baselines(train_ds, test_ds)
+    ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
     print(f"\n--- CNN ({'image only' if args.no_aux else 'image + aux'}) ---")
     print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}")
     if ridge_mae is not None:

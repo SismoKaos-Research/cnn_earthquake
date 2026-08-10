@@ -47,6 +47,7 @@ Usage:
 
 import argparse
 import os
+import random
 from pathlib import Path
 
 import numpy as np
@@ -57,8 +58,79 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_lstm import CNNBranch, LSTMAttentionBranch
-from cnn_regression import AUX_COLUMNS, regression_metrics, report_baselines
+from cnn_regression import AUX_COLUMNS, detect_aux_columns, regression_metrics, report_baselines
 from training import seed_everything
+
+
+# ---------------------------------------------------------------------------
+# Splits -- mirrors cnn_groundmotion.py's respilt/report_split (report.md
+# 13.8), applied here to check whether this task's event-disjoint headline
+# numbers (7.5-7.8) are inflated by site memorisation: 175/181 (3s) and
+# 148/152 (6s) stations appear in more than one split under the generator's
+# default event-disjoint grouping.
+# ---------------------------------------------------------------------------
+
+def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
+    """
+    Re-partition rows without moving any tensor on disk. The manifest's
+    original `split` names the DIRECTORY a tensor lives in, so it is
+    preserved as `file_split`; only the LOGICAL split (used for train/val/
+    test grouping below) changes.
+
+    `how`:
+      event   -- the generator's default (unchanged): events are disjoint,
+                 so the magnitude label cannot leak, but most stations are
+                 shared, so site response can be learned and reused.
+      station -- stations are disjoint, so site response cannot leak, but
+                 an earthquake recorded at a train station and a test
+                 station now shares its source term (magnitude) across the
+                 split -- regression.py's own docstring calls this usually
+                 the worse leak for a regression target.
+      both    -- station-disjoint, then every val/test row whose event also
+                 appears in train is DROPPED. Neither term can leak. Costs
+                 rows; the count dropped is reported, not hidden.
+    """
+    d = d.copy()
+    if "file_split" not in d:
+        d["file_split"] = d["split"]
+    if how == "event":
+        return d
+
+    rng = random.Random(seed)
+    stations = sorted(set(d.station_key))
+    rng.shuffle(stations)
+    size = d.station_key.value_counts().to_dict()
+    total = len(d)
+    targets = {s: r * total for s, r in zip(("train", "val", "test"), ratios)}
+    running = {s: 0 for s in targets}
+    assign = {}
+    for st in stations:
+        best = max(targets, key=lambda s: (targets[s] - running[s]) / max(targets[s], 1.0))
+        assign[st] = best
+        running[best] += size[st]
+    d["split"] = d.station_key.map(assign)
+
+    if how == "both":
+        train_events = set(d.loc[d.split == "train", "event_id"])
+        clash = (d.split != "train") & d.event_id.isin(train_events)
+        print(f"[split] doubly-disjoint: dropping {int(clash.sum())} val/test rows whose "
+              f"event also appears in train")
+        d = d[~clash].copy()
+    return d
+
+
+def report_split(d, how):
+    tr, te = d[d.split == "train"], d[d.split == "test"]
+    shared_ev = len(set(tr.event_id) & set(te.event_id))
+    shared_st = len(set(tr.station_key) & set(te.station_key))
+    print(f"[split] grouping='{how}'  train {len(tr)}  val {int((d.split=='val').sum())}  "
+          f"test {len(te)}")
+    print(f"[split]   events shared train/test : {shared_ev}"
+          f"   ({'LEAK: source term' if shared_ev else 'clean'})")
+    print(f"[split]   stations shared          : {shared_st}"
+          f"   ({'LEAK: site response' if shared_st else 'clean'})")
+    print(f"[split]   test stations unseen in train: "
+          f"{len(set(te.station_key) - set(tr.station_key))}/{te.station_key.nunique()}")
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +171,7 @@ class DualMagnitudeDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.rows.iloc[idx]
-        d = torch.load(self.root / row["split"] / row["filename"], weights_only=True)
+        d = torch.load(self.root / row["file_split"] / row["filename"], weights_only=True)
         return (d["seq"].float(), d["img"].float(),
                 torch.from_numpy(self.aux[idx]),
                 torch.tensor(self.targets[idx], dtype=torch.float32))
@@ -185,6 +257,15 @@ def parse_args():
     p.add_argument("--huber-delta", type=float, default=0.0,
                   help="If > 0 use SmoothL1 with this beta instead of plain L1 (MAE), "
                        "matching cnn_regression.py's convention.")
+    p.add_argument("--split-by", default="event", choices=["event", "station", "both"],
+                  help="event: the generator's own split, unchanged (default). station: "
+                       "re-partition in memory so stations are disjoint (site response "
+                       "cannot leak, but a shared event can). both: station-disjoint AND "
+                       "event-disjoint -- drops val/test rows whose event also appears in "
+                       "train (report.md 13.8's doubly-disjoint check, applied here).")
+    p.add_argument("--seed-split", type=int, default=42,
+                  help="Seed for the station partition (--split-by station/both). "
+                       "Independent of --seed (model init/shuffle).")
     return p.parse_args()
 
 
@@ -194,13 +275,22 @@ def main():
 
     root = Path(args.dataset_dir)
     manifest = pd.read_csv(root / "manifest.csv")
-    for col in ("magnitude", "log_snr"):
-        if col not in manifest.columns:
-            raise ValueError(f"manifest.csv is missing '{col}'. Regenerate with "
-                             f"`seismic-cli generate-regression-dataset --dual`.")
+    if "magnitude" not in manifest.columns:
+        raise ValueError("manifest.csv is missing 'magnitude'. Regenerate with "
+                         "`seismic-cli generate-regression-dataset --dual`.")
     if "distance_km" not in manifest.columns:
         manifest["distance_km"] = np.nan
     manifest["log_distance"] = np.log(manifest["distance_km"].clip(lower=1.0))
+
+    global AUX_COLUMNS
+    AUX_COLUMNS = detect_aux_columns(manifest)
+    missing = [c for c in AUX_COLUMNS if c not in manifest.columns]
+    if missing:
+        raise ValueError(f"manifest.csv is missing {missing}. Regenerate with "
+                         f"`seismic-cli generate-regression-dataset --dual`.")
+
+    manifest = resplit(manifest, args.split_by, seed=args.seed_split)
+    report_split(manifest, args.split_by)
 
     parts = {}
     for split in ("train", "val", "test"):
@@ -285,7 +375,7 @@ def main():
     yt, yp = evaluate(test_loader)
     tm = regression_metrics(yt, yp)
 
-    ridge_mae = report_baselines(train_ds, test_ds)
+    ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
     print(f"\n--- Dual-channel model (channels='{args.channels}') ---")
     print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}")
     if ridge_mae is not None:

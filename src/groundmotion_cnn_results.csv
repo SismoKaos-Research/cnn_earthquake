@@ -1,2 +1,0 @@
-target,arch,seed,input_norm,n_aux,val_MAE_log,MAE_log,R2_log,MAE_lin,R2_lin
-pgv_fwd,cnn_lstm,0,peak,2,0.2107100486755371,0.21786101162433624,0.7550247311592102,0.0033626649528741837,0.20324397087097168

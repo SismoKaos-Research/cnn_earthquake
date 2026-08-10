@@ -150,6 +150,106 @@ ran), and the feature-extractor integration (`Sismokaos-featureExtract`'s
 auto-extracted chaos/complexity measures as additional aux inputs) — both
 remain open next steps.
 
+## 5. Adding Magnitude: When *and* How Big
+
+§1–4 answer half of this project's actual deliverable. Confirmed directly
+with the project lead: the target is a **probabilistic** forecast of both
+*when* and *at what magnitude* the next earthquake will occur (not
+deterministic prediction — no current method in seismology does that
+reliably, grant document notwithstanding). §1–4 is the validated "when"
+half. This section adds a magnitude output and reports what happened.
+
+**Design: extend the existing network with a second head, not build a new
+one.** `build_dense_windows` already computes, for the binary label, the
+array of future major-event times within the horizon. It was extended to
+also keep the magnitude of the first (earliest) such event —
+`next_magnitude`, NaN exactly when the binary label is 0. `catalog.py`'s
+`encode_and_write_dense` writes it as a manifest column (a target, not an
+aux feature). `DualChannelForecastNet`'s single output head was restructured
+into a shared trunk feeding **two** linear outputs: the existing binary
+logit, unchanged, and a new magnitude point-estimate. Loss: the existing
+`BCEWithLogitsLoss` plus a masked L1 loss on the magnitude head (masked to
+positive windows only, where a next-event magnitude is defined), weighted by
+`--mag-loss-weight`. Checkpoint selection stayed tied to validation AUC only
+— deliberately, so the already-validated binary result's checkpoint choice
+couldn't be put at risk by an unproven second objective.
+
+**Floors, evaluated on test-set positive windows only** (n=1,423 at the
+original dataset size): predict-the-mean of `next_magnitude` over TRAIN
+positive windows, and a ridge regression on four aux features
+(`max_mag`, `mean_mag`, `b_value`, `log_rate` — all already in
+`DENSE_AUX_FEATURES`) fit on TRAIN positive windows, mirroring the
+"fitted-statistical-relation" floor pattern `cnn_regression.py`'s
+`report_baselines` established for a different task in this project.
+
+**Result — three attempts, single seed, all clean losses to the floors:**
+
+| variant | model MAE | predict-the-mean floor | ridge floor | binary AUC (unaffected) |
+|---|---|---|---|---|
+| default (`--mag-loss-weight 1.0`) | 0.289 | 0.239 | 0.247 | 0.7318 |
+| `--mag-loss-weight 3.0` | 0.341 (worse) | 0.239 | 0.247 | 0.7323 |
+| `--patience 30` (30+ epochs run; checkpoint never moved past epoch 1) | 0.289 (identical) | 0.239 | 0.247 | 0.7318 |
+| 2× training windows (`--stride-events 4`, same catalog) | 0.300 | 0.239 | 0.248 | 0.7253 |
+
+None of the three levers tried — higher magnitude-loss weight, more training
+patience, twice the training data via denser striding — closed the gap, and
+higher loss weight made it measurably worse (likely gradient interference
+with the shared trunk). The binary head's AUC held steady across every
+variant (0.725–0.732, inside the established 3-seed range from §3) — adding
+and tuning the magnitude head never put the validated result at risk, but it
+also never earned its own keep.
+
+**3-seed confirmation of the default variant** (`--mag-loss-weight 1.0`,
+same dataset as §3): binary AUC 0.7318 / 0.7326 / 0.7265 (mean 0.730) —
+squarely inside §3's established range, confirming the two-head architecture
+doesn't destabilize the validated binary result across seeds. The magnitude
+head's own MAE swings much more across the same 3 seeds (0.289 / 0.248 /
+0.280) — one seed nearly matched the ridge floor (0.247) while the others
+didn't — which is itself an argument for the floor: it scores exactly 0.247
+every time, deterministically, with no seed lottery involved.
+
+**Per-zone breakdown of the recommended system** (seed 42 checkpoint +
+ridge, `catalog_forecast_predict.py`) sharpens where "good" actually means
+good:
+
+| zone | n | positive rate | AUC (when) | n positive | MAE (how big) |
+|---|---|---|---|---|---|
+| **AEGEAN** | 1129 | 0.782 | **0.791** | 883 | **0.215** |
+| EAFZ | 823 | 0.487 | 0.573 | 401 | 0.303 |
+| NAFZ | 320 | 0.356 | 0.440 | 114 | 0.265 |
+| CENTRAL | 142 | 0.176 | 0.411 | 25 | 0.399 |
+
+**AEGEAN is where this system is genuinely good at both halves** — AUC 0.79
+for "will a M≥4.5 event occur," and a magnitude MAE of 0.215, *better* than
+the pooled 0.247, on the same zone. That's not cherry-picking: AEGEAN is the
+same zone §3/§4 already identified as the one place this project's forecast
+work (scalar or neural) has found real, seed-consistent signal — this is
+that same zone's story extended to magnitude, not a new claim. EAFZ, NAFZ,
+and CENTRAL don't share it: NAFZ and CENTRAL sit below-chance on "when"
+(§3's near-Poisson diagnosis, unchanged), and their magnitude numbers don't
+rescue that — a magnitude estimate attached to an unreliable "will it happen
+at all" isn't a useful forecast, whatever its own MAE reads. CENTRAL's
+n=25 positive test windows is also too few to trust its 0.399 figure at
+face value either way.
+
+**Recommendation: use the ridge floor as the actual magnitude answer,
+not the neural head.** This is the same pattern this project already found
+in report.md's Task 3 (three-class risk classification) — a simple
+statistical model on a handful of physically-motivated scalars beats a
+CNN/LSTM architecture built for the same target, repeatably, not once. The
+honest, presentable system this project has for "when and how big" is
+**two different tools for two different sub-questions**: the validated
+dual-channel network for "will a M≥threshold event occur within the
+horizon" (real skill, AUC 0.73, §3), paired with
+`ridge(max_mag, mean_mag, b_value, log_rate)` for "how big will it be, given
+one occurs" (MAE ≈ 0.24–0.25, beats every neural attempt at the same
+question). Not a consolation prize for the magnitude half — the best
+available answer, honestly arrived at.
+
+Raw per-variant numbers: `src/cnn_lstm_forecast_maghead_results.csv`. Combined
+end-to-end prediction (binary network + ridge magnitude, run together on the
+same test windows): `src/catalog_forecast_predict.py`.
+
 ## Reproduction
 
 ```bash
@@ -166,3 +266,19 @@ python cnn_lstm_forecast.py \
 ```
 
 Raw per-seed numbers: `src/cnn_lstm_forecast_results.csv`.
+
+**Magnitude head (§5) — same dataset command, plus `--stride-events 4` for
+the denser variant:**
+
+```bash
+python cnn_lstm_forecast.py \
+    --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \
+    --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv \
+    --seed 42 --mag-loss-weight 1.0   # 3.0 for the higher-weight variant;
+                                       # --patience 30 --epochs 100 for the
+                                       # longer-training variant
+```
+
+Recommended magnitude prediction, run standalone against the same test
+windows: `python catalog_forecast_predict.py --dataset-dir
+../../data_downloader/data/dataset_catalog_forecast`.
