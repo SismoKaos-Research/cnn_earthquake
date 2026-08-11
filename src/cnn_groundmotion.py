@@ -79,6 +79,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from cnn_lstm import LSTMAttentionBranch
 from groundmotion_baselines import TARGETS, load
+from metrics import print_report, regression_report
 from training import seed_everything
 
 
@@ -485,6 +486,10 @@ def main():
     # this project exists to avoid.
     best_name = min(floor, key=lambda k: floor[k]["MAE_log"])
     best_floor = floor[best_name]
+    if cnn_pred is not None:
+        print_report(f"CNN ({args.arch}) -- full metric set, seed-averaged (test set, log target)",
+                    regression_report(parts["test"][2].numpy(), cnn_pred))
+
     delta = best_floor["MAE_log"] - mae.mean()
     print(f"  vs strongest floor ({best_name}):")
     print(f"    MAE_log  CNN {mae.mean():.4f} vs {best_floor['MAE_log']:.4f}"

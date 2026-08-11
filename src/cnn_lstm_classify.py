@@ -47,7 +47,8 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import CNNBranch, GatedFusion, LSTMAttentionBranch
+from metrics import majority_class_baseline
+from model.dual_channel import DualChannelNet
 from training import seed_everything
 
 
@@ -117,70 +118,25 @@ class RamDualTensorDataset(Dataset):
 # Model
 # ---------------------------------------------------------------------------
 
-class DualChannelBinaryNet(nn.Module):
+class DualChannelBinaryNet(DualChannelNet):
     """Same fusion design as `cnn_lstm.py`'s DualChannelRiskNet, minus the
     auxiliary-scalar branch (there are no catalog-style physical scalars
     here) and with a single-logit binary head instead of a 3-way softmax.
 
     `fusion="linear"` is the paper's a*F1+b*F2 (two global scalars).
-    `fusion="gate"` replaces it with `cnn_lstm.GatedFusion`, a per-example
+    `fusion="gate"` replaces it with `model.blocks.GatedFusion`, a per-example
     gate -- only meaningful when both branches are active (`channels="all"`);
     single-branch ablations ignore `fusion` entirely since there is nothing
     to combine."""
 
     def __init__(self, seq_dim, img_channels, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear"):
-        super().__init__()
-        self.channels = channels
-        self.fusion = fusion
-        self.use_1d = channels in ("all", "1d")
-        self.use_2d = channels in ("all", "2d")
-        if not (self.use_1d or self.use_2d):
-            raise ValueError(f"--channels {channels} disables every branch")
-        if fusion not in ("linear", "gate"):
-            raise ValueError(f"--fusion must be 'linear' or 'gate', got {fusion!r}")
-
-        if self.use_1d:
-            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
-            self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
-        if self.use_2d:
-            self.b2 = CNNBranch(img_channels, dropout=dropout)
-            self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
-
-        self.both = self.use_1d and self.use_2d
-        if self.both and fusion == "gate":
-            self.gated_fusion = GatedFusion(fusion_dim)
-        else:
-            # Learned fusion weights (a, b in the paper's notation). Also
-            # used, harmlessly, as a global rescale in single-branch
-            # ablations -- the optimizer settles it near 1 since there is
-            # nothing to balance it against.
-            self.w1 = nn.Parameter(torch.tensor(1.0))
-            self.w2 = nn.Parameter(torch.tensor(1.0))
-
-        self.head = nn.Sequential(
-            nn.LayerNorm(fusion_dim),
-            nn.Dropout(dropout),
-            nn.Linear(fusion_dim, fusion_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(fusion_dim, 1),
-        )
+        super().__init__(seq_dim, img_channels, aux_dim=0, hidden=hidden,
+                         fusion_dim=fusion_dim, dropout=dropout, channels=channels,
+                         fusion=fusion, n_classes=1, squeeze_output=False)
 
     def forward(self, seq, img):
-        self.last_gate = None
-        if self.both:
-            f1 = self.p1(self.b1(seq))
-            f2 = self.p2(self.b2(img))
-            if self.fusion == "gate":
-                fused, self.last_gate = self.gated_fusion(f1, f2)
-            else:
-                fused = self.w1 * f1 + self.w2 * f2
-        elif self.use_1d:
-            fused = self.w1 * self.p1(self.b1(seq))
-        else:
-            fused = self.w2 * self.p2(self.b2(img))
-        return self.head(fused)
+        return super().forward(seq, img)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +328,11 @@ def main():
         print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
     print("\nClassification Report:")
     print(classification_report(all_labels, all_preds, digits=4))
+
+    train_labels = np.array([lbl for _, lbl in train_ds.samples])
+    maj, maj_acc, maj_bal = majority_class_baseline(train_labels, all_labels)
+    print(f"\nmajority-class floor: predicting {maj} always -> "
+         f"accuracy {maj_acc:.4f}  balanced {maj_bal:.4f}")
 
 
 if __name__ == "__main__":

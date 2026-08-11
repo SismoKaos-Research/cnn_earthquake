@@ -44,8 +44,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.metrics import (accuracy_score, confusion_matrix, matthews_corrcoef,
-                             recall_score, roc_auc_score)
+from sklearn.metrics import (accuracy_score, classification_report,
+                             confusion_matrix, matthews_corrcoef, recall_score,
+                             roc_auc_score)
 from sklearn.model_selection import GroupKFold
 
 RISK_CLASSES = ["00_noise", "01_low_risk", "02_high_risk"]
@@ -145,6 +146,8 @@ def main():
     print("  per-class recall:",
           {c: round(float((pred[test.y.values == i] == i).mean()), 3)
            for i, c in enumerate(RISK_CLASSES)})
+    print("\nClassification Report:")
+    print(classification_report(test.y, pred, target_names=RISK_CLASSES, digits=4, zero_division=0))
 
     eq = test.y > 0
     print(f"\n  stage-1 AUC (noise vs earthquake): "

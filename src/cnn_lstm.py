@@ -43,6 +43,9 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              cohen_kappa_score, confusion_matrix)
 from torch.utils.data import DataLoader, Dataset
 
+from metrics import multiclass_report, print_report
+from model.blocks import LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
+from model.dual_channel import DualChannelNet
 from training import seed_everything
 
 RISK_CLASSES = ["lt_1y", "1_5y", "gt_5y"]
@@ -144,81 +147,7 @@ class CatalogWindowDataset(Dataset):
 # Model
 # ---------------------------------------------------------------------------
 
-class LSTMAttentionBranch(nn.Module):
-    """LSTM for long-range order, then multi-head self-attention to weight steps."""
-
-    def __init__(self, in_dim, hidden=64, layers=1, heads=4, dropout=0.2):
-        super().__init__()
-        self.lstm = nn.LSTM(in_dim, hidden, num_layers=layers, batch_first=True,
-                            bidirectional=True,
-                            dropout=dropout if layers > 1 else 0.0)
-        d = hidden * 2
-        self.attn = nn.MultiheadAttention(d, heads, dropout=dropout, batch_first=True)
-        self.norm = nn.LayerNorm(d)
-        self.out_dim = d
-
-    def forward(self, x):
-        h, _ = self.lstm(x)
-        a, _ = self.attn(h, h, h)
-        h = self.norm(h + a)             # residual, as in the transformer block
-        return h.mean(dim=1)             # pool over time
-
-
-class CNNBranch(nn.Module):
-    """Compact CNN over the RAM image. The images are small (32x32 by default),
-    so a 4-stage ResNet would be heavily over-provisioned here."""
-
-    def __init__(self, in_channels=3, width=32, dropout=0.2):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, width, 3, padding=1, bias=False),
-            nn.BatchNorm2d(width), nn.GELU(),
-            nn.Conv2d(width, width * 2, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(width * 2), nn.GELU(),
-            nn.Dropout2d(dropout),
-            nn.Conv2d(width * 2, width * 4, 3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(width * 4), nn.GELU(),
-            nn.AdaptiveAvgPool2d(1),
-        )
-        self.out_dim = width * 4
-
-    def forward(self, x):
-        return torch.flatten(self.net(x), 1)
-
-
-class GatedFusion(nn.Module):
-    """
-    Per-example gate deciding how much to trust each branch, replacing a
-    fixed pair of scalars (a*F1 + b*F2, same for every example) with
-    g(x)*F1 + (1-g(x))*F2, where g = sigmoid(MLP([F1, F2])) is conditioned on
-    both branches' own features for THIS example.
-
-    Motivation (report.md 10.5.1/10.5.2): the paper's fixed-scalar fusion
-    underperformed the best single branch on two independent 2D
-    representations (RAM and spectrogram) -- a global blend can't suppress a
-    weak branch on the specific examples where it's wrong, only shrink its
-    average contribution. Late-fusion stacking on frozen checkpoints fixed
-    that post hoc; this tests whether the same idea, trained end-to-end
-    instead of on frozen features, does at least as well without giving up
-    joint training's ability to let the branches adapt to each other.
-    """
-
-    def __init__(self, dim, hidden=None, dropout=0.1):
-        super().__init__()
-        hidden = hidden or max(8, dim // 2)
-        self.net = nn.Sequential(
-            nn.Linear(dim * 2, hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
-
-    def forward(self, f1, f2):
-        g = torch.sigmoid(self.net(torch.cat([f1, f2], dim=1)))
-        return g * f1 + (1.0 - g) * f2, g
-
-
-class DualChannelRiskNet(nn.Module):
+class DualChannelRiskNet(DualChannelNet):
     """
     1D + 2D + auxiliary scalars, fused and classified.
 
@@ -230,48 +159,9 @@ class DualChannelRiskNet(nn.Module):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                  n_classes=3, dropout=0.3, channels="all"):
-        super().__init__()
-        self.channels = channels
-        self.use_1d = channels in ("all", "1d", "1d+aux")
-        self.use_2d = channels in ("all", "2d", "2d+aux")
-        self.use_aux = channels in ("all", "aux", "1d+aux", "2d+aux")
-        if not (self.use_1d or self.use_2d or self.use_aux):
-            raise ValueError(f"--channels {channels} disables every branch")
-
-        if self.use_1d:
-            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
-            self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
-        if self.use_2d:
-            self.b2 = CNNBranch(img_channels, dropout=dropout)
-            self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
-        # Learned fusion weights (a, b in the paper's notation).
-        self.w1 = nn.Parameter(torch.tensor(1.0))
-        self.w2 = nn.Parameter(torch.tensor(1.0))
-
-        head_in = (fusion_dim if (self.use_1d or self.use_2d) else 0) + \
-                  (aux_dim if self.use_aux else 0)
-        self.head = nn.Sequential(
-            nn.LayerNorm(head_in),
-            nn.Dropout(dropout),
-            nn.Linear(head_in, fusion_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(fusion_dim, n_classes),
-        )
-
-    def forward(self, seq, img, aux):
-        feats = []
-        fused = None
-        if self.use_1d:
-            fused = self.w1 * self.p1(self.b1(seq))
-        if self.use_2d:
-            f2 = self.w2 * self.p2(self.b2(img))
-            fused = f2 if fused is None else fused + f2
-        if fused is not None:
-            feats.append(fused)
-        if self.use_aux:
-            feats.append(aux)
-        return self.head(torch.cat(feats, dim=1))
+        super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
+                         fusion_dim=fusion_dim, dropout=dropout, channels=channels,
+                         n_classes=n_classes, squeeze_output=False)
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +310,16 @@ def main():
 
     model.load_state_dict(torch.load(save_path, weights_only=True))
     yt, pt = evaluate(test_loader)
+
+    model.eval()
+    scores = []
+    with torch.no_grad():
+        for seq, img, aux, _ in test_loader:
+            scores.append(torch.softmax(model(seq.to(device), img.to(device), aux.to(device)),
+                                        dim=1).cpu().numpy())
+    print_report("Dual-channel model -- full metric set (test set)",
+                multiclass_report(yt, pt, y_score=np.concatenate(scores), class_names=RISK_CLASSES))
+
     acc = float((yt == pt).mean())
     bal = balanced_accuracy_score(yt, pt)
     kappa = cohen_kappa_score(yt, pt)

@@ -37,7 +37,9 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from training import ResBlock, seed_everything
+from metrics import majority_class_baseline
+from model.trunk2d import SETrunk2D
+from training import seed_everything
 
 AUX_FEATURES = ["log_snr", "log_rms"]
 
@@ -110,50 +112,19 @@ class RamAuxTensorDataset(Dataset):
 # Model
 # ---------------------------------------------------------------------------
 
-class RamAuxCNN(nn.Module):
+class RamAuxCNN(SETrunk2D):
     """
-    Same ResNet+SE trunk as `training.ImprovedSeismicCNN` (reuses ResBlock
-    directly so the two stay identical), with the pooled features
-    concatenated with the aux vector before the head. `use_aux=False` drops
-    the concatenation entirely -- architecturally identical to the plain RAM
-    classifier, for a controlled ablation.
+    `model.trunk2d.SETrunk2D`, with the pooled features concatenated with the
+    aux vector before the head. `use_aux=False` drops the concatenation
+    entirely -- architecturally identical to the plain RAM classifier, for a
+    controlled ablation.
     """
 
     def __init__(self, aux_dim, use_aux=True, dropout1=0.5, dropout2=0.3,
                 hidden_dim=64, num_stages=4, in_channels=3):
-        super().__init__()
-        self.use_aux = use_aux
-        self.in_conv = nn.Sequential(
-            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(16), nn.GELU(),
-        )
-        self.layer1 = ResBlock(16, 32, stride=2)
-        self.layer2 = ResBlock(32, 64, stride=2)
-        self.layer3 = ResBlock(64, 128, stride=2)
-        if num_stages >= 4:
-            self.layer4 = ResBlock(128, 256, stride=2)
-            final_channels = 256
-        else:
-            self.layer4 = nn.Identity()
-            final_channels = 128
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-
-        head_in = final_channels + (aux_dim if use_aux else 0)
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout1),
-            nn.Linear(head_in, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout2),
-            nn.Linear(hidden_dim, 1),
-        )
-
-    def forward(self, x, aux):
-        x = self.in_conv(x)
-        x = self.layer1(x); x = self.layer2(x); x = self.layer3(x); x = self.layer4(x)
-        x = torch.flatten(self.global_pool(x), 1)
-        if self.use_aux:
-            x = torch.cat([x, aux], dim=1)
-        return self.classifier(x)
+        super().__init__(num_stages=num_stages, in_channels=in_channels,
+                         aux_dim=aux_dim if use_aux else 0, num_classes=1,
+                         dropout1=dropout1, dropout2=dropout2, hidden_dim=hidden_dim)
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +297,11 @@ def main():
         print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
     print("\nClassification Report:")
     print(classification_report(all_labels, all_preds, digits=4))
+
+    train_labels = np.array([lbl for _, lbl in train_ds.samples])
+    maj, maj_acc, maj_bal = majority_class_baseline(train_labels, all_labels)
+    print(f"\nmajority-class floor: predicting {maj} always -> "
+         f"accuracy {maj_acc:.4f}  balanced {maj_bal:.4f}")
 
 
 if __name__ == "__main__":

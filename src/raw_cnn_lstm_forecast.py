@@ -1,20 +1,10 @@
 """
-Fair head-to-head against feature_lstm_forecast.py: same continuous KO.GEDZ
-data (May 2024 - Feb 2025, Aegean zone), same dense-forecast target (M>=4.5
-within horizon_days), same 24-hour sequence length, same train/val/test
-split, same 3-seed ensemble evaluation -- the only thing that changes is the
-per-hour representation. feature_lstm_forecast.py uses Sismokaos-
-featureExtract's hand-crafted features (STA/LTA, Hjorth, permutation
-entropy, ...); this script uses a small 1D CNN, trained end-to-end, directly
-on the raw preprocessed waveform (3, 18000) -- the exact same
-gap-filled/filtered/decimated 5Hz signal the hand features were computed
-from, read straight from Sismokaos-featureExtract's preprocessor.preprocess
-output (data/aegean_2024_2025/YYYY_MM_DD/*.npy), never touching the
-hand-crafted feature CSV at all.
-
-This is the direct test of the original hypothesis: does a learned
-representation beat hand-selected features on this task, holding everything
-else (signal, target, split, evaluation) fixed?
+Same setup as feature_lstm_forecast.py (KO.GEDZ, May 2024-Feb 2025, M>=4.5
+dense forecast target, 24h sequences, same split, same 3-seed ensemble) but
+the per-hour input is a small 1D CNN over the raw waveform (3, 18000)
+instead of the hand-crafted feature vector. Reads directly from
+Sismokaos-featureExtract's preprocessor.preprocess output
+(data/aegean_2024_2025/YYYY_MM_DD/*.npy), not the feature CSV.
 
 Usage:
     python raw_cnn_lstm_forecast.py \\
@@ -34,9 +24,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import LSTMAttentionBranch
 from feature_lstm_forecast import (days_since_prev_major, label_hours,
                                    load_aegean_events, safe_auc)
+from metrics import binary_report, print_report
+from model.sequence import SequenceHeadNet
 from training import seed_everything
 
 _DATE_DIR_RE = re.compile(r"^\d{4}_\d{2}_\d{2}$")
@@ -45,8 +36,8 @@ HOUR_SAMPLES = 18000  # 3600s * 5Hz
 
 def load_hourly_raw(data_root: str):
     """Returns (DatetimeIndex, raw) where raw is (n_hours, 3, HOUR_SAMPLES)
-    float32, NaN-filled by linear interpolation then zero (gaps only ever a
-    couple percent of a hour per the run's own gap report)."""
+    float32. Gaps (usually a couple percent per hour) are linearly
+    interpolated, then anything left over is zeroed."""
     root = Path(data_root)
     date_dirs = sorted(d for d in root.iterdir() if d.is_dir() and _DATE_DIR_RE.match(d.name))
 
@@ -114,9 +105,7 @@ class RawSeqDataset(Dataset):
 
 
 class RawWaveformEncoder(nn.Module):
-    """Compresses one hour's raw 3-component waveform into a compact
-    embedding via a 1D CNN -- the learned-representation counterpart to
-    feature_functions.py's hand-crafted per-window statistics."""
+    """1D CNN that embeds one hour's raw 3-component waveform."""
 
     def __init__(self, out_dim=32, dropout=0.3):
         super().__init__()
@@ -138,24 +127,10 @@ class RawWaveformEncoder(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-class RawCNNLSTM(nn.Module):
+class RawCNNLSTM(SequenceHeadNet):
     def __init__(self, cnn_out=32, hidden=16, dropout=0.5):
-        super().__init__()
-        self.cnn = RawWaveformEncoder(out_dim=cnn_out, dropout=dropout)
-        self.branch = LSTMAttentionBranch(cnn_out, hidden=hidden, dropout=dropout)
-        self.head = nn.Sequential(
-            nn.LayerNorm(self.branch.out_dim),
-            nn.Dropout(dropout),
-            nn.Linear(self.branch.out_dim, hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
-
-    def forward(self, seq_raw):
-        B, T, C, L = seq_raw.shape
-        emb = self.cnn(seq_raw.reshape(B * T, C, L)).reshape(B, T, -1)
-        return self.head(self.branch(emb)).squeeze(-1)
+        super().__init__(cnn_out, hidden=hidden, dropout=dropout,
+                         encoder=RawWaveformEncoder(out_dim=cnn_out, dropout=dropout))
 
 
 def parse_args():
@@ -212,7 +187,7 @@ def train_one_seed(args, seed, raw, labels, train_idx, val_idx, test_idx, device
     yv0, _, _ = evaluate(val_loader)
     use_loss_fallback = len(np.unique(yv0)) < 2
     if use_loss_fallback:
-        print(f"  [seed {seed}] val split single-class -- using val loss for checkpoint selection.")
+        print(f"  [seed {seed}] val split is single-class, checkpointing on val loss instead of AUC")
 
     best = float("inf") if use_loss_fallback else -1.0
     no_improve, best_state = 0, None
@@ -249,7 +224,6 @@ def train_one_seed(args, seed, raw, labels, train_idx, val_idx, test_idx, device
 def main():
     args = parse_args()
 
-    print("=" * 64)
     print("Loading raw preprocessed waveform and building hourly labels...")
     hour_index, raw = load_hourly_raw(args.data_root)
     major_times = load_aegean_events(args.catalog_path, args.threshold)
@@ -305,14 +279,7 @@ def main():
     ensemble_auc = safe_auc(yt_ref, ensemble_score)
     print(f"  ENSEMBLE (mean of {len(seeds)} seeds' probabilities)   AUC {ensemble_auc:.4f}   n={len(yt_ref)}")
 
-    floor = max(0.5, base_auc, pers_auc)
-    if ensemble_auc <= floor + 1e-9:
-        print("\n  [!] Ensemble does NOT clear max(chance, persistence) -- not evidence of forecasting skill.")
-    else:
-        print(f"\n  Ensemble beats max(chance, persistence) by {ensemble_auc - floor:+.4f} AUC.")
-    print(f"\n  vs. hand-feature LSTM ensemble: 0.5575 AUC (feature_lstm_forecast.py, same data/split/target)")
-    print(f"\n  [!] Single station, ~10 months, {len(seeds)}-seed ensemble -- treat as a first look, "
-         "not a settled result (report.md 6.6).")
+    print_report("Raw-waveform CNN-LSTM ensemble (test set)", binary_report(yt_ref, ensemble_score))
 
 
 if __name__ == "__main__":

@@ -44,6 +44,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 
+from metrics import regression_report
+
 # target key -> (linear column, log column, unit, matched-unit input peak, degenerate?)
 #
 # The amplitude predictor is matched to the target's units: velocity input for a
@@ -172,6 +174,9 @@ def run_target(d, tkey, stratify=True):
         out.append({"target": tkey, "baseline": name, "degenerate": degenerate, **m})
         print(f"{name:28s} {m['MAE_log']:9.4f} {m['R2_log']:8.4f} "
               f"{m['MAE_'+unit]:12.5g} {m['R2_lin']:9.4f}")
+        rr = regression_report(te[log_col].to_numpy(float), p)
+        print(f"{'':28s}  (log-space RMSE {rr['RMSE']:.4f}  median-AE {rr['median_AE']:.4f}"
+              f"  max-error {rr['max_error']:.4f})")
 
     if stratify and not degenerate:
         _stratify(te, log_col, preds, unit)

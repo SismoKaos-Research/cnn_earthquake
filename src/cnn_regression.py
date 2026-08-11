@@ -27,7 +27,6 @@ Usage:
 """
 
 import argparse
-import math
 import os
 from pathlib import Path
 
@@ -37,10 +36,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error, r2_score
 from torch.utils.data import DataLoader, Dataset
 
-from training import ImprovedSeismicCNN, seed_everything
+from metrics import regression_report
+from model.trunk2d import SETrunk2D
+from training import seed_everything
 
 AUX_COLUMNS = ["log_snr", "log_distance"]
 PER_COMPONENT_AUX_COLUMNS = ["log_snr_0", "log_snr_1", "log_snr_2", "log_distance"]
@@ -113,10 +113,10 @@ class MagnitudeDataset(Dataset):
 # Model
 # ---------------------------------------------------------------------------
 
-class RegressionSeismicCNN(nn.Module):
+class RegressionSeismicCNN(SETrunk2D):
     """
-    Shared CNN trunk, then the pooled features are concatenated with the
-    auxiliary scalars before the regression head.
+    `model.trunk2d.SETrunk2D`, concatenating the auxiliary scalars before the
+    regression head.
 
     `use_aux=False` reproduces an image-only model, which is the honest
     ablation for "does the encoded window carry magnitude information at all".
@@ -131,34 +131,9 @@ class RegressionSeismicCNN(nn.Module):
     def __init__(self, dropout1=0.4, dropout2=0.2, hidden_dim=128,
                  num_stages=4, in_channels=3, n_aux=len(AUX_COLUMNS), use_aux=True,
                  num_classes=1):
-        super().__init__()
-        backbone = ImprovedSeismicCNN(dropout1=dropout1, dropout2=dropout2,
-                                      hidden_dim=hidden_dim, num_stages=num_stages,
-                                      in_channels=in_channels)
-        self.in_conv = backbone.in_conv
-        self.layer1, self.layer2 = backbone.layer1, backbone.layer2
-        self.layer3, self.layer4 = backbone.layer3, backbone.layer4
-        self.global_pool = backbone.global_pool
-        feat_dim = 256 if num_stages >= 4 else 128
-
-        self.use_aux = use_aux
-        self.n_aux = n_aux if use_aux else 0
-        self.head = nn.Sequential(
-            nn.Dropout(dropout1),
-            nn.Linear(feat_dim + self.n_aux, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout2),
-            nn.Linear(hidden_dim, num_classes),
-        )
-
-    def forward(self, x, aux=None):
-        x = self.in_conv(x)
-        x = self.layer1(x); x = self.layer2(x)
-        x = self.layer3(x); x = self.layer4(x)
-        x = torch.flatten(self.global_pool(x), 1)
-        if self.use_aux:
-            x = torch.cat([x, aux], dim=1)
-        return self.head(x)
+        super().__init__(num_stages=num_stages, in_channels=in_channels,
+                         aux_dim=n_aux if use_aux else 0, num_classes=num_classes,
+                         dropout1=dropout1, dropout2=dropout2, hidden_dim=hidden_dim)
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +141,9 @@ class RegressionSeismicCNN(nn.Module):
 # ---------------------------------------------------------------------------
 
 def regression_metrics(y_true, y_pred):
-    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
-    return {
-        "MAE": float(mean_absolute_error(y_true, y_pred)),
-        "RMSE": float(math.sqrt(np.mean((y_true - y_pred) ** 2))),
-        "R2": float(r2_score(y_true, y_pred)) if len(y_true) > 1 else float("nan"),
-    }
+    """MAE/RMSE/R2 (this script's original key set) plus median-AE/max-error/
+    resid_std from `metrics.regression_report`."""
+    return regression_report(y_true, y_pred)
 
 
 def report_baselines(train_ds, test_ds, aux_names=None):
@@ -359,7 +331,8 @@ def main():
 
     ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
     print(f"\n--- CNN ({'image only' if args.no_aux else 'image + aux'}) ---")
-    print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}")
+    print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}  "
+         f"median-AE {tm['median_AE']:.3f}  max-error {tm['max_error']:.3f}")
     if ridge_mae is not None:
         delta = ridge_mae - tm["MAE"]
         verdict = ("the encoded window adds information beyond amplitude+distance"

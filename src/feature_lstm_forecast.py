@@ -43,10 +43,10 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import LSTMAttentionBranch
+from metrics import binary_report, print_report, safe_auc  # noqa: F401 (safe_auc re-exported; raw_cnn_lstm_forecast.py imports it from here)
+from model.sequence import SequenceHeadNet
 from training import seed_everything
 
 AEGEAN_BBOX = (36.0, 40.0, 25.0, 30.0)  # lat0, lat1, lon0, lon1 -- matches forecast.py's FAULT_ZONES
@@ -131,13 +131,6 @@ class HourlySeqDataset(Dataset):
         return (torch.from_numpy(seq).float(),
                torch.tensor(self.labels[end], dtype=torch.float32))
 
-
-def safe_auc(y, score):
-    if len(np.unique(y)) < 2:
-        return float("nan")
-    return float(roc_auc_score(y, score))
-
-
 def parse_args():
     p = argparse.ArgumentParser(description="LSTM forecaster on hand-crafted continuous features.")
     p.add_argument("--features-csv", required=True)
@@ -160,21 +153,9 @@ def parse_args():
     return p.parse_args()
 
 
-class ForecastLSTM(nn.Module):
+class ForecastLSTM(SequenceHeadNet):
     def __init__(self, feat_dim, hidden=64, dropout=0.3):
-        super().__init__()
-        self.branch = LSTMAttentionBranch(feat_dim, hidden=hidden, dropout=dropout)
-        self.head = nn.Sequential(
-            nn.LayerNorm(self.branch.out_dim),
-            nn.Dropout(dropout),
-            nn.Linear(self.branch.out_dim, hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
-
-    def forward(self, seq):
-        return self.head(self.branch(seq)).squeeze(-1)
+        super().__init__(feat_dim, hidden=hidden, dropout=dropout)
 
 
 def train_one_seed(args, seed, feature_cols, features, labels,
@@ -323,6 +304,8 @@ def main():
         print(f"\n  Ensemble beats max(chance, persistence) by {ensemble_auc - floor:+.4f} AUC.")
     print(f"\n  [!] Single station, ~10 months, {len(seeds)}-seed ensemble -- treat as a first look, "
          "not a settled result (report.md 6.6).")
+
+    print_report("Hand-feature LSTM ensemble (test set)", binary_report(yt_ref, ensemble_score))
 
 
 if __name__ == "__main__":

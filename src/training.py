@@ -22,98 +22,31 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader
 
+from model.blocks import ResBlock, SEBlock  # re-exported for existing `from training import ResBlock` callers
+from model.trunk2d import SETrunk2D
 
 # --------------------------------------------------------------------------
 # Model
 # --------------------------------------------------------------------------
 
-class SEBlock(nn.Module):
-    def __init__(self, channels, reduction=16):
-        super(SEBlock, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channels, max(1, channels // reduction), bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(max(1, channels // reduction), channels, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
-        return x * y.expand_as(x)
-
-
-class ResBlock(nn.Module):
-    """A standard Residual Block with an integrated SE Block."""
-    def __init__(self, in_channels, out_channels, stride=1):
-        super(ResBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3,
-                               stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3,
-                               stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.se = SEBlock(out_channels)
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
-            )
-
-    def forward(self, x):
-        out = F.gelu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out = self.se(out)
-        out += self.shortcut(x)
-        return F.gelu(out)
-
-
-class ImprovedSeismicCNN(nn.Module):
+class ImprovedSeismicCNN(SETrunk2D):
     """
     ResNet-style CNN with SE blocks. Global average pooling makes it agnostic
     to input resolution, so the same architecture takes 64x64 RAM images and
     non-square spectrograms (e.g. 129x94) without modification.
 
     num_stages=4 keeps the original layer1..layer4 state-dict keys, so
-    existing checkpoints load unchanged.
+    existing checkpoints load unchanged. Stays defined at this name/module
+    path (rather than moving to model/trunk2d.py) because cnn_run.py unpickles
+    a full saved model object by qualified class path.
     """
     def __init__(self, dropout1=0.5, dropout2=0.3, hidden_dim=64, num_stages=4, in_channels=3):
-        super(ImprovedSeismicCNN, self).__init__()
-        self.in_conv = nn.Sequential(
-            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.GELU()
-        )
-        self.layer1 = ResBlock(16, 32, stride=2)
-        self.layer2 = ResBlock(32, 64, stride=2)
-        self.layer3 = ResBlock(64, 128, stride=2)
-        if num_stages >= 4:
-            self.layer4 = ResBlock(128, 256, stride=2)
-            final_channels = 256
-        else:
-            self.layer4 = nn.Identity()
-            final_channels = 128
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout1),
-            nn.Linear(final_channels, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout2),
-            nn.Linear(hidden_dim, 1)
-        )
+        super().__init__(num_stages=num_stages, in_channels=in_channels, aux_dim=0,
+                         num_classes=1, dropout1=dropout1, dropout2=dropout2,
+                         hidden_dim=hidden_dim)
 
     def forward(self, x):
-        x = self.in_conv(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.global_pool(x)
-        x = torch.flatten(x, 1)
-        return self.classifier(x)
+        return super().forward(x)
 
 
 # --------------------------------------------------------------------------
@@ -204,9 +137,7 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
 
 
-# --------------------------------------------------------------------------
 # Training / evaluation
-# --------------------------------------------------------------------------
 
 def run_training(args, train_dataset, val_dataset, test_dataset, in_channels=3):
     """Full train / validate / test cycle shared by both entry points."""

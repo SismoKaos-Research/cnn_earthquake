@@ -8,6 +8,8 @@ from scipy.cluster import hierarchy
 from scipy.spatial.distance import squareform
 from scipy.stats import spearmanr
 
+from metrics import predict_mean_baseline, print_report, regression_report
+
 
 def load_data(npz_path):
     data = np.load(npz_path)
@@ -69,7 +71,11 @@ def group_and_rank_features(train_path, val_path, distance_threshold=0.3):
     )
     
     print(f"  -> Best LightGBM Iteration: {model.best_iteration_}")
-    
+
+    val_pred = model.predict(X_val, num_iteration=model.best_iteration_)
+    print_report("LightGBM (val set)", regression_report(y_val, val_pred))
+    print_report("predict-the-mean floor (val set)", predict_mean_baseline(y_train, y_val))
+
     # 4. Aggregate Importance by Cluster
     print("\n[PHASE 4] Aggregating Feature Importance by Family...")
     # 'gain' measures how much a feature improved the magnitude prediction when it was used to split a tree

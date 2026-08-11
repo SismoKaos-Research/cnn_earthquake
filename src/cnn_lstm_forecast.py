@@ -59,10 +59,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.linear_model import Ridge
-from sklearn.metrics import matthews_corrcoef, roc_auc_score
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import CNNBranch, LSTMAttentionBranch
+from metrics import binary_report, print_report, regression_report, safe_auc, safe_mcc
+from model.dual_channel import DualChannelDualHeadNet
 from training import seed_everything
 
 AUX_FEATURES = ["log_duration_days", "log_rate", "log_rate_recent", "rate_accel",
@@ -147,7 +147,7 @@ class DenseWindowDataset(Dataset):
 # Model -- same branches as cnn_lstm.py, binary head
 # ---------------------------------------------------------------------------
 
-class DualChannelForecastNet(nn.Module):
+class DualChannelForecastNet(DualChannelDualHeadNet):
     """Same 1D/2D/aux architecture as `cnn_lstm.py`'s DualChannelRiskNet, with
     a shared trunk feeding two heads: `binary_out` (will M>=threshold occur
     within horizon_days -- the original, validated task) and `magnitude_out`
@@ -159,49 +159,8 @@ class DualChannelForecastNet(nn.Module):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all"):
-        super().__init__()
-        self.channels = channels
-        self.use_1d = channels in ("all", "1d", "1d+aux")
-        self.use_2d = channels in ("all", "2d", "2d+aux")
-        self.use_aux = channels in ("all", "aux", "1d+aux", "2d+aux")
-        if not (self.use_1d or self.use_2d or self.use_aux):
-            raise ValueError(f"--channels {channels} disables every branch")
-
-        if self.use_1d:
-            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, dropout=dropout)
-            self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
-        if self.use_2d:
-            self.b2 = CNNBranch(img_channels, dropout=dropout)
-            self.p2 = nn.Linear(self.b2.out_dim, fusion_dim)
-        self.w1 = nn.Parameter(torch.tensor(1.0))
-        self.w2 = nn.Parameter(torch.tensor(1.0))
-
-        head_in = (fusion_dim if (self.use_1d or self.use_2d) else 0) + \
-                 (aux_dim if self.use_aux else 0)
-        self.trunk = nn.Sequential(
-            nn.LayerNorm(head_in),
-            nn.Dropout(dropout),
-            nn.Linear(head_in, fusion_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
-        self.binary_out = nn.Linear(fusion_dim, 1)
-        self.magnitude_out = nn.Linear(fusion_dim, 1)
-
-    def forward(self, seq, img, aux):
-        feats = []
-        fused = None
-        if self.use_1d:
-            fused = self.w1 * self.p1(self.b1(seq))
-        if self.use_2d:
-            f2 = self.w2 * self.p2(self.b2(img))
-            fused = f2 if fused is None else fused + f2
-        if fused is not None:
-            feats.append(fused)
-        if self.use_aux:
-            feats.append(aux)
-        trunk_out = self.trunk(torch.cat(feats, dim=1))
-        return self.binary_out(trunk_out).squeeze(-1), self.magnitude_out(trunk_out).squeeze(-1)
+        super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
+                         fusion_dim=fusion_dim, dropout=dropout, channels=channels)
 
 
 # ---------------------------------------------------------------------------
@@ -226,18 +185,6 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     if not mask.any():
         return pred.sum() * 0.0
     return (pred[mask] - target[mask]).abs().mean()
-
-
-def safe_auc(y, score):
-    if len(np.unique(y)) < 2:
-        return float("nan")
-    return float(roc_auc_score(y, score))
-
-
-def safe_mcc(y, pred):
-    if len(np.unique(pred)) < 2 or len(np.unique(y)) < 2:
-        return float("nan")
-    return float(matthews_corrcoef(y, pred))
 
 
 def report_row(name: str, y: np.ndarray, score: np.ndarray) -> dict:
@@ -434,6 +381,12 @@ def main():
 
     print(f"\n--- Dual-channel forecast model (channels='{args.channels}') ---")
     model_row = report_row("model", yt, st)
+    print_report("Dual-channel forecast model -- full binary metric set (test set)",
+                binary_report(yt, st))
+    valid_mag = ~np.isnan(mag_true)
+    if valid_mag.any():
+        print_report("Magnitude head (positive windows only)",
+                    regression_report(mag_true[valid_mag], mag_pred[valid_mag]))
 
     print("\n--- Per zone (test set, pooled window level) ---")
     test_rows = test_ds.rows.copy()

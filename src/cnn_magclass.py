@@ -46,7 +46,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, matthews_corrcoef, roc_auc_score
+from sklearn.metrics import (accuracy_score, classification_report,
+                             confusion_matrix, matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_regression import AUX_COLUMNS, RegressionSeismicCNN
@@ -315,6 +316,15 @@ def main():
                    "NO measurable gain over amplitude+distance alone -- the encoding "
                    "is not contributing")
         print(f"  vs logistic baseline: {delta:+.4f} AUC  ->  {verdict}")
+
+    cm = confusion_matrix(yt, preds)
+    print("\nConfusion Matrix:")
+    print(cm)
+    if cm.size == 4:
+        tn, fp, fn, tp = cm.ravel()
+        print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
+    print("\nClassification Report:")
+    print(classification_report(yt, preds, digits=4))
 
 
 if __name__ == "__main__":
