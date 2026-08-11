@@ -21,6 +21,8 @@ As in `cnn_magclass.py`, a headline number is never reported alone:
 
 Usage:
     python cnn_riskclass.py --dataset-dir dataset_riskclass_3s --window-seconds 3
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -54,6 +56,20 @@ class RiskClassDataset(Dataset):
     except the target is the 3-way `risk_class` column mapped to {0,1,2}."""
 
     def __init__(self, manifest: pd.DataFrame, root: Path, aux_stats=None, transform=None):
+        """Loads manifest rows and fits (or reuses) aux normalization stats.
+
+        Args:
+            manifest: Manifest rows for one split, with 'split', 'filename',
+                'risk_class', and `AUX_COLUMNS` columns.
+            root: Dataset root directory (contains a subdirectory per
+                split).
+            aux_stats: Optional (mean, std) tuple to standardize aux with;
+                if None, fit from this split's own data (the train split
+                should pass None; val/test must reuse the train split's
+                stats).
+            transform: Optional callable applied to the loaded window
+                tensor before it is returned.
+        """
         self.rows = manifest.reset_index(drop=True)
         self.root = Path(root)
         self.transform = transform
@@ -72,12 +88,26 @@ class RiskClassDataset(Dataset):
         self.targets = self.rows["risk_class"].map(CLASS_TO_IDX).to_numpy(dtype=np.int64)
 
     def aux_stats(self):
+        """Returns the (mean, std) tuple this dataset standardized aux with."""
         return (self.aux_mu, self.aux_sd)
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.rows)
 
     def __getitem__(self, idx):
+        """Returns one (window, aux, target) sample.
+
+        Loads a .pt spectrogram tensor directly, or a .png RAM image
+        converted to a tensor, depending on `filename`'s suffix.
+
+        Args:
+            idx: Row index into this split.
+
+        Returns:
+            Tuple of (float32 window tensor, float32 aux tensor, long
+            scalar class-index target tensor).
+        """
         row = self.rows.iloc[idx]
         path = self.root / row["split"] / row["filename"]
         if path.suffix == ".pt":
@@ -99,7 +129,17 @@ class RiskClassDataset(Dataset):
 
 def report_baselines(train_ds, test_ds):
     """Predict-the-majority-class, and multinomial logistic regression on the
-    auxiliary scalars alone."""
+    auxiliary scalars alone.
+
+    Args:
+        train_ds: Training-split `RiskClassDataset`.
+        test_ds: Test-split `RiskClassDataset`.
+
+    Returns:
+        The logistic baseline's test macro-averaged one-vs-rest AUC
+        (float), NaN if it couldn't be computed, or None if fitting the
+        baseline failed entirely.
+    """
     y_tr, y_te = train_ds.targets, test_ds.targets
     print("\n--- Reference points (test set) ---")
     majority = int(np.bincount(y_tr).argmax())
@@ -129,6 +169,13 @@ def report_baselines(train_ds, test_ds):
 
 
 def print_confusion(y_true, y_pred, label):
+    """Prints a labeled confusion matrix over `RISK_CLASSES`.
+
+    Args:
+        y_true: True class indices.
+        y_pred: Predicted class indices.
+        label: Header text identifying which split/set this matrix is for.
+    """
     cm = confusion_matrix(y_true, y_pred, labels=list(range(len(RISK_CLASSES))))
     print(f"\n  Confusion matrix ({label}), rows=true cols=pred:")
     header = "            " + "  ".join(f"{c:>11s}" for c in RISK_CLASSES)
@@ -142,6 +189,18 @@ def print_confusion(y_true, y_pred, label):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments and fills in short/long preset defaults.
+
+    Any tunable left at its default (None) is filled from a "short"
+    (`--window-seconds <= 12`) or "long" preset, matching `training.py`'s
+    PRESETS convention but inlined here (same rationale as
+    `cnn_magclass.parse_args`).
+
+    Returns:
+        argparse.Namespace with the script's CLI options, every tunable
+        resolved to a concrete value, plus `preset_name` ("short" or
+        "long").
+    """
     p = argparse.ArgumentParser(description="Three-class risk classification "
                                             "(noise / low-risk / high-risk) on encoded seismic windows.")
     p.add_argument("--dataset-dir", type=str, required=True,
@@ -178,6 +237,15 @@ def parse_args():
 
 
 def main():
+    """Loads the encoded-window risk-class dataset, trains
+    `RegressionSeismicCNN` as a 3-way classifier, and reports test
+    accuracy/macro-AUC/MCC against the majority-class and logistic-
+    regression floors.
+
+    Raises:
+        ValueError: If the manifest is missing 'risk_class' or 'log_snr',
+            or if any split ("train"/"val"/"test") is empty.
+    """
     args = parse_args()
     seed_everything(args.seed)
 
@@ -247,6 +315,14 @@ def main():
     epochs_no_improve = 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true labels/class probabilities.
+
+        Args:
+            loader: DataLoader yielding (x, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true int array, y_prob array shape (n, n_classes)).
+        """
         model.eval()
         probs, trues = [], []
         with torch.no_grad():

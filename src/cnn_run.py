@@ -1,3 +1,35 @@
+"""
+Runs inference with a trained seismic classifier loaded from the FULL
+pickled model object (`trained_model/full_model.pth`), as saved by
+`training.run_training` via `torch.save(model, ...)` -- not from a
+state-dict checkpoint (see `cnn_run_from_state.py` for that variant).
+
+`torch.load(..., weights_only=False)` below unpickles the saved object by
+walking its exact module path, `training.ImprovedSeismicCNN`, and from
+there into `model.trunk2d.SETrunk2D` and `model/blocks.py`'s `ResBlock`/
+`SEBlock` via the class's MRO. That resolution is by qualified name, not by
+structural shape, so `ImprovedSeismicCNN`, `ResBlock`, and `SEBlock` must
+stay defined at exactly the module paths they're imported from below --
+renaming, moving, or re-defining any of them (here or in `training.py`)
+would make `full_model.pth` fail to unpickle. The `ResBlock, SEBlock`
+import is otherwise unused in this script; it is kept (with the
+`# noqa: F401` below) as the same backward-compatibility re-export
+`cnn_train.py`'s own docstring describes -- older checkpoints pickled
+before the `training.py` refactor may reference the legacy
+`cnn_train.ImprovedSeismicCNN` module path rather than `training`'s.
+
+Loads the ImageFolder test split from `./dataset/test`, runs inference, and
+prints a confusion matrix, classification report, and ROC-AUC/MCC/Brier
+score. No CLI flags -- every path is a hardcoded constant inline below.
+This is a flat top-to-bottom script (no `main()`); it runs immediately on
+import, so it is only ever meant to be run as `__main__`, never imported.
+
+Usage:
+    python cnn_run.py
+
+Not imported by anything else -- standalone script.
+"""
+
 import torch
 from sklearn.metrics import (brier_score_loss, classification_report,
                              confusion_matrix, matthews_corrcoef,

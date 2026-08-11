@@ -2,6 +2,12 @@
 in this repo. Each `*_report` function returns a plain dict (safe to print,
 log, or diff across runs); `print_report` gives every script the same
 console format instead of a bespoke print block per script.
+
+Not a runnable script -- imported only. Callers: every training/eval script
+in src/ (cnn_lstm*.py, cnn_regression.py, cnn_riskclass.py, cnn_magclass.py,
+cnn_ram_aux.py, cnn_groundmotion.py, groundmotion_baselines.py,
+feature_lstm_forecast.py, raw_cnn_lstm_forecast.py,
+raw100hz_cnn_lstm_forecast.py, riskclass_scalar.py, lgbm_cluster.py).
 """
 
 import numpy as np
@@ -15,7 +21,16 @@ from sklearn.metrics import (accuracy_score, average_precision_score,
 
 
 def safe_auc(y, score):
-    """ROC-AUC, or NaN when the split is single-class (undefined otherwise)."""
+    """Computes ROC-AUC, guarding against an undefined single-class split.
+
+    Args:
+        y: True binary labels.
+        score: Predicted scores or probabilities for the positive class.
+
+    Returns:
+        ROC-AUC as a float, or NaN if `y` contains only one class (AUC is
+        undefined in that case).
+    """
     y = np.asarray(y)
     if len(np.unique(y)) < 2:
         return float("nan")
@@ -23,6 +38,16 @@ def safe_auc(y, score):
 
 
 def safe_mcc(y, pred):
+    """Computes Matthews correlation coefficient, guarding against degenerate input.
+
+    Args:
+        y: True binary labels.
+        pred: Predicted binary labels.
+
+    Returns:
+        MCC as a float, or NaN if either `y` or `pred` contains only one
+        class (MCC is undefined/degenerate in that case).
+    """
     y, pred = np.asarray(y), np.asarray(pred)
     if len(np.unique(pred)) < 2 or len(np.unique(y)) < 2:
         return float("nan")
@@ -30,9 +55,25 @@ def safe_mcc(y, pred):
 
 
 def binary_report(y_true, y_score, y_pred=None, threshold=0.5):
-    """Accuracy/precision/recall/F1/ROC-AUC/PR-AUC/MCC/Brier + confusion
-    matrix for a binary classifier. `y_score` is the positive-class
-    probability; `y_pred` defaults to thresholding it at `threshold`."""
+    """Full metric set for a binary classifier.
+
+    Accuracy/precision/recall/F1/ROC-AUC/PR-AUC/MCC/Brier/log-loss +
+    confusion matrix.
+
+    Args:
+        y_true: True binary labels.
+        y_score: Predicted positive-class probability.
+        y_pred: Predicted binary labels. Defaults to thresholding `y_score`
+            at `threshold` when None.
+        threshold: Decision threshold used to derive `y_pred` from
+            `y_score` when `y_pred` is not given.
+
+    Returns:
+        Dict with keys "n", "accuracy", "balanced_accuracy", "precision",
+        "recall", "f1", "roc_auc", "pr_auc", "mcc", "brier", "log_loss"
+        (each a float, NaN where undefined on a single-class `y_true`), and
+        "confusion_matrix" (list of lists).
+    """
     y_true, y_score = np.asarray(y_true), np.asarray(y_score)
     if y_pred is None:
         y_pred = (y_score >= threshold).astype(np.int64)
@@ -56,9 +97,29 @@ def binary_report(y_true, y_score, y_pred=None, threshold=0.5):
 
 
 def multiclass_report(y_true, y_pred, y_score=None, class_names=None):
-    """Accuracy/balanced-accuracy/macro+weighted P-R-F1/Cohen's kappa +
-    confusion matrix for a multiclass classifier. `y_score` (per-class
-    probabilities) adds macro one-vs-rest AUC when given."""
+    """Full metric set for a multiclass classifier.
+
+    Accuracy/balanced-accuracy/macro+weighted precision-recall-F1/Cohen's
+    kappa + confusion matrix.
+
+    Args:
+        y_true: True class labels.
+        y_pred: Predicted class labels.
+        y_score: Optional per-class predicted probabilities, shape
+            (n_samples, n_classes). Adds macro one-vs-rest AUC when given
+            and `y_true` has more than one class present.
+        class_names: Optional display names for the classes, in the same
+            order as the sorted label set. Stored under "labels" for the
+            caller to use when printing; falls back to the sorted label
+            values themselves when None.
+
+    Returns:
+        Dict with keys "n", "accuracy", "balanced_accuracy",
+        "precision_macro", "recall_macro", "f1_macro", "f1_weighted",
+        "cohen_kappa" (floats), "confusion_matrix" (list of lists),
+        "labels" (list), and "macro_auc_ovr" (float, only present when
+        `y_score` is given).
+    """
     y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
     labels = sorted(set(y_true.tolist()) | set(y_pred.tolist()))
     report = {
@@ -83,7 +144,19 @@ def multiclass_report(y_true, y_pred, y_score=None, class_names=None):
 
 
 def regression_report(y_true, y_pred):
-    """MAE/RMSE/R2/median-AE/max-error + residual std for a regressor."""
+    """Full metric set for a regressor.
+
+    MAE/RMSE/R2/median-AE/max-error + residual std.
+
+    Args:
+        y_true: True target values.
+        y_pred: Predicted target values.
+
+    Returns:
+        Dict with keys "n" (int) and "MAE", "RMSE", "R2", "median_AE",
+        "max_error", "resid_std" (floats; "R2" is NaN when fewer than 2
+        samples).
+    """
     y_true, y_pred = np.asarray(y_true, dtype=np.float64), np.asarray(y_pred, dtype=np.float64)
     resid = y_true - y_pred
     return {
@@ -98,7 +171,16 @@ def regression_report(y_true, y_pred):
 
 
 def majority_class_baseline(y_train, y_test):
-    """Predicting the training set's majority class on every test row."""
+    """Floor: predicting the training set's majority class on every test row.
+
+    Args:
+        y_train: Training-set class labels, used to determine the majority
+            class.
+        y_test: Test-set class labels, used to score the floor prediction.
+
+    Returns:
+        Tuple of (majority_class, accuracy, balanced_accuracy).
+    """
     y_train, y_test = np.asarray(y_train), np.asarray(y_test)
     labels = sorted(set(y_train.tolist()))
     maj = max(labels, key=lambda c: (y_train == c).sum())
@@ -107,22 +189,47 @@ def majority_class_baseline(y_train, y_test):
 
 
 def predict_mean_baseline(y_train, y_test):
-    """Predicting the training set's mean on every test row (regression floor)."""
+    """Floor: predicting the training set's mean on every test row (regression).
+
+    Args:
+        y_train: Training-set target values, used to compute the mean.
+        y_test: Test-set target values, used to score the floor prediction.
+
+    Returns:
+        A `regression_report` dict (see `regression_report`) scoring the
+        constant-mean prediction against `y_test`.
+    """
     y_train, y_test = np.asarray(y_train, dtype=np.float64), np.asarray(y_test, dtype=np.float64)
     pred = np.full_like(y_test, y_train.mean())
     return regression_report(y_test, pred)
 
 
 def persistence_baseline(days_since_prev, horizon_days):
-    """Predict positive iff a qualifying event occurred within the previous
-    `horizon_days`. NaN (no prior qualifying event on record) predicts
-    negative -- there is nothing to persist from."""
+    """Floor: predict positive iff a qualifying event occurred recently.
+
+    Args:
+        days_since_prev: Days since the previous qualifying event, per
+            sample; NaN where no prior qualifying event is on record.
+        horizon_days: Forecast horizon in days. A sample is predicted
+            positive iff `days_since_prev <= horizon_days`.
+
+    Returns:
+        Array of int64 0/1 predictions, same length as `days_since_prev`.
+        NaN entries predict negative (0) -- there is nothing to persist from.
+    """
     d = np.asarray(days_since_prev, dtype=np.float64)
     return np.where(np.isnan(d), 0, (d <= horizon_days).astype(int)).astype(np.int64)
 
 
 def print_report(name, report, digits=4):
-    """Consistent one-block console print for any of the `*_report` dicts above."""
+    """Prints one of the `*_report` dicts in a consistent console format.
+
+    Args:
+        name: Header printed above the block (e.g. a fold/model label).
+        report: A dict returned by `binary_report`, `multiclass_report`, or
+            `regression_report`.
+        digits: Decimal places used when printing float values.
+    """
     print(f"\n--- {name} ---")
     for key, value in report.items():
         if key in ("confusion_matrix", "labels"):

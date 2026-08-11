@@ -34,6 +34,8 @@ As in `cnn_regression.py`, a headline number is never reported alone:
 
 Usage:
     python cnn_magclass.py --dataset-dir dataset_magclass_3s --window-seconds 3
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -66,6 +68,21 @@ class MagnitudeClassDataset(Dataset):
 
     def __init__(self, manifest: pd.DataFrame, root: Path, mag_threshold: float,
                  aux_stats=None, transform=None):
+        """Loads manifest rows and fits (or reuses) aux normalization stats.
+
+        Args:
+            manifest: Manifest rows for one split, with 'split', 'filename',
+                'magnitude', and `AUX_COLUMNS` columns.
+            root: Dataset root directory (contains a subdirectory per
+                split).
+            mag_threshold: Magnitude >= this is the positive class.
+            aux_stats: Optional (mean, std) tuple to standardize aux with;
+                if None, fit from this split's own data (the train split
+                should pass None; val/test must reuse the train split's
+                stats).
+            transform: Optional callable applied to the loaded window
+                tensor before it is returned.
+        """
         self.rows = manifest.reset_index(drop=True)
         self.root = Path(root)
         self.transform = transform
@@ -85,12 +102,26 @@ class MagnitudeClassDataset(Dataset):
         self.targets = (self.magnitudes >= mag_threshold).astype(np.float32)
 
     def aux_stats(self):
+        """Returns the (mean, std) tuple this dataset standardized aux with."""
         return (self.aux_mu, self.aux_sd)
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.rows)
 
     def __getitem__(self, idx):
+        """Returns one (window, aux, target) sample.
+
+        Loads a .pt spectrogram tensor directly, or a .png RAM image
+        converted to a tensor, depending on `filename`'s suffix.
+
+        Args:
+            idx: Row index into this split.
+
+        Returns:
+            Tuple of (float32 window tensor, float32 aux tensor, float32
+            scalar binary target tensor).
+        """
         row = self.rows.iloc[idx]
         path = self.root / row["split"] / row["filename"]
         if path.suffix == ".pt":
@@ -112,7 +143,16 @@ class MagnitudeClassDataset(Dataset):
 
 def report_baselines(train_ds, test_ds):
     """Predict-the-majority-class, and logistic regression on the auxiliary
-    scalars alone."""
+    scalars alone.
+
+    Args:
+        train_ds: Training-split `MagnitudeClassDataset`.
+        test_ds: Test-split `MagnitudeClassDataset`.
+
+    Returns:
+        The logistic baseline's test AUC (float), or None if fitting it
+        failed.
+    """
     y_tr, y_te = train_ds.targets, test_ds.targets
     print("\n--- Reference points (test set) ---")
     majority = 1.0 if y_tr.mean() >= 0.5 else 0.0
@@ -140,6 +180,20 @@ def report_baselines(train_ds, test_ds):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments and fills in short/long preset defaults.
+
+    Any tunable left at its default (None) is filled from a "short"
+    (`--window-seconds <= 12`) or "long" preset, matching `training.py`'s
+    PRESETS convention but inlined here rather than sharing that module's
+    `build_arg_parser`/`resolve_preset` (this script's dataset/model differ
+    enough that reusing them would need as much overriding as writing the
+    handful of lines directly).
+
+    Returns:
+        argparse.Namespace with the script's CLI options, every tunable
+        resolved to a concrete value, plus `preset_name` ("short" or
+        "long").
+    """
     p = argparse.ArgumentParser(description="Magnitude-class (binary) classification "
                                             "on encoded seismic windows.")
     p.add_argument("--dataset-dir", type=str, required=True,
@@ -178,6 +232,14 @@ def parse_args():
 
 
 def main():
+    """Loads the encoded-window dataset, trains `RegressionSeismicCNN` as a
+    binary classifier, and reports test accuracy/AUC/MCC against the
+    majority-class and logistic-regression floors.
+
+    Raises:
+        ValueError: If the manifest is missing 'magnitude' or 'log_snr', or
+            if any split ("train"/"val"/"test") is empty.
+    """
     args = parse_args()
     seed_everything(args.seed)
 
@@ -249,6 +311,14 @@ def main():
     epochs_no_improve = 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true labels/probabilities.
+
+        Args:
+            loader: DataLoader yielding (x, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true, y_prob) arrays.
+        """
         model.eval()
         probs, trues = [], []
         with torch.no_grad():

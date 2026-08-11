@@ -1,12 +1,19 @@
 """
 Shared model + training core for the seismic classifiers.
 
-Both entry points use this: `cnn_train.py` (RAM PNG images via ImageFolder)
-and `cnn_from_tensor.py` (spectrogram .pt tensors). Keeping the loop in one
-place is deliberate -- the two scripts had drifted apart, so fixes landed in
-one and not the other (the val/test threshold mismatch, label-smoothing
-diagnostics, AUC checkpointing, CPU support, seeding). Anything added here
-reaches both.
+Not a runnable script -- imported only. Both entry points use this:
+`cnn_train.py` (RAM PNG images via ImageFolder) and `cnn_from_tensor.py`
+(spectrogram .pt tensors) import `ImprovedSeismicCNN`, `PRESETS`,
+`build_arg_parser`, `resolve_preset`, `print_config`, and `run_training`.
+`seed_everything` is imported by nearly every other training script in
+src/. `cnn_run.py` unpickles a full saved `ImprovedSeismicCNN` object by
+its qualified class path (`training.ImprovedSeismicCNN`), so that class
+must stay defined at this name and module path.
+
+Keeping the loop in one place is deliberate -- the two entry-point scripts
+had drifted apart, so fixes landed in one and not the other (the val/test
+threshold mismatch, label-smoothing diagnostics, AUC checkpointing, CPU
+support, seeding). Anything added here reaches both.
 """
 
 import argparse
@@ -41,11 +48,28 @@ class ImprovedSeismicCNN(SETrunk2D):
     a full saved model object by qualified class path.
     """
     def __init__(self, dropout1=0.5, dropout2=0.3, hidden_dim=64, num_stages=4, in_channels=3):
+        """Initializes the trunk with no auxiliary input and a single-logit output.
+
+        Args:
+            dropout1: Dropout before the classifier's hidden layer.
+            dropout2: Dropout before the classifier's output layer.
+            hidden_dim: Width of the classifier's hidden layer.
+            num_stages: 3 or 4 residual stages (see `SETrunk2D.__init__`).
+            in_channels: Number of input image channels.
+        """
         super().__init__(num_stages=num_stages, in_channels=in_channels, aux_dim=0,
                          num_classes=1, dropout1=dropout1, dropout2=dropout2,
                          hidden_dim=hidden_dim)
 
     def forward(self, x):
+        """Runs the trunk and classifier head.
+
+        Args:
+            x: Input image batch, shape (batch, in_channels, height, width).
+
+        Returns:
+            Tensor of shape (batch, 1) -- a raw logit, no activation applied.
+        """
         return super().forward(x)
 
 
@@ -75,6 +99,19 @@ _TUNABLES = ["batch_size", "num_epochs", "patience", "lr", "weight_decay",
 
 def build_arg_parser(description: str, default_dataset_dir: str = "./dataset",
                      default_save_dir: str = "trained_model") -> argparse.ArgumentParser:
+    """Builds the CLI argument parser shared by cnn_train.py and cnn_from_tensor.py.
+
+    Args:
+        description: Program description shown in `--help`.
+        default_dataset_dir: Default value for `--dataset-dir`.
+        default_save_dir: Default value for `--save-dir`.
+
+    Returns:
+        An `argparse.ArgumentParser` with `--dataset-dir`, `--save-dir`,
+        `--window-seconds`, `--seed`, `--num-workers`, and one flag per
+        tunable in `_TUNABLES` (each defaulting to None, meaning "take it
+        from the preset resolved by `resolve_preset`").
+    """
     p = argparse.ArgumentParser(description=description)
     p.add_argument("--dataset-dir", type=str, default=default_dataset_dir,
                    help="Directory containing train/val/test subfolders.")
@@ -108,6 +145,16 @@ def build_arg_parser(description: str, default_dataset_dir: str = "./dataset",
 
 
 def resolve_preset(args):
+    """Fills in any unset tunable from the "short" or "long" preset.
+
+    Args:
+        args: Parsed args from a parser built by `build_arg_parser`. Mutated
+            in place: each tunable in `_TUNABLES` that is currently None is
+            set from the resolved preset, and `args.preset_name` is added.
+
+    Returns:
+        The same `args` object, for convenient chaining.
+    """
     name = "long"
     if args.window_seconds is not None and args.window_seconds <= SHORT_WINDOW_THRESHOLD_SEC:
         name = "short"
@@ -119,6 +166,13 @@ def resolve_preset(args):
 
 
 def print_config(args, extra=None):
+    """Prints the resolved preset name and every tunable's final value.
+
+    Args:
+        args: Args already passed through `resolve_preset`.
+        extra: Optional dict of additional key/value pairs to print
+            alongside the tunables (e.g. dataset-derived info).
+    """
     print("=" * 60)
     print(f"Preset: '{args.preset_name}'"
           + (f" (window_seconds={args.window_seconds})" if args.window_seconds
@@ -132,6 +186,11 @@ def print_config(args, extra=None):
 
 
 def seed_everything(seed: int):
+    """Seeds Python's random, NumPy, and PyTorch RNGs.
+
+    Args:
+        seed: Seed value applied to all three RNGs.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -140,7 +199,31 @@ def seed_everything(seed: int):
 # Training / evaluation
 
 def run_training(args, train_dataset, val_dataset, test_dataset, in_channels=3):
-    """Full train / validate / test cycle shared by both entry points."""
+    """Runs the full train/validate/test cycle shared by both entry points.
+
+    Trains an `ImprovedSeismicCNN` with AdamW + AMP + gradient clipping,
+    checkpointing on `args.monitor` ("loss" or "auc") with early stopping on
+    `args.patience`, then reloads the best checkpoint and reports final test
+    accuracy/AUC/MCC, a confusion matrix, and a full classification report.
+    Also saves the full model object (not just the state dict) to
+    `<save_dir>/full_model.pth` for scripts that need to unpickle it directly.
+
+    Args:
+        args: Parsed, preset-resolved args (see `build_arg_parser`,
+            `resolve_preset`) providing seed, batch_size, num_workers,
+            dropout1/dropout2/hidden_dim/num_stages, lr, weight_decay,
+            scheduler, num_epochs, monitor, patience, and save_dir.
+        train_dataset: Training dataset yielding (image, label) pairs.
+        val_dataset: Validation dataset, same format.
+        test_dataset: Test dataset, same format.
+        in_channels: Number of input image channels (3 for RGB RAM images,
+            1 for single-channel spectrograms).
+
+    Returns:
+        None. Prints per-epoch and final metrics; saves
+        `<save_dir>/best_seismic_model.pth` (state dict) and
+        `<save_dir>/full_model.pth` (full pickled model) as a side effect.
+    """
     seed_everything(args.seed)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,

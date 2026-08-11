@@ -27,6 +27,8 @@ would deployment have looked like."
 
 Usage:
     python cnn_lstm_loeo.py --dataset-dir dataset_catalog_pooled
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -66,6 +68,19 @@ class InMemoryWindowDataset(Dataset):
 
     def __init__(self, seq: np.ndarray, img: np.ndarray, aux: np.ndarray,
                 labels: np.ndarray, idx: np.ndarray, stats):
+        """Slices and standardizes one fold's split from the preloaded arrays.
+
+        Args:
+            seq: Full pooled seq array, shape (n_total, seq_len, seq_dim)
+                (see `preload_all`).
+            img: Full pooled img array, shape (n_total, img_channels,
+                height, width).
+            aux: Full pooled aux array, shape (n_total, aux_dim).
+            labels: Full pooled int label array, shape (n_total,).
+            idx: Row indices, into the arrays above, making up this split.
+            stats: (seq_mean, seq_std, aux_mean, aux_std) tuple to
+                standardize seq/aux with (see `fit_stats`).
+        """
         sm, ss, am, asd = stats
         self.seq = np.nan_to_num((seq[idx] - sm) / ss, nan=0.0).astype(np.float32)
         self.img = img[idx]
@@ -73,14 +88,42 @@ class InMemoryWindowDataset(Dataset):
         self.labels = labels[idx]
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.labels)
 
     def __getitem__(self, i):
+        """Returns one (seq, img, aux, label) sample.
+
+        Args:
+            i: Index into this split.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32 aux
+            tensor, long label tensor).
+        """
         return (torch.from_numpy(self.seq[i]), torch.from_numpy(self.img[i]),
                 torch.from_numpy(self.aux[i]), torch.tensor(self.labels[i], dtype=torch.long))
 
 
 def preload_all(root: Path, manifest: pd.DataFrame):
+    """Loads every window's {seq, img, aux} tensors into pooled arrays once.
+
+    Args:
+        root: Directory containing the window .pt files named in
+            `manifest.filename` (the dataset's "all" subdirectory).
+        manifest: Full pooled dataset manifest, with 'filename' and
+            'risk_class' columns.
+
+    Returns:
+        Tuple of (seq, img, aux, labels): `seq` float32 array shape
+        (n, seq_len, seq_dim), `img` float32 array shape (n, img_channels,
+        height, width), `aux` float32 array shape (n, aux_dim), `labels`
+        int array shape (n,) via the module-level `CLASS_TO_IDX`.
+
+    Raises:
+        SystemExit: If any row's `risk_class` isn't a recognized class
+            (i.e. not in `CLASS_TO_IDX`).
+    """
     seqs, imgs, auxs = [], [], []
     for fn in manifest.filename:
         d = torch.load(root / fn, weights_only=True)
@@ -97,6 +140,18 @@ def preload_all(root: Path, manifest: pd.DataFrame):
 
 
 def fit_stats(seq: np.ndarray, aux: np.ndarray, idx: np.ndarray):
+    """Fits NaN-safe per-feature (mean, std) normalization stats over a subset.
+
+    Args:
+        seq: Full pooled seq array, shape (n_total, seq_len, seq_dim).
+        aux: Full pooled aux array, shape (n_total, aux_dim).
+        idx: Row indices, into `seq`/`aux`, to fit stats from (typically a
+            fold's inner-training rows).
+
+    Returns:
+        Tuple of (seq_mean, seq_std, aux_mean, aux_std) arrays, NaN/zero-std
+        entries replaced with 0.0 (mean) or 1.0 (std).
+    """
     S = seq[idx].reshape(-1, seq.shape[-1])
     A = aux[idx]
     with np.errstate(invalid="ignore"):
@@ -107,6 +162,11 @@ def fit_stats(seq: np.ndarray, aux: np.ndarray, idx: np.ndarray):
 
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Leave-one-event-out CV for the dual-channel risk model.")
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `generate-catalog-dataset --split-mode loeo` "
@@ -137,6 +197,31 @@ def parse_args():
 
 def run_fold(seq: np.ndarray, img: np.ndarray, aux: np.ndarray, labels_all: np.ndarray,
             test_idx: np.ndarray, train_pool_idx: np.ndarray, args, device, fold_seed: int):
+    """Trains and evaluates one LOEO fold: one held-out event as test,
+    everything else as the training pool (with a stratified inner-val slice
+    for early stopping).
+
+    Args:
+        seq: Full pooled seq array, shape (n_total, seq_len, seq_dim).
+        img: Full pooled img array, shape (n_total, img_channels, height,
+            width).
+        aux: Full pooled aux array, shape (n_total, aux_dim).
+        labels_all: Full pooled int label array, shape (n_total,).
+        test_idx: Row indices making up this fold's held-out event.
+        train_pool_idx: Row indices making up this fold's training pool
+            (every window not in `test_idx`).
+        args: Parsed CLI args (uses inner_val_frac, hidden, fusion_dim,
+            dropout, channels, batch_size, num_workers, no_class_weights,
+            lr, weight_decay, epochs, patience, verbose).
+        device: torch device to train on.
+        fold_seed: Random seed for this fold's inner split, init, and
+            shuffling.
+
+    Returns:
+        Tuple of (y_true, y_pred, majority_class_pred) arrays for the test
+        split, from the best (by inner-val balanced accuracy) epoch's
+        weights.
+    """
     seed_everything(fold_seed)
 
     pool_labels = labels_all[train_pool_idx]
@@ -172,6 +257,14 @@ def run_fold(seq: np.ndarray, img: np.ndarray, aux: np.ndarray, labels_all: np.n
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true/predicted classes.
+
+        Args:
+            loader: DataLoader yielding (seq, img, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true, y_pred) int arrays.
+        """
         model.eval()
         ys, ps = [], []
         with torch.no_grad():
@@ -217,6 +310,21 @@ def run_fold(seq: np.ndarray, img: np.ndarray, aux: np.ndarray, labels_all: np.n
 
 
 def main():
+    """Forms one LOEO fold per (region, target_time) event, trains and
+    evaluates each, and reports the pooled result against chance and the
+    per-fold majority-class floor.
+
+    Side effect: rebinds the module-level `RISK_CLASSES`/`CLASS_TO_IDX` from
+    the manifest (via `risk_classes_from_manifest`), since the class names
+    and their time-ordering depend on how the dataset's boundaries were
+    generated.
+
+    Raises:
+        SystemExit: If the manifest has no region/target_time columns, if
+            any row's `risk_class` isn't recognized (via `preload_all`), or
+            if fewer than 3 usable folds result from `--min-fold-test`/
+            `--max-folds`.
+    """
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset_dir = Path(args.dataset_dir)

@@ -1,3 +1,28 @@
+"""
+Runs inference with a trained `ImprovedSeismicCNN` loaded from its state-dict
+checkpoint (`trained_model/best_seismic_model.pth`, as saved by
+`training.run_training`), rather than the full pickled model object that
+`cnn_run.py` unpickles from `full_model.pth`. Reconstructing the model class
+in code and loading only its weights is the more portable of the two --
+it doesn't depend on the pickled object's module path resolving -- but it
+does mean `ImprovedSeismicCNN`'s submodule attribute names (`self.layer1`,
+`self.layer2`, ... set in `SETrunk2D.__init__`) must keep matching the
+checkpoint's state-dict keys, since `load_state_dict` matches by name, not
+by pickled class identity.
+
+Reads an ImageFolder-style test split, saves a per-image CSV of predicted
+probability/class, and prints accuracy, a confusion matrix, a classification
+report, and ROC-AUC/MCC/Brier score.
+
+Configuration is via the module-level constants below (WEIGHTS_PATH,
+DATA_DIR, BATCH_SIZE, THRESHOLD, NUM_WORKERS, OUT_CSV), not CLI flags.
+
+Usage:
+    python cnn_run_from_state.py
+
+Not imported by anything else -- standalone script.
+"""
+
 import os
 
 import pandas as pd
@@ -17,11 +42,27 @@ NUM_WORKERS = 4
 OUT_CSV = "trained_model/test_predictions.csv"
 
 def build_transform():
+    """Builds the inference-time image transform (tensor conversion only, no augmentation).
+
+    Returns:
+        A `torchvision.transforms.Compose` with a single `ToTensor` step.
+    """
     return transforms.Compose([
         transforms.ToTensor(),
     ])
 
 def run_inference():
+    """Loads the checkpoint, runs inference over the test split, and reports metrics.
+
+    Returns:
+        None. Writes `OUT_CSV` (per-image predictions) and prints accuracy,
+        a confusion matrix, a classification report, and ROC-AUC/MCC/Brier
+        score as a side effect.
+
+    Raises:
+        FileNotFoundError: If `WEIGHTS_PATH` doesn't exist.
+        NotADirectoryError: If `DATA_DIR` doesn't exist.
+    """
     if not os.path.exists(WEIGHTS_PATH):
         raise FileNotFoundError(f"Weights not found: {WEIGHTS_PATH}")
     if not os.path.isdir(DATA_DIR):

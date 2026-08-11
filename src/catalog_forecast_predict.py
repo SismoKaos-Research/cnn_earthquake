@@ -12,6 +12,8 @@ Usage:
     python catalog_forecast_predict.py \\
         --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
         --model-path trained_model_cnnlstm_forecast_maghead/best_cnnlstm_forecast.pth
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -26,6 +28,11 @@ from cnn_lstm_forecast import AUX_FEATURES, DenseWindowDataset, DualChannelForec
 
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Combined binary + magnitude forecast.")
     p.add_argument("--dataset-dir", required=True)
     p.add_argument("--model-path", default="trained_model_cnnlstm_forecast_maghead/best_cnnlstm_forecast.pth",
@@ -38,6 +45,14 @@ def parse_args():
 
 
 def main():
+    """Loads the checkpoint's binary head plus a fitted ridge magnitude
+    floor, predicts both on the test split, writes a per-window CSV, and
+    prints overall and per-zone AUC/MAE.
+
+    Returns:
+        None. Writes `args.out_csv` and prints a sample of predictions plus
+        overall and per-zone metrics as a side effect.
+    """
     args = parse_args()
     root = Path(args.dataset_dir)
     manifest = pd.read_csv(root / "manifest.csv")

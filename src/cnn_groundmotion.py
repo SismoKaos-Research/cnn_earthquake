@@ -62,6 +62,8 @@ Protocol
 Usage:
     python cnn_groundmotion.py --dataset-dir ../../data_downloader/data/dataset_groundmotion_3s
     python cnn_groundmotion.py --target pga_fwd --arch cnn --no-aux
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -88,8 +90,7 @@ from training import seed_everything
 # ---------------------------------------------------------------------------
 
 def respilt(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
-    """
-    Re-partition rows without moving any tensor on disk.
+    """Re-partitions rows without moving any tensor on disk.
 
     The manifest's original `split` names the DIRECTORY a tensor lives in, so it
     is preserved as `file_split` and only the LOGICAL split changes.
@@ -109,6 +110,19 @@ def respilt(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
       * `both`    -- station-disjoint, then every val/test row whose event also
                      appears in train is DROPPED. Neither term can leak. Costs
                      rows, and the count dropped is reported rather than hidden.
+
+    Args:
+        d: Manifest DataFrame with 'split', 'station_key', and 'event_id'
+            columns.
+        how: Grouping to use -- "event" (unchanged), "station", or "both".
+        seed: Seed for the station shuffle used by "station"/"both".
+        ratios: Target (train, val, test) row-count fractions for the
+            station partition.
+
+    Returns:
+        A copy of `d` with 'file_split' added (the original directory-based
+        split) and, for "station"/"both", 'split' reassigned to the new
+        station-disjoint grouping (rows dropped for "both").
     """
     d = d.copy()
     if "file_split" not in d:
@@ -140,6 +154,13 @@ def respilt(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
 
 
 def report_split(d, how):
+    """Prints the row counts and any train/test event or station overlap.
+
+    Args:
+        d: Manifest DataFrame after `respilt`, with 'split', 'event_id',
+            and 'station_key' columns.
+        how: Grouping name to print (as returned by `respilt`'s `how` arg).
+    """
     tr, te = d[d.split == "train"], d[d.split == "test"]
     shared_ev = len(set(tr.event_id) & set(te.event_id))
     shared_st = len(set(tr.station_key) & set(te.station_key))
@@ -154,16 +175,26 @@ def report_split(d, how):
 
 
 def preload(df, dataset_dir, input_norm):
-    """
-    Load every window into one array up front.
+    """Loads every window into one array up front.
 
     43k windows of (3, 300) float32 is ~156 MB, so the whole corpus fits in
     memory and per-epoch disk reads would dominate runtime for no reason.
 
-    Returns (X, log_peak) where log_peak is the per-window peak of the vector
-    magnitude BEFORE normalisation -- recomputed from the tensor rather than
-    read from the manifest, so the scalar the model sees provably describes the
-    tensor the model sees.
+    Args:
+        df: Manifest rows to load, with 'file_split' and 'filename' columns.
+        dataset_dir: Dataset root directory (contains a subdirectory per
+            file_split).
+        input_norm: "peak" divides each window by its own peak vector
+            magnitude before returning it; "none" leaves it as raw physical
+            amplitude.
+
+    Returns:
+        Tuple of (X, log_peak): `X` is a float32 array shape (n, 3, 300)
+        (normalized if `input_norm == "peak"`); `log_peak` is a float32
+        array shape (n,), the per-window peak of the vector magnitude
+        BEFORE normalisation -- recomputed from the tensor rather than read
+        from the manifest, so the scalar the model sees provably describes
+        the tensor the model sees.
     """
     n = len(df)
     X = np.empty((n, 3, 300), dtype=np.float32)
@@ -180,7 +211,28 @@ def preload(df, dataset_dir, input_norm):
 
 
 def build_tensors(df, X, log_peak, target_col, aux_cols, use_aux, aux_stats=None):
-    """Assemble (x, aux, y); aux is standardised with TRAIN statistics only."""
+    """Assembles (x, aux, y) tensors; aux is standardised with TRAIN statistics only.
+
+    Args:
+        df: Manifest rows matching `X`/`log_peak` row-for-row.
+        X: Preloaded window array, shape (n, 3, 300) (see `preload`).
+        log_peak: Per-window log10 peak amplitude, shape (n,) (see `preload`).
+        target_col: Column in `df` holding the regression target.
+        aux_cols: Auxiliary scalar column names to assemble into `aux`;
+            `"__log_peak__"` is replaced by `log_peak` rather than read from
+            `df`.
+        use_aux: If False, returns an empty (n, 0) aux tensor regardless of
+            `aux_cols`.
+        aux_stats: Optional (mean, std) tuple to standardize `aux` with; if
+            None, computed from this call's own `aux` (the train split
+            should pass None; val/test must reuse the train split's stats).
+
+    Returns:
+        Tuple of (x, aux, y, aux_stats): `x` is `X` as a tensor, `aux` is
+        the (possibly empty) standardized auxiliary tensor, `y` is the
+        target tensor, and `aux_stats` is the (mean, std) tuple used (either
+        the one passed in or the one just computed).
+    """
     y = df[target_col].to_numpy(np.float32)
     if not use_aux:
         aux = np.zeros((len(df), 0), np.float32)
@@ -211,6 +263,14 @@ class Conv1dTrunk(nn.Module):
     """
 
     def __init__(self, in_ch=3, width=32, dropout=0.2):
+        """Initializes the 3-stage strided Conv1D trunk.
+
+        Args:
+            in_ch: Number of input channels.
+            width: Base channel width; the three conv stages use `width`,
+                `width*2`, `width*4` channels.
+            dropout: Dropout used after the second stage.
+        """
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv1d(in_ch, width, 7, padding=3, bias=False),
@@ -227,6 +287,14 @@ class Conv1dTrunk(nn.Module):
         self.out_ch = width * 4
 
     def forward(self, x):
+        """Runs the trunk over one batch.
+
+        Args:
+            x: Input sequence batch, shape (batch, in_ch, 300).
+
+        Returns:
+            Tensor of shape (batch, out_ch, 37).
+        """
         return self.net(x)
 
 
@@ -241,6 +309,20 @@ class GroundMotionNet(nn.Module):
 
     def __init__(self, arch="cnn_lstm", n_aux=0, width=32, hidden=64,
                  dropout=0.2, heads=4):
+        """Initializes the trunk, optional LSTM+attention branch, and head.
+
+        Args:
+            arch: "cnn_lstm" adds an `LSTMAttentionBranch` over the trunk's
+                output sequence (the paper's stack); "cnn" pools the trunk
+                directly instead (the recurrent-part ablation).
+            n_aux: Width of an auxiliary scalar vector concatenated onto the
+                pooled features before the head. 0 disables the aux path.
+            width: Base channel width forwarded to `Conv1dTrunk`.
+            hidden: LSTM hidden size (per direction, when `arch="cnn_lstm"`)
+                and head hidden width.
+            dropout: Dropout used throughout the trunk, branch, and head.
+            heads: Number of attention heads (when `arch="cnn_lstm"`).
+        """
         super().__init__()
         self.trunk = Conv1dTrunk(width=width, dropout=dropout)
         self.arch = arch
@@ -259,6 +341,17 @@ class GroundMotionNet(nn.Module):
         )
 
     def forward(self, x, aux):
+        """Runs the trunk, optional sequence branch, and head.
+
+        Args:
+            x: Input window batch, shape (batch, 3, 300).
+            aux: Auxiliary scalar batch, shape (batch, n_aux). Ignored (via
+                its own zero width) when `n_aux` is 0.
+
+        Returns:
+            Tensor of shape (batch,) -- a single raw regression output per
+            window.
+        """
         h = self.trunk(x)
         h = self.seq(h.transpose(1, 2)) if self.seq is not None else h.mean(dim=2)
         if aux.shape[1]:
@@ -271,6 +364,15 @@ class GroundMotionNet(nn.Module):
 # ---------------------------------------------------------------------------
 
 def metrics(y_log, p_log):
+    """Computes MAE/R2 in both log space and back-transformed linear space.
+
+    Args:
+        y_log: True target values, in log10 space.
+        p_log: Predicted target values, in log10 space.
+
+    Returns:
+        Dict with keys "MAE_log", "R2_log", "MAE_lin", "R2_lin" (floats).
+    """
     lin_t, lin_p = 10.0 ** y_log, 10.0 ** p_log
     return {"MAE_log": mean_absolute_error(y_log, p_log),
             "R2_log": r2_score(y_log, p_log),
@@ -280,6 +382,16 @@ def metrics(y_log, p_log):
 
 @torch.no_grad()
 def predict(model, loader, device):
+    """Runs a trained model over a loader and collects its predictions.
+
+    Args:
+        model: Trained `GroundMotionNet`.
+        loader: DataLoader yielding (x, aux, y) batches.
+        device: torch device to run inference on.
+
+    Returns:
+        float32 numpy array of predictions, one per sample in `loader`.
+    """
     model.eval()
     out = []
     for x, aux, _ in loader:
@@ -288,7 +400,22 @@ def predict(model, loader, device):
 
 
 def train_one(args, data, n_aux, device, seed):
-    """Train a single seed. Early stopping and selection use VALIDATION only."""
+    """Trains a single seed. Early stopping and selection use VALIDATION only.
+
+    Args:
+        args: Parsed CLI args (uses batch_size, arch, width, hidden,
+            dropout, lr, weight_decay, epochs, log_every, patience).
+        data: Tuple of (train, val, test) tensor tuples, each
+            (x, aux, y), as produced by `build_tensors`.
+        n_aux: Width of the auxiliary scalar vector.
+        device: torch device to train on.
+        seed: Random seed for init/shuffling.
+
+    Returns:
+        Tuple of (metrics_dict, best_val_MAE_log, test_predictions), where
+        `metrics_dict` is `metrics`'s output on the test split using the
+        best (by validation MAE) epoch's weights.
+    """
     seed_everything(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -332,8 +459,7 @@ def train_one(args, data, n_aux, device, seed):
 
 
 def floor_on_same_rows(tr_df, te_df, target_col, amp_col):
-    """
-    The baselines, refit on exactly the rows the network was given.
+    """The baselines, refit on exactly the rows the network was given.
 
     The third is the one that matters for attribution. Site response is a
     per-station additive term in log space, and a network can identify a station
@@ -344,8 +470,18 @@ def floor_on_same_rows(tr_df, te_df, target_col, amp_col):
     waveform shape. Adding station as a categorical gives the floor the same
     ability and makes the remaining margin attributable.
 
-    Returns (metrics_by_name, predictions_by_name) so the delta can be
-    stratified per row afterwards.
+    Args:
+        tr_df: Training-split manifest rows, with `target_col`, `amp_col`,
+            'log_dist', and 'station_key' columns.
+        te_df: Test-split manifest rows, same columns.
+        target_col: Column holding the regression target (log space).
+        amp_col: Column holding the log peak amplitude scalar.
+
+    Returns:
+        Tuple of (metrics_by_name, predictions_by_name): dicts keyed by
+        floor name ("log peak amplitude", "amplitude + log distance",
+        "amplitude + distance + station"), so the delta can be stratified
+        per row afterwards.
     """
     out, preds = {}, {}
     y_te = te_df[target_col].to_numpy()
@@ -360,6 +496,16 @@ def floor_on_same_rows(tr_df, te_df, target_col, amp_col):
     idx = {s: i for i, s in enumerate(cats)}
 
     def design(df):
+        """Builds the [amplitude, log_dist, one-hot station] design matrix.
+
+        Args:
+            df: Manifest rows with `amp_col`, 'log_dist', and 'station_key'
+                columns.
+
+        Returns:
+            float64 array, shape (len(df), 2 + len(cats)). A station not in
+            the training set's `cats` gets an all-zero one-hot (zero effect).
+        """
         X = np.zeros((len(df), 2 + len(cats)))
         X[:, 0] = df[amp_col].to_numpy()
         X[:, 1] = df["log_dist"].to_numpy()
@@ -378,6 +524,11 @@ def floor_on_same_rows(tr_df, te_df, target_col, amp_col):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Peak ground motion CNN vs the scalar floor.")
     p.add_argument("--dataset-dir", default="../../data_downloader/data/dataset_groundmotion_3s")
     p.add_argument("--target", default="pgv_fwd", choices=list(TARGETS))
@@ -408,6 +559,8 @@ def parse_args():
 
 
 def main():
+    """Loads the dataset/baselines, trains the seed ensemble, and reports
+    both metric spaces against the strongest floor."""
     args = parse_args()
     lin_col, log_col, unit, amp_col, degenerate = TARGETS[args.target]
 
@@ -522,8 +675,7 @@ def main():
 
 
 def _stratify_delta(te_df, y, cnn_pred, floor_pred):
-    """
-    Where the CNN's advantage actually comes from.
+    """Prints where the CNN's advantage actually comes from.
 
     `peak_in_input` matters most. The window spans [arr-0.6, arr+2.4], so at
     short distance it CONTAINS the S arrival -- the network can read directly
@@ -531,6 +683,15 @@ def _stratify_delta(te_df, y, cnn_pred, floor_pred):
     information, but it is information about the S-P moveout confound rather
     than about ground motion, so a gain concentrated in one stratum means
     something different from a gain spread evenly.
+
+    Args:
+        te_df: Test-split manifest rows, with 'peak_in_input' and (if
+            present) 'magnitude' columns.
+        y: True target values (log space), aligned with `te_df`.
+        cnn_pred: Seed-averaged CNN predictions (log space), or None to
+            skip (nothing was trained).
+        floor_pred: Strongest floor's predictions (log space), aligned with
+            `te_df`.
     """
     if cnn_pred is None:
         return

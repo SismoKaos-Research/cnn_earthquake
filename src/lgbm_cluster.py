@@ -1,3 +1,34 @@
+"""
+Feature distillation and clustering on CNN-extracted feature vectors.
+
+Takes 256-dim CNN feature vectors (already extracted by a separate PyTorch
+extraction step and saved to `extracted_features/*.npz` as
+{features, labels, filenames} arrays -- not itself part of this script or
+this directory) and:
+
+  1. Hierarchically (Ward) clusters the 256 raw features by Spearman
+     correlation distance (1 - |correlation|), so highly correlated features
+     -- which a CNN's channels routinely produce -- collapse into a handful
+     of "feature families" instead of being counted as independent evidence.
+  2. Trains a LightGBM regressor on all 256 raw features (magnitude target),
+     reporting val MAE/RMSE/R2 against the predict-the-mean floor from
+     `metrics.py`, matching this project's floor-before-headline convention.
+  3. Aggregates LightGBM's per-feature gain importance up to the family
+     level and prints the top 10 families by total gain, so "which raw
+     feature index mattered" becomes "which cluster of redundant features
+     mattered" -- more interpretable when many features are near-duplicates.
+
+Usage:
+    python lgbm_cluster.py
+
+Paths (extracted_features/train_features_60s.npz,
+extracted_features/val_features_60s.npz) and the clustering
+`distance_threshold` are hardcoded module-level constants in the
+`__main__` block below, not CLI flags.
+
+Not imported by anything else -- standalone script.
+"""
+
 from collections import defaultdict
 
 import lightgbm as lgb
@@ -12,10 +43,39 @@ from metrics import predict_mean_baseline, print_report, regression_report
 
 
 def load_data(npz_path):
+    """Loads a CNN-feature-extraction .npz file.
+
+    Args:
+        npz_path: Path to a .npz file with 'features', 'labels', and
+            'filenames' arrays, as written by the (separate) PyTorch
+            feature-extraction step.
+
+    Returns:
+        Tuple of (features array shape (n, 256), labels array shape (n,),
+        filenames array shape (n,)).
+    """
     data = np.load(npz_path)
     return data['features'], data['labels'], data['filenames']
 
 def group_and_rank_features(train_path, val_path, distance_threshold=0.3):
+    """Clusters correlated CNN features, trains LightGBM, and ranks feature families by importance.
+
+    Args:
+        train_path: Path to the training split's .npz feature file (see
+            `load_data`).
+        val_path: Path to the validation split's .npz feature file, used
+            for early stopping and the reported metrics.
+        distance_threshold: Ward-linkage cut distance passed to
+            `scipy.cluster.hierarchy.fcluster`. Lower values group only
+            more strongly correlated features together (e.g. 0.3 groups
+            features with >0.7 correlation).
+
+    Returns:
+        Tuple of (fitted LGBMRegressor, cluster_labels array of length 256
+        mapping each raw feature index to its family id, sorted_families
+        list of (cluster_id, total_gain) tuples ordered by descending
+        total gain).
+    """
     print("="*60)
     print("LIGHTGBM FEATURE DISTILLATION & CLUSTERING")
     print("="*60)

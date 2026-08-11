@@ -36,6 +36,8 @@ GroupKFold over stations provides.
 
 Usage:
     python riskclass_scalar.py --dataset-dir ../../data_downloader/data/dataset_riskclass_3s_v2
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -57,19 +59,51 @@ STAGE2_FEATURES = ["log_snr", "log_distance"]
 
 
 def _make_gb(**kw):
+    """Builds one stage's HistGradientBoostingClassifier with shared hyperparameters.
+
+    Args:
+        **kw: Extra keyword arguments forwarded to
+            `HistGradientBoostingClassifier` (e.g. `sample_weight` is passed
+            to `.fit`, not here; this only builds the estimator).
+
+    Returns:
+        An unfitted `HistGradientBoostingClassifier`.
+    """
     return HistGradientBoostingClassifier(
         max_iter=200, learning_rate=0.05, max_leaf_nodes=7,
         l2_regularization=5.0, early_stopping=True, random_state=42, **kw)
 
 
 def _weights(y: np.ndarray, power: float) -> np.ndarray:
-    """Inverse-frequency class weights raised to `power` (0 = unweighted)."""
+    """Computes inverse-frequency class weights raised to `power` (0 = unweighted).
+
+    Args:
+        y: Integer class labels.
+        power: Exponent applied to the inverse-frequency weight; 0 gives
+            uniform (unweighted) weights, 1 gives full inverse-frequency.
+
+    Returns:
+        Array of per-sample weights, same length as `y`.
+    """
     counts = np.bincount(y, minlength=int(y.max()) + 1).astype(float)
     w = (counts.sum() / np.maximum(counts, 1.0)) ** power
     return w[y]
 
 
 def fit_two_stage(df: pd.DataFrame, power_stage1: float, power_stage2: float):
+    """Fits the stage-1 (noise vs. earthquake) and stage-2 (low vs. high risk) models.
+
+    Args:
+        df: Training rows with columns 'y' (int class label, 0=noise,
+            1=low_risk, 2=high_risk), plus `STAGE1_FEATURES`/
+            `STAGE2_FEATURES` columns.
+        power_stage1: Class-weight exponent for stage 1 (see `_weights`).
+        power_stage2: Class-weight exponent for stage 2 (see `_weights`).
+
+    Returns:
+        Tuple of (stage1_model, stage2_model), both fitted
+        `HistGradientBoostingClassifier`s.
+    """
     is_eq = (df.y.values > 0).astype(int)
     m1 = _make_gb()
     m1.fit(df[STAGE1_FEATURES].to_numpy(float), is_eq,
@@ -86,12 +120,37 @@ def fit_two_stage(df: pd.DataFrame, power_stage1: float, power_stage2: float):
 
 
 def predict_two_stage(m1, m2, df: pd.DataFrame) -> np.ndarray:
+    """Combines both stages' predictions into a 3-class probability distribution.
+
+    Recombines by the chain rule: P(noise) = 1-P(eq), P(low) = P(eq)*(1-P(hi)),
+    P(high) = P(eq)*P(hi).
+
+    Args:
+        m1: Fitted stage-1 model (noise vs. earthquake).
+        m2: Fitted stage-2 model (low vs. high risk, earthquakes only).
+        df: Rows to predict, with `STAGE1_FEATURES`/`STAGE2_FEATURES` columns.
+
+    Returns:
+        Array of shape (n_rows, 3), columns ordered as `RISK_CLASSES`
+        (noise, low_risk, high_risk); each row sums to 1.
+    """
     p_eq = m1.predict_proba(df[STAGE1_FEATURES].to_numpy(float))[:, 1]
     p_hi = m2.predict_proba(df[STAGE2_FEATURES].to_numpy(float))[:, 1]
     return np.column_stack([1.0 - p_eq, p_eq * (1.0 - p_hi), p_eq * p_hi])
 
 
 def load(dataset_dir: str):
+    """Loads the manifest and derives the log-distance feature and integer label.
+
+    Args:
+        dataset_dir: Directory from `seismic-cli generate-riskclass-dataset`
+            containing manifest.csv.
+
+    Returns:
+        Manifest DataFrame with added 'log_distance' (log of distance_km,
+        clipped to a 1 km floor; NaN where distance_km is absent) and 'y'
+        (int class label from `CLASS_TO_IDX`) columns.
+    """
     root = Path(dataset_dir)
     m = pd.read_csv(root / "manifest.csv")
     if "distance_km" not in m.columns:
@@ -102,6 +161,13 @@ def load(dataset_dir: str):
 
 
 def main():
+    """Selects class-weight powers by station-grouped CV, then fits and reports on test.
+
+    Returns:
+        None. Prints the CV selection, then test accuracy/macro-AUC/MCC/
+        balanced accuracy, a confusion matrix, a classification report, and
+        each stage's own AUC.
+    """
     p = argparse.ArgumentParser(description="Two-stage scalar risk classifier.")
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-riskclass-dataset`.")

@@ -28,6 +28,8 @@ Usage:
     python cnn_lstm_stack.py --dataset-dir dataset_specdual_6s \\
         --ckpt-1d .../specdual_1d/best_cnnlstm_classify.pth \\
         --ckpt-2d .../specdual_2d/best_cnnlstm_classify.pth
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -43,6 +45,11 @@ from cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Stack frozen 1d-only and 2d-only checkpoints.")
     p.add_argument("--dataset-dir", required=True)
     p.add_argument("--ckpt-1d", required=True, help="Checkpoint from `--channels 1d` training.")
@@ -55,6 +62,24 @@ def parse_args():
 
 
 def load_frozen(ckpt_path, seq_dim, img_channels, args, channels, device):
+    """Rebuilds a `DualChannelBinaryNet` and loads a frozen checkpoint into it.
+
+    Args:
+        ckpt_path: Path to a state-dict checkpoint from
+            `cnn_lstm_classify.py` training (e.g. `--channels 1d` or
+            `--channels 2d`).
+        seq_dim: Per-step feature width of the 1D sequence input.
+        img_channels: Number of channels of the 2D image input.
+        args: Parsed CLI args (uses hidden, fusion_dim -- must match the
+            checkpoint's training run).
+        channels: Which branch the checkpoint was trained with ("1d" or
+            "2d").
+        device: torch device to load the model onto.
+
+    Returns:
+        The reconstructed model in eval mode with every parameter's
+        `requires_grad` set to False.
+    """
     model = DualChannelBinaryNet(seq_dim, img_channels, hidden=args.hidden,
                                  fusion_dim=args.fusion_dim, dropout=0.0,
                                  channels=channels).to(device)
@@ -66,6 +91,17 @@ def load_frozen(ckpt_path, seq_dim, img_channels, args, channels, device):
 
 
 def collect_logits(model, loader, device):
+    """Runs a frozen model over `loader` and collects its raw logits and true labels.
+
+    Args:
+        model: Frozen model in eval mode, called as `model(seq, img)`.
+        loader: DataLoader yielding (seq, img, label) batches.
+        device: torch device to run inference on.
+
+    Returns:
+        Tuple of (logits, labels), each a float/int numpy array of the
+        same length as `loader`'s dataset.
+    """
     logits, labels = [], []
     with torch.no_grad():
         for seq, img, lbl in loader:
@@ -77,6 +113,16 @@ def collect_logits(model, loader, device):
 
 
 def report(name, logits, labels):
+    """Prints accuracy/AUC/MCC for one set of logits at the 0.5 threshold.
+
+    Args:
+        name: Label printed for this row.
+        logits: Raw model logits.
+        labels: True binary labels, same length as `logits`.
+
+    Returns:
+        Tuple of (accuracy, auc, mcc) floats.
+    """
     probs = 1.0 / (1.0 + np.exp(-logits))
     preds = (probs > 0.5).astype(int)
     acc = float((preds == labels).mean())
@@ -87,6 +133,10 @@ def report(name, logits, labels):
 
 
 def main():
+    """Loads two frozen single-branch checkpoints, stacks them with a
+    logistic regression combiner fit on val logits, and reports test
+    metrics for each branch alone, a naive average, and the stacked
+    combiner."""
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

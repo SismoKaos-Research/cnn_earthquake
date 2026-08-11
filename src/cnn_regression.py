@@ -24,6 +24,14 @@ CNN, so a headline MAE cannot be mistaken for a result:
 
 Usage:
     python cnn_regression.py --dataset-dir dataset_reg_60s --window-seconds 60
+
+Also imported (not just run standalone): cnn_magclass.py and cnn_riskclass.py
+import `AUX_COLUMNS` and `RegressionSeismicCNN` from this module (same
+trunk+aux-scalar architecture, different classification head/loss on top);
+cnn_lstm_regression.py imports `AUX_COLUMNS`, `detect_aux_columns`,
+`regression_metrics`, and `report_baselines` from this module, reusing the
+same aux-scalar schema detection and reference baselines for its dual-channel
+regressor.
 """
 
 import argparse
@@ -47,9 +55,19 @@ PER_COMPONENT_AUX_COLUMNS = ["log_snr_0", "log_snr_1", "log_snr_2", "log_distanc
 
 
 def detect_aux_columns(manifest: pd.DataFrame) -> list:
-    """seismic-cli's --per-component-aux writes log_snr_0/1/2 (one per Z/N/E)
+    """Detects which auxiliary-column schema a manifest uses.
+
+    seismic-cli's --per-component-aux writes log_snr_0/1/2 (one per Z/N/E)
     instead of one Z/N/E-averaged log_snr; detect which schema this manifest
-    actually has rather than assuming the original 2-column layout."""
+    actually has rather than assuming the original 2-column layout.
+
+    Args:
+        manifest: Dataset manifest DataFrame.
+
+    Returns:
+        `PER_COMPONENT_AUX_COLUMNS` if the manifest has a 'log_snr_0'
+        column, else `AUX_COLUMNS`.
+    """
     return PER_COMPONENT_AUX_COLUMNS if "log_snr_0" in manifest.columns else AUX_COLUMNS
 
 
@@ -68,6 +86,21 @@ class MagnitudeDataset(Dataset):
     """
 
     def __init__(self, manifest: pd.DataFrame, root: Path, aux_stats=None, transform=None):
+        """Builds the dataset from a manifest split and fits (or reuses) aux stats.
+
+        Args:
+            manifest: Manifest rows for this split (already filtered to one
+                `split` value by the caller).
+            root: Dataset root directory (contains `<split>/<filename>`
+                encoded-window files).
+            aux_stats: Optional (mean, std) tuple to standardize the aux
+                columns with; if None, computed from this manifest's own
+                rows (NaN-safe, with std floored to avoid divide-by-zero).
+                The train split should always pass None; val/test must
+                reuse the train split's stats.
+            transform: Optional callable applied to the loaded window
+                tensor before it's returned.
+        """
         self.rows = manifest.reset_index(drop=True)
         self.root = Path(root)
         self.transform = transform
@@ -88,12 +121,27 @@ class MagnitudeDataset(Dataset):
         self.targets = self.rows["magnitude"].to_numpy(dtype=np.float32)
 
     def aux_stats(self):
+        """Returns this dataset's (mean, std) used to standardize aux columns.
+
+        Returns:
+            Tuple of (mean array, std array), each shape (n_aux,).
+        """
         return (self.aux_mu, self.aux_sd)
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.rows)
 
     def __getitem__(self, idx):
+        """Returns one (window, aux, magnitude) sample.
+
+        Args:
+            idx: Row index into this split.
+
+        Returns:
+            Tuple of (float32 window tensor, float32 aux tensor, float32
+            scalar magnitude tensor).
+        """
         row = self.rows.iloc[idx]
         path = self.root / row["split"] / row["filename"]
         if path.suffix == ".pt":
@@ -131,6 +179,25 @@ class RegressionSeismicCNN(SETrunk2D):
     def __init__(self, dropout1=0.4, dropout2=0.2, hidden_dim=128,
                  num_stages=4, in_channels=3, n_aux=len(AUX_COLUMNS), use_aux=True,
                  num_classes=1):
+        """See `SETrunk2D.__init__` (`aux_dim` is forced to 0 when `use_aux`
+        is False, disabling the aux concatenation for a controlled ablation).
+
+        Args:
+            dropout1: See `SETrunk2D.__init__`.
+            dropout2: See `SETrunk2D.__init__`.
+            hidden_dim: See `SETrunk2D.__init__`.
+            num_stages: See `SETrunk2D.__init__`.
+            in_channels: See `SETrunk2D.__init__`.
+            n_aux: Width of the auxiliary scalar vector. Ignored (treated
+                as 0) if `use_aux` is False.
+            use_aux: If False, disables the aux concatenation entirely --
+                an image-only ablation.
+            num_classes: Width of the final layer -- 1 (default) for
+                regression/binary, or N for an N-way classification head
+                (e.g. `cnn_riskclass.py`'s 3-way risk head), paired with a
+                different loss by the caller. No other part of the trunk
+                changes.
+        """
         super().__init__(num_stages=num_stages, in_channels=in_channels,
                          aux_dim=n_aux if use_aux else 0, num_classes=num_classes,
                          dropout1=dropout1, dropout2=dropout2, hidden_dim=hidden_dim)
@@ -141,13 +208,34 @@ class RegressionSeismicCNN(SETrunk2D):
 # ---------------------------------------------------------------------------
 
 def regression_metrics(y_true, y_pred):
-    """MAE/RMSE/R2 (this script's original key set) plus median-AE/max-error/
-    resid_std from `metrics.regression_report`."""
+    """Computes the regression metric set.
+
+    MAE/RMSE/R2 (this script's original key set) plus median-AE/max-error/
+    resid_std from `metrics.regression_report`.
+
+    Args:
+        y_true: True magnitude values.
+        y_pred: Predicted magnitude values.
+
+    Returns:
+        A `metrics.regression_report` dict.
+    """
     return regression_report(y_true, y_pred)
 
 
 def report_baselines(train_ds, test_ds, aux_names=None):
-    """Predict-the-mean, and ridge on the auxiliary scalars alone."""
+    """Prints predict-the-mean and ridge-on-aux-scalars-alone reference points.
+
+    Args:
+        train_ds: Training-split `MagnitudeDataset`.
+        test_ds: Test-split `MagnitudeDataset`.
+        aux_names: Optional display names for the aux columns, for the
+            printed label. Defaults to "aux scalars" when None.
+
+    Returns:
+        The ridge baseline's test MAE (float), or None if fitting it raised
+        an exception (printed as a warning rather than propagated).
+    """
     y_tr, y_te = train_ds.targets, test_ds.targets
     print("\n--- Reference points (test set) ---")
     m = regression_metrics(y_te, np.full_like(y_te, y_tr.mean()))
@@ -170,6 +258,14 @@ def report_baselines(train_ds, test_ds, aux_names=None):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments and resolves the short/long preset.
+
+    Returns:
+        argparse.Namespace with the script's CLI options; any tunable left
+        at None on the command line is filled from the resolved
+        "short" (<=12s windows) or "long" preset, and `args.preset_name`
+        is set to whichever preset was used.
+    """
     p = argparse.ArgumentParser(description="Magnitude regression on encoded seismic windows.")
     p.add_argument("--dataset-dir", type=str, required=True,
                    help="Directory produced by `seismic-cli generate-regression-dataset`.")
@@ -207,6 +303,8 @@ def parse_args():
 
 
 def main():
+    """Loads the encoded-window dataset, trains `RegressionSeismicCNN`, and
+    reports test MAE/RMSE/R2 plus the mean and ridge-on-aux baselines."""
     args = parse_args()
     seed_everything(args.seed)
 
@@ -284,6 +382,14 @@ def main():
     epochs_no_improve = 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true/predicted magnitudes.
+
+        Args:
+            loader: DataLoader yielding (x, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true, y_pred) float arrays.
+        """
         model.eval()
         preds, trues = [], []
         with torch.no_grad():

@@ -46,6 +46,13 @@ Usage:
     python cnn_lstm_forecast.py \\
         --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
         --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv
+
+Also imported (not just run standalone): catalog_forecast_predict.py imports
+`AUX_FEATURES`, `DenseWindowDataset`, and `DualChannelForecastNet` from this
+module (same feature list, dataset loader, and architecture used to produce
+predictions from a trained checkpoint), plus `safe_auc` -- which this module
+does not itself define, only re-exports via its `from metrics import ...`
+below.
 """
 
 import argparse
@@ -87,6 +94,20 @@ class DenseWindowDataset(Dataset):
     """
 
     def __init__(self, manifest: pd.DataFrame, root: Path, split: str, stats=None):
+        """Loads one split's manifest rows and fits (or reuses) normalization stats.
+
+        Args:
+            manifest: Full dataset manifest DataFrame (all splits).
+            root: Dataset root directory (contains a subdirectory per split).
+            split: Which split to load -- e.g. "train", "val", "test".
+            stats: Optional (seq_mean, seq_std, aux_mean, aux_std) tuple to
+                normalize with; if None, fit from this split's own data (the
+                train split should always pass None; val/test must reuse the
+                train split's stats).
+
+        Raises:
+            ValueError: If `split` has no rows in `manifest`.
+        """
         self.rows = manifest[manifest.split == split].reset_index(drop=True)
         self.dir = Path(root) / split
         if self.rows.empty:
@@ -120,18 +141,34 @@ class DenseWindowDataset(Dataset):
         self.stats = stats
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.rows)
 
     def standardized_aux_matrix(self) -> np.ndarray:
         """Loads and standardizes aux for every row in this split -- used
         only for the magnitude head's ridge floor (a one-time, end-of-run
-        computation), not the hot training path, which loads per-item."""
+        computation), not the hot training path, which loads per-item.
+
+        Returns:
+            float64 array, shape (n_rows, aux_dim), NaN-filled entries
+            replaced with 0.0.
+        """
         am, asd = self.stats[2], self.stats[3]
         A = np.stack([torch.load(self.dir / fn, weights_only=True)["aux"].numpy()
                      for fn in self.rows.filename], axis=0)
         return np.nan_to_num((A - am) / asd, nan=0.0)
 
     def __getitem__(self, i):
+        """Returns one normalized (seq, img, aux, label, next_magnitude) sample.
+
+        Args:
+            i: Row index into this split.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32 aux
+            tensor, float32 scalar label tensor, float32 scalar
+            next_magnitude tensor -- NaN where `label` is 0).
+        """
         d = torch.load(self.dir / self.rows.filename.iloc[i], weights_only=True)
         sm, ss, am, asd = self.stats
         seq = (d["seq"].numpy() - sm) / ss
@@ -159,6 +196,7 @@ class DualChannelForecastNet(DualChannelDualHeadNet):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all"):
+        """See `DualChannelDualHeadNet.__init__`."""
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels)
 
@@ -168,9 +206,19 @@ class DualChannelForecastNet(DualChannelDualHeadNet):
 # ---------------------------------------------------------------------------
 
 def persistence_prediction(days_since_prev_major: np.ndarray, horizon_days: float) -> np.ndarray:
-    """Predict positive iff a qualifying event occurred in the PREVIOUS
+    """Predicts positive iff a qualifying event occurred in the PREVIOUS
     horizon_days. NaN (no prior qualifying event on record) predicts negative --
-    there is nothing to persist from."""
+    there is nothing to persist from.
+
+    Args:
+        days_since_prev_major: Days since the previous qualifying event, per
+            window; NaN where none precedes it.
+        horizon_days: Forecast horizon in days.
+
+    Returns:
+        int64 array of 0/1 predictions, same length as
+        `days_since_prev_major`.
+    """
     d = days_since_prev_major
     return np.where(np.isnan(d), 0, (d <= horizon_days).astype(int)).astype(np.int64)
 
@@ -180,7 +228,16 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     windows) only. Returns 0 (no gradient contribution) for a batch with no
     such rows, rather than NaN -- a real edge case per-zone even though rare
     pooled, given batch_size=64 against this task's ~0.59 pooled positive
-    rate."""
+    rate.
+
+    Args:
+        pred: Predicted magnitudes, shape (batch,).
+        target: True magnitudes, shape (batch,), NaN where label == 0.
+
+    Returns:
+        Scalar tensor: the mean absolute error over non-NaN rows, or 0.0
+        (no gradient contribution) if every row in the batch is NaN.
+    """
     mask = ~torch.isnan(target)
     if not mask.any():
         return pred.sum() * 0.0
@@ -188,6 +245,16 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 
 
 def report_row(name: str, y: np.ndarray, score: np.ndarray) -> dict:
+    """Prints and returns one row's AUC/accuracy/MCC.
+
+    Args:
+        name: Label printed for this row (e.g. a zone or floor name).
+        y: True binary labels.
+        score: Predicted positive-class probability (or 0/1 prediction).
+
+    Returns:
+        Dict with keys "name", "auc", "acc", "mcc", "n".
+    """
     pred = (score >= 0.5).astype(np.int64)
     auc, acc, mcc = safe_auc(y, score), float((pred == y).mean()), safe_mcc(y, pred)
     print(f"  {name:28s} AUC {auc:.4f}   acc {acc:.4f}   MCC {mcc:+.4f}   n={len(y)}")
@@ -200,12 +267,26 @@ def report_row(name: str, y: np.ndarray, score: np.ndarray) -> dict:
 
 def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: str,
                    data_downloader_root: str, horizon_days: float, threshold: float) -> None:
-    """
-    Re-scores the test predictions at the honest (block) sample size using
+    """Re-scores the test predictions at the honest (block) sample size using
     `seismic_cli.forecast.build_blocks` -- the same partitioning
     `catalog_report.md` used, so this number is directly comparable to the
     retired scalar forecaster's. Skipped with a clear message, not a crash,
     if the sibling repo isn't importable from here.
+
+    Args:
+        test_rows: Test-split manifest rows, with 'end_time' and 'region'
+            columns.
+        scores: Predicted positive-class probability, aligned with
+            `test_rows`.
+        catalog_path: Path to the earthquake catalog CSV.
+        data_downloader_root: Path to the sibling data_downloader repo
+            (must contain a `seismic_cli/` package to import from).
+        horizon_days: Forecast horizon in days (block width).
+        threshold: Minimum magnitude for a catalog event to qualify.
+
+    Returns:
+        None. Prints per-zone block-level AUC/accuracy, or a skip message if
+        the sibling repo isn't importable or a zone has no usable blocks.
     """
     root = Path(data_downloader_root).resolve()
     if not (root / "seismic_cli").is_dir():
@@ -257,6 +338,11 @@ def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: st
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(
         description="Dual-channel CNN+LSTM, retargeted onto the dense per-zone forecast target.")
     p.add_argument("--dataset-dir", required=True,
@@ -291,6 +377,9 @@ def parse_args():
 
 
 def main():
+    """Loads the dense-window dataset, trains `DualChannelForecastNet`, and
+    reports the binary and magnitude heads against their floors, per-zone
+    and (optionally) block-level."""
     args = parse_args()
     seed_everything(args.seed)
 
@@ -331,6 +420,15 @@ def main():
     best, no_improve = -1.0, 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects labels/scores/magnitudes.
+
+        Args:
+            loader: DataLoader yielding (seq, img, aux, y, mag) batches.
+
+        Returns:
+            Tuple of (y_true int64 array, y_score array, magnitude_true
+            array, magnitude_pred array).
+        """
         model.eval()
         ys, ss, mag_true, mag_pred = [], [], [], []
         with torch.no_grad():

@@ -5,6 +5,15 @@ Reads every `groundmotion_cnn_*.csv` written by `run_groundmotion_experiments.sh
 and prints the comparison in both metric spaces, with the seed spread beside
 each mean, so no configuration can be quoted without its uncertainty or without
 the floor it is being measured against.
+
+Usage:
+    python groundmotion_summary.py
+
+Takes no CLI flags -- reads every `groundmotion_cnn_*.csv` file already
+present next to this script (in `src/`) and writes
+`groundmotion_grid_summary.csv` alongside them.
+
+Not imported by anything else -- standalone script.
 """
 
 import glob
@@ -25,6 +34,13 @@ QUESTIONS = {
 
 
 def main():
+    """Collates every `groundmotion_cnn_*.csv` in this script's directory into one table.
+
+    Returns:
+        None. Prints the comparison table (or a "no result CSVs found"
+        message and returns early if none exist) and writes
+        `groundmotion_grid_summary.csv` as a side effect.
+    """
     src = Path(__file__).parent
     files = sorted(glob.glob(str(src / "groundmotion_cnn_*.csv")))
     if not files:

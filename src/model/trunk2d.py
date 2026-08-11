@@ -1,4 +1,9 @@
-"""SE-ResNet trunk shared by the RAM/spectrogram classifiers and regressors."""
+"""SE-ResNet trunk shared by the RAM/spectrogram classifiers and regressors.
+
+Not a runnable script -- imported only. Callers: training.py
+(ImprovedSeismicCNN subclasses this), cnn_regression.py
+(RegressionSeismicCNN), cnn_ram_aux.py (RamAuxCNN).
+"""
 
 import torch
 import torch.nn as nn
@@ -19,6 +24,23 @@ class SETrunk2D(nn.Module):
 
     def __init__(self, num_stages=4, in_channels=3, aux_dim=0, num_classes=1,
                 dropout1=0.5, dropout2=0.3, hidden_dim=64):
+        """Initializes the trunk and classifier head.
+
+        Args:
+            num_stages: 3 or 4 residual stages. 4 keeps `layer1..layer4` as
+                the state-dict keys (matches existing checkpoints); 3 drops
+                `layer4` to an identity and halves the final channel count,
+                for a smaller model on short/low-signal inputs.
+            in_channels: Number of input image channels.
+            aux_dim: Width of an auxiliary scalar vector concatenated onto
+                the pooled features before the classifier head. 0 disables
+                the aux path entirely (forward's `aux` argument is ignored).
+            num_classes: Width of the final linear layer -- 1 for binary
+                classification/regression, N for N-way classification.
+            dropout1: Dropout before the classifier's hidden layer.
+            dropout2: Dropout before the classifier's output layer.
+            hidden_dim: Width of the classifier's hidden layer.
+        """
         super().__init__()
         self.aux_dim = aux_dim
         self.in_conv = nn.Sequential(
@@ -45,6 +67,18 @@ class SETrunk2D(nn.Module):
         )
 
     def forward(self, x, aux=None):
+        """Runs the trunk and classifier head.
+
+        Args:
+            x: Input image batch, shape (batch, in_channels, height, width).
+            aux: Auxiliary scalar batch, shape (batch, aux_dim). Ignored if
+                `aux_dim` is 0 (including on legacy checkpoints loaded before
+                this attribute existed, via the class-level default above).
+
+        Returns:
+            Tensor of shape (batch, num_classes) -- raw logits, no
+            activation applied.
+        """
         x = self.in_conv(x)
         x = self.layer1(x)
         x = self.layer2(x)

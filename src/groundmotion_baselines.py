@@ -32,8 +32,13 @@ corrected here because correcting it would silently change what the log-space
 model claims.
 
 Usage:
-    python groundmotion_baselines.py \
+    python groundmotion_baselines.py \\
         --manifest ../../data_downloader/data/dataset_groundmotion_3s/manifest.csv
+
+Also imported (not just run standalone): cnn_groundmotion.py imports
+`TARGETS` and `load` from this module, reusing the same target definitions
+and label-independent quality-filtering rules for its neural model so the
+two are directly comparable.
 """
 
 import argparse
@@ -81,11 +86,21 @@ GBM_KEYS = {"gbm (same 2 features)"}
 
 
 def load(manifest, drop_truncated=True, drop_clipped=True):
-    """
-    Read the manifest and apply the label-independent quality rules.
+    """Reads the manifest and applies the label-independent quality rules.
 
-    Every exclusion here is decided by a flag that was computed without looking
-    at the target, so this cannot select the rows that happen to fit.
+    Every exclusion here is decided by a flag that was computed without
+    looking at the target, so this cannot select the rows that happen to fit.
+
+    Args:
+        manifest: Path to the dataset's manifest.csv.
+        drop_truncated: If True, drops rows whose forward label ran past
+            the record end (`label_truncated`).
+        drop_clipped: If True, drops rows with a raw sample at the
+            digitizer rail (`clipped`).
+
+    Returns:
+        Filtered DataFrame with an added 'log_dist' column
+        (log10 of distance_km, clipped to a 1 km floor).
     """
     d = pd.read_csv(manifest)
     n0 = len(d)
@@ -118,7 +133,19 @@ def load(manifest, drop_truncated=True, drop_clipped=True):
 
 
 def metrics(y_log_true, y_log_pred, unit):
-    """MAE and R2 in log space and, after back-transforming, in linear space."""
+    """Computes MAE and R2 in log space and, after back-transforming, in linear space.
+
+    Args:
+        y_log_true: True target values in log10 space.
+        y_log_pred: Predicted target values in log10 space.
+        unit: Target's physical unit (e.g. "gal", "cm/s"), used only to
+            name the linear-space MAE key.
+
+    Returns:
+        Dict with keys "MAE_log", "R2_log", "MAE_<unit>", "R2_lin". Linear
+        values are back-transformed as 10**pred (the median, not the mean,
+        of the implied lognormal -- see module docstring).
+    """
     lin_true, lin_pred = 10.0 ** y_log_true, 10.0 ** y_log_pred
     return {
         "MAE_log": mean_absolute_error(y_log_true, y_log_pred),
@@ -129,7 +156,20 @@ def metrics(y_log_true, y_log_pred, unit):
 
 
 def fit_predict(name, feats, tr, te, tcol):
-    """Train on `tr`, predict `te`. Everything is fitted in log space."""
+    """Fits a baseline on `tr` and predicts `te`. Everything is fitted in log space.
+
+    Args:
+        name: Baseline name; keys in `GBM_KEYS` use a
+            HistGradientBoostingRegressor instead of LinearRegression.
+        feats: List of predictor column names in `tr`/`te`. Empty list
+            means the predict-the-median baseline (no features used).
+        tr: Training-split DataFrame.
+        te: Test-split DataFrame.
+        tcol: Target column name (log space) in `tr`/`te`.
+
+    Returns:
+        Array of predictions for `te`, in log space.
+    """
     if not feats:                       # predict-the-median
         return np.full(len(te), float(np.median(tr[tcol])))
     Xtr, Xte = tr[feats].to_numpy(float), te[feats].to_numpy(float)
@@ -142,6 +182,20 @@ def fit_predict(name, feats, tr, te, tcol):
 
 
 def run_target(d, tkey, stratify=True):
+    """Fits and reports every baseline in `PREDICTORS` for one target.
+
+    Args:
+        d: Full quality-filtered DataFrame (see `load`).
+        tkey: Key into `TARGETS` naming the target to run.
+        stratify: If True and the target isn't degenerate, also prints the
+            log-peak-amplitude baseline's error by target decile and
+            magnitude band (see `_stratify`).
+
+    Returns:
+        List of per-baseline result dicts (each with keys "target",
+        "baseline", "degenerate", plus `metrics`'s keys), or None if the
+        target has fewer than 50 train or test rows after dropping NaNs.
+    """
     lin_col, log_col, unit, amp_col, degenerate = TARGETS[tkey]
     sub = d.dropna(subset=[log_col, amp_col, "log_dist", "magnitude"])
     tr = sub[sub.split == "train"]
@@ -184,13 +238,23 @@ def run_target(d, tkey, stratify=True):
 
 
 def _stratify(te, log_col, preds, unit):
-    """
-    Error by target decile and magnitude band.
+    """Prints the log-peak-amplitude baseline's error by target decile and magnitude band.
 
     A single aggregate MAE on a distribution this skewed is exactly the number
     the paper reports, and it is the one that hides the failure mode: a model
     that nails the common small values and misses every large one still looks
     good on the mean.
+
+    Args:
+        te: Test-split DataFrame.
+        log_col: Target column name (log space) in `te`.
+        preds: Dict mapping baseline name to its prediction array for `te`;
+            only the "log peak amplitude" entry is used.
+        unit: Target's physical unit, for the printed median.
+
+    Returns:
+        None. Prints the decile and magnitude-band breakdown; returns early
+        (printing nothing) if "log peak amplitude" isn't in `preds`.
     """
     y = te[log_col].to_numpy(float)
     key = "log peak amplitude"
@@ -219,6 +283,13 @@ def _stratify(te, log_col, preds, unit):
 
 
 def main():
+    """Loads the manifest, runs every target's baseline sweep, and writes/prints the summary.
+
+    Returns:
+        None. Writes `args.out_csv` (per-baseline, per-target metrics) and
+        prints the amplitude-only floor vs. best non-oracle baseline for
+        every target as a side effect.
+    """
     p = argparse.ArgumentParser(description="Non-neural floors for peak ground motion.")
     p.add_argument("--manifest", required=True)
     p.add_argument("--keep-truncated", action="store_true",

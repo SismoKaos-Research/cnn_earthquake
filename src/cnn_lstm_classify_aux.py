@@ -24,6 +24,11 @@ Usage:
     python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s
     python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s --channels 2d+aux
     python cnn_lstm_classify_aux.py --dataset-dir dataset_dualaux_6s --fusion gate
+
+Also imported (not just run standalone): cnn_lstm_stack_aux.py imports
+`DualChannelAuxBinaryNet` and `RamDualAuxTensorDataset` from this module,
+loading this script's checkpoint (via `--ckpt-1d`/`--ckpt-2d`) as one branch
+of a stacked ensemble.
 """
 
 import argparse
@@ -61,6 +66,21 @@ class RamDualAuxTensorDataset(Dataset):
     """
 
     def __init__(self, root_dir, aux_stats=None):
+        """Indexes every .pt sample under `root_dir`'s class subdirectories.
+
+        Args:
+            root_dir: Directory with one subdirectory per class, each
+                containing .pt files (`seismic-cli generate-dual-aux-dataset`
+                output), e.g. `<root>/00_noise/`, `<root>/01_earthquake/`.
+            aux_stats: Optional (mean, std) tuple to standardize `aux` with;
+                if None, computed from this split's own samples (the train
+                split should always pass None; val/test must reuse the
+                train split's stats).
+
+        Raises:
+            FileNotFoundError: If `root_dir` doesn't exist.
+            RuntimeError: If no .pt files are found under `root_dir`.
+        """
         self.root_dir = Path(root_dir)
         if not self.root_dir.exists():
             raise FileNotFoundError(f"Dataset split not found: {self.root_dir}")
@@ -83,10 +103,30 @@ class RamDualAuxTensorDataset(Dataset):
         self.aux_stats = aux_stats
 
     def sample_shapes(self):
+        """Returns (seq_shape, img_shape, aux_shape) of the first sample, as a quick check.
+
+        Returns:
+            Tuple of (seq tensor shape tuple, img tensor shape tuple, aux
+            tensor shape tuple).
+        """
         d = torch.load(self.samples[0][0], weights_only=True)
         return tuple(d["seq"].shape), tuple(d["img"].shape), tuple(d["aux"].shape)
 
     def validate_shapes(self, limit=None):
+        """Every tensor must share one shape or the default collate throws mid-run.
+
+        Args:
+            limit: If given, only checks the first `limit` samples instead
+                of the full dataset (cheaper, useful for a quick smoke test).
+
+        Returns:
+            Tuple of (seq_shape, img_shape, aux_shape) that every checked
+            sample matched.
+
+        Raises:
+            ValueError: If any checked sample's seq, img, or aux shape
+                differs from the first sample's.
+        """
         seq_shape, img_shape, aux_shape = self.sample_shapes()
         paths = self.samples if limit is None else self.samples[:limit]
         for fpath, _ in paths:
@@ -100,9 +140,19 @@ class RamDualAuxTensorDataset(Dataset):
         return seq_shape, img_shape, aux_shape
 
     def __len__(self):
+        """Returns the number of samples in this split."""
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """Returns one (seq, img, aux, label) sample, with aux standardized.
+
+        Args:
+            idx: Index into `self.samples`.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32 aux
+            tensor, float32 scalar label tensor).
+        """
         fpath, label = self.samples[idx]
         d = torch.load(fpath, weights_only=True)
         am, asd = self.aux_stats
@@ -122,6 +172,9 @@ class DualChannelAuxBinaryNet(DualChannelNet):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear", lstm_layers=1, lstm_heads=4):
+        """See `DualChannelNet.__init__` (`n_classes=1`, `squeeze_output=False`
+        always here -- the caller squeezes/unsqueezes as needed to match
+        `BCEWithLogitsLoss`'s (batch, 1) convention)."""
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          fusion=fusion, lstm_layers=lstm_layers, lstm_heads=lstm_heads,
@@ -133,6 +186,11 @@ class DualChannelAuxBinaryNet(DualChannelNet):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Dual-channel CNN+LSTM RAM classifier + amplitude aux.")
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-dual-aux-dataset`.")
@@ -162,6 +220,8 @@ def parse_args():
 
 
 def main():
+    """Loads the dual-tensor+aux dataset, trains `DualChannelAuxBinaryNet`,
+    and reports test accuracy/AUC/MCC plus the majority-class floor."""
     args = parse_args()
     seed_everything(args.seed)
 

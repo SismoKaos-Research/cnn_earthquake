@@ -22,6 +22,8 @@ differences.
 Usage:
     python cnn_ram_aux.py --dataset-dir dataset_ramaux_6s
     python cnn_ram_aux.py --dataset-dir dataset_ramaux_6s --no-aux   # ablation
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -58,6 +60,21 @@ class RamAuxTensorDataset(Dataset):
     """
 
     def __init__(self, root_dir, aux_stats=None):
+        """Indexes every .pt sample under `root_dir`'s class subdirectories.
+
+        Args:
+            root_dir: Directory with one subdirectory per class, each
+                containing .pt files (`seismic-cli generate-ram-aux-dataset`
+                output), e.g. `<root>/00_noise/`, `<root>/01_earthquake/`.
+            aux_stats: Optional (mean, std) tuple to standardize `aux` with;
+                if None, computed from this split's own samples (the train
+                split should always pass None; val/test must reuse the
+                train split's stats).
+
+        Raises:
+            FileNotFoundError: If `root_dir` doesn't exist.
+            RuntimeError: If no .pt files are found under `root_dir`.
+        """
         self.root_dir = Path(root_dir)
         if not self.root_dir.exists():
             raise FileNotFoundError(f"Dataset split not found: {self.root_dir}")
@@ -80,10 +97,28 @@ class RamAuxTensorDataset(Dataset):
         self.aux_stats = aux_stats
 
     def sample_shapes(self):
+        """Returns (img_shape, aux_shape) of the first sample, as a quick check.
+
+        Returns:
+            Tuple of (img tensor shape tuple, aux tensor shape tuple).
+        """
         d = torch.load(self.samples[0][0], weights_only=True)
         return tuple(d["img"].shape), tuple(d["aux"].shape)
 
     def validate_shapes(self, limit=None):
+        """Every tensor must share one shape or the default collate throws mid-run.
+
+        Args:
+            limit: If given, only checks the first `limit` samples instead
+                of the full dataset (cheaper, useful for a quick smoke test).
+
+        Returns:
+            Tuple of (img_shape, aux_shape) that every checked sample matched.
+
+        Raises:
+            ValueError: If any checked sample's img or aux shape differs
+                from the first sample's.
+        """
         img_shape, aux_shape = self.sample_shapes()
         paths = self.samples if limit is None else self.samples[:limit]
         for fpath, _ in paths:
@@ -97,9 +132,19 @@ class RamAuxTensorDataset(Dataset):
         return img_shape, aux_shape
 
     def __len__(self):
+        """Returns the number of samples in this split."""
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """Returns one (img, aux, label) sample, with aux standardized.
+
+        Args:
+            idx: Index into `self.samples`.
+
+        Returns:
+            Tuple of (float32 img tensor, float32 aux tensor, float32
+            scalar label tensor).
+        """
         fpath, label = self.samples[idx]
         d = torch.load(fpath, weights_only=True)
         am, asd = self.aux_stats
@@ -122,6 +167,21 @@ class RamAuxCNN(SETrunk2D):
 
     def __init__(self, aux_dim, use_aux=True, dropout1=0.5, dropout2=0.3,
                 hidden_dim=64, num_stages=4, in_channels=3):
+        """See `SETrunk2D.__init__` (`num_classes=1` always here; `aux_dim`
+        is forced to 0 when `use_aux` is False, disabling the aux
+        concatenation for a controlled ablation).
+
+        Args:
+            aux_dim: Width of the auxiliary scalar vector. Ignored (treated
+                as 0) if `use_aux` is False.
+            use_aux: If False, disables the aux concatenation entirely --
+                architecturally identical to the plain RAM classifier.
+            dropout1: See `SETrunk2D.__init__`.
+            dropout2: See `SETrunk2D.__init__`.
+            hidden_dim: See `SETrunk2D.__init__`.
+            num_stages: See `SETrunk2D.__init__`.
+            in_channels: See `SETrunk2D.__init__`.
+        """
         super().__init__(num_stages=num_stages, in_channels=in_channels,
                          aux_dim=aux_dim if use_aux else 0, num_classes=1,
                          dropout1=dropout1, dropout2=dropout2, hidden_dim=hidden_dim)
@@ -132,6 +192,11 @@ class RamAuxCNN(SETrunk2D):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="RAM-image classifier with amplitude aux scalars.")
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-ram-aux-dataset`.")
@@ -156,6 +221,8 @@ def parse_args():
 
 
 def main():
+    """Loads the RAM+aux dataset, trains `RamAuxCNN`, and reports test
+    accuracy/AUC/MCC plus the majority-class floor."""
     args = parse_args()
     seed_everything(args.seed)
     use_aux = not args.no_aux

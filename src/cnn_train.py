@@ -11,6 +11,15 @@ checkpoints keep working unchanged.
 Usage:
     python cnn_train.py --dataset-dir dataset_6s_max \\
         --save-dir trained_model_6s --window-seconds 6
+
+Also imported (not just run standalone): `cnn_run.py` imports
+`ImprovedSeismicCNN`, `ResBlock`, `SEBlock` from this module (all
+re-exported here from `training.py`, for the backward-compatibility reason
+stated above -- older `full_model.pth` checkpoints may have been pickled
+before the `training.py` refactor and so reference the legacy
+`cnn_train.ImprovedSeismicCNN` module path); `cnn_run_from_state.py`
+imports `ImprovedSeismicCNN` from this module to reconstruct the model
+before loading a state-dict checkpoint into it.
 """
 
 from torchvision import datasets, transforms
@@ -22,6 +31,8 @@ from training import (PRESETS, SHORT_WINDOW_THRESHOLD_SEC,  # noqa: F401
 
 
 def main():
+    """Loads the RAM-image ImageFolder dataset and runs `training.run_training`
+    on `training.ImprovedSeismicCNN`."""
     parser = build_arg_parser(
         "Train ImprovedSeismicCNN on RAM images.",
         default_dataset_dir="./dataset",

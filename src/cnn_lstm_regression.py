@@ -43,6 +43,8 @@ read as an established result off one run.
 
 Usage:
     python cnn_lstm_regression.py --dataset-dir ../../data_downloader/data/dataset_magclass_dual_3s
+
+Not imported by anything else -- standalone script.
 """
 
 import argparse
@@ -71,8 +73,7 @@ from training import seed_everything
 # ---------------------------------------------------------------------------
 
 def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
-    """
-    Re-partition rows without moving any tensor on disk. The manifest's
+    """Re-partitions rows without moving any tensor on disk. The manifest's
     original `split` names the DIRECTORY a tensor lives in, so it is
     preserved as `file_split`; only the LOGICAL split (used for train/val/
     test grouping below) changes.
@@ -89,6 +90,19 @@ def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
       both    -- station-disjoint, then every val/test row whose event also
                  appears in train is DROPPED. Neither term can leak. Costs
                  rows; the count dropped is reported, not hidden.
+
+    Args:
+        d: Manifest DataFrame with 'split', 'station_key', and 'event_id'
+            columns.
+        how: Grouping to use -- "event" (unchanged), "station", or "both".
+        seed: Seed for the station shuffle used by "station"/"both".
+        ratios: Target (train, val, test) row-count fractions for the
+            station partition.
+
+    Returns:
+        A copy of `d` with 'file_split' added (the original directory-based
+        split) and, for "station"/"both", 'split' reassigned to the new
+        station-disjoint grouping (rows dropped for "both").
     """
     d = d.copy()
     if "file_split" not in d:
@@ -120,6 +134,13 @@ def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
 
 
 def report_split(d, how):
+    """Prints the row counts and any train/test event or station overlap.
+
+    Args:
+        d: Manifest DataFrame after `resplit`, with 'split', 'event_id',
+            and 'station_key' columns.
+        how: Grouping name to print (as returned by `resplit`'s `how` arg).
+    """
     tr, te = d[d.split == "train"], d[d.split == "test"]
     shared_ev = len(set(tr.event_id) & set(te.event_id))
     shared_st = len(set(tr.station_key) & set(te.station_key))
@@ -147,6 +168,18 @@ class DualMagnitudeDataset(Dataset):
     """
 
     def __init__(self, manifest: pd.DataFrame, root: Path, aux_stats=None):
+        """Loads manifest rows and fits (or reuses) aux normalization stats.
+
+        Args:
+            manifest: Manifest rows for one split, with 'file_split',
+                'filename', 'magnitude', and `AUX_COLUMNS` columns.
+            root: Dataset root directory (contains a subdirectory per
+                file_split).
+            aux_stats: Optional (mean, std) tuple to standardize aux with;
+                if None, fit from this split's own data (the train split
+                should pass None; val/test must reuse the train split's
+                stats).
+        """
         self.rows = manifest.reset_index(drop=True)
         self.root = Path(root)
 
@@ -164,12 +197,23 @@ class DualMagnitudeDataset(Dataset):
         self.targets = self.rows["magnitude"].to_numpy(dtype=np.float32)
 
     def aux_stats(self):
+        """Returns the (mean, std) tuple this dataset standardized aux with."""
         return (self.aux_mu, self.aux_sd)
 
     def __len__(self):
+        """Returns the number of rows in this split."""
         return len(self.rows)
 
     def __getitem__(self, idx):
+        """Returns one normalized (seq, img, aux, magnitude) sample.
+
+        Args:
+            idx: Row index into this split.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32 aux
+            tensor, float32 scalar magnitude tensor).
+        """
         row = self.rows.iloc[idx]
         d = torch.load(self.root / row["file_split"] / row["filename"], weights_only=True)
         return (d["seq"].float(), d["img"].float(),
@@ -188,6 +232,8 @@ class DualChannelRegressionNet(DualChannelNet):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all"):
+        """See `DualChannelNet.__init__` (`n_classes=1`, `squeeze_output=True`
+        always here)."""
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          n_classes=1, squeeze_output=True)
@@ -198,6 +244,11 @@ class DualChannelRegressionNet(DualChannelNet):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(
         description="Dual-channel CNN+LSTM magnitude regression (spectrogram or RAM 2D + raw-waveform 1D).")
     p.add_argument("--dataset-dir", required=True,
@@ -232,6 +283,18 @@ def parse_args():
 
 
 def main():
+    """Loads the dual-tensor magnitude dataset, trains
+    `DualChannelRegressionNet`, and reports test MAE/RMSE/R2 against the
+    ridge baseline.
+
+    Side effect: rebinds the module-level `AUX_COLUMNS` to the columns
+    actually detected in the manifest (`detect_aux_columns`), since the set
+    of available auxiliary predictors can vary by dataset.
+
+    Raises:
+        ValueError: If the manifest is missing 'magnitude' or any detected
+            aux column, or if any split ("train"/"val"/"test") is empty.
+    """
     args = parse_args()
     seed_everything(args.seed)
 
@@ -298,6 +361,14 @@ def main():
     best_val_mae, no_improve = float("inf"), 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true/predicted magnitudes.
+
+        Args:
+            loader: DataLoader yielding (seq, img, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true, y_pred) float arrays.
+        """
         model.eval()
         preds, trues = [], []
         with torch.no_grad():

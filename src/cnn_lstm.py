@@ -26,6 +26,12 @@ Two departures from the paper, both forced by findings in report.md:
 Usage:
     python cnn_lstm.py --dataset-dir dataset_catalog_marmara
     python cnn_lstm.py --dataset-dir ... --channels 1d      # ablation
+
+Also imported (not just run standalone): cnn_lstm_loeo.py imports
+`DualChannelRiskNet` and `risk_classes_from_manifest` from this module (same
+architecture and label-ordering logic, leave-one-earthquake-out split
+instead of chronological); cnn_groundmotion.py imports `LSTMAttentionBranch`
+re-exported here from model/blocks.py.
 """
 
 import argparse
@@ -67,7 +73,15 @@ def risk_classes_from_manifest(manifest: pd.DataFrame):
     a hardcoded list, keeps the label, the ordinal direction, and the reported
     confusion matrix honest for any boundary choice.
 
-    Returns (ordered_class_names, class_to_idx).
+    Args:
+        manifest: Dataset manifest DataFrame with a 'risk_class' column and,
+            when available, a 'days_to_major' column to order classes by.
+
+    Returns:
+        Tuple of (ordered_class_names, class_to_idx dict).
+
+    Raises:
+        ValueError: If `manifest` has no 'risk_class' column.
     """
     if "risk_class" not in manifest.columns:
         raise ValueError("manifest has no 'risk_class' column")
@@ -99,6 +113,21 @@ class CatalogWindowDataset(Dataset):
     """
 
     def __init__(self, manifest: pd.DataFrame, root: Path, split: str, stats=None):
+        """Loads one split's manifest rows and fits (or reuses) normalization stats.
+
+        Args:
+            manifest: Full dataset manifest DataFrame (all splits).
+            root: Dataset root directory (contains a subdirectory per split).
+            split: Which split to load -- e.g. "train", "val", "test".
+            stats: Optional (seq_mean, seq_std, aux_mean, aux_std) tuple to
+                normalize with; if None, fit from this split's own data (the
+                train split should always pass None; val/test must reuse the
+                train split's stats).
+
+        Raises:
+            ValueError: If `split` has no rows in `manifest`, or any row's
+                `risk_class` isn't a recognized class.
+        """
         self.rows = manifest[manifest.split == split].reset_index(drop=True)
         self.dir = Path(root) / split
         if self.rows.empty:
@@ -133,6 +162,15 @@ class CatalogWindowDataset(Dataset):
         return len(self.rows)
 
     def __getitem__(self, i):
+        """Returns one normalized (seq, img, aux, label) sample.
+
+        Args:
+            i: Row index into this split.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32 aux
+            tensor, long label tensor).
+        """
         d = torch.load(self.dir / self.rows.filename.iloc[i], weights_only=True)
         sm, ss, am, asd = self.stats
         seq = (d["seq"].numpy() - sm) / ss
@@ -159,6 +197,7 @@ class DualChannelRiskNet(DualChannelNet):
 
     def __init__(self, seq_dim, img_channels, aux_dim, hidden=64, fusion_dim=128,
                  n_classes=3, dropout=0.3, channels="all"):
+        """See `DualChannelNet.__init__` (`squeeze_output` is always False here)."""
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          n_classes=n_classes, squeeze_output=False)
@@ -177,6 +216,13 @@ def report_baselines(train_ds, test_ds):
     detection. Here it predicts each test window's class from the class of the
     chronologically preceding training window's distribution conditioned on a
     similar event rate, approximated by the train-set mode.
+
+    Args:
+        train_ds: Training-split `CatalogWindowDataset`.
+        test_ds: Test-split `CatalogWindowDataset`.
+
+    Returns:
+        Tuple of (majority_class_accuracy, majority_class_balanced_accuracy).
     """
     y_tr, y_te = train_ds.labels, test_ds.labels
     print("\n--- Reference points (test set) ---")
@@ -201,6 +247,11 @@ def report_baselines(train_ds, test_ds):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Dual-channel CNN+LSTM earthquake risk model.")
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-catalog-dataset`.")
@@ -225,6 +276,8 @@ def parse_args():
 
 
 def main():
+    """Loads the catalog dataset, trains `DualChannelRiskNet`, and reports
+    the full metric set plus baselines on the test split."""
     args = parse_args()
     seed_everything(args.seed)
 
@@ -271,6 +324,14 @@ def main():
     best, no_improve = -1.0, 0
 
     def evaluate(loader):
+        """Runs the model over `loader` and collects true/predicted classes.
+
+        Args:
+            loader: DataLoader yielding (seq, img, aux, y) batches.
+
+        Returns:
+            Tuple of (y_true, y_pred) int arrays.
+        """
         model.eval()
         ys, ps = [], []
         with torch.no_grad():

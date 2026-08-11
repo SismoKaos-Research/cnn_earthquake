@@ -1,4 +1,11 @@
-"""Dual-channel (1D LSTM+attention / 2D CNN / optional aux-scalar) fusion models."""
+"""Dual-channel (1D LSTM+attention / 2D CNN / optional aux-scalar) fusion models.
+
+Not a runnable script -- imported only. Callers: cnn_lstm.py
+(DualChannelRiskNet subclasses DualChannelNet), cnn_lstm_classify.py
+(DualChannelBinaryNet), cnn_lstm_classify_aux.py (DualChannelAuxBinaryNet),
+cnn_lstm_regression.py (DualChannelRegressionNet), cnn_lstm_forecast.py
+(DualChannelForecastNet subclasses DualChannelDualHeadNet).
+"""
 
 import torch
 import torch.nn as nn
@@ -21,6 +28,30 @@ class DualChannelTrunk(nn.Module):
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear",
                 lstm_layers=1, lstm_heads=4):
+        """Initializes the 1D/2D/aux branches and fusion.
+
+        Args:
+            seq_dim: Per-step feature width of the 1D sequence input.
+            img_channels: Number of channels of the 2D image input.
+            aux_dim: Width of an auxiliary scalar vector concatenated after
+                fusion. 0 disables the aux branch.
+            hidden: LSTM hidden size (per direction) for the 1D branch.
+            fusion_dim: Common width both branches are projected to before
+                fusion, and the fused output's width.
+            dropout: Dropout used throughout the branches and fusion.
+            channels: Which branches are active -- "all", "1d", "2d", "aux",
+                "1d+aux", or "2d+aux" (aux-only variants require
+                `aux_dim > 0`).
+            fusion: "linear" (a*F1+b*F2 with learned scalars) or "gate" (a
+                per-example gate, `model.blocks.GatedFusion`); "gate" only
+                takes effect when both 1D and 2D are active.
+            lstm_layers: Number of stacked LSTM layers in the 1D branch.
+            lstm_heads: Number of attention heads in the 1D branch.
+
+        Raises:
+            ValueError: If `channels` disables every branch, or `fusion` is
+                not "linear" or "gate".
+        """
         super().__init__()
         self.channels = channels
         self.fusion = fusion
@@ -57,6 +88,21 @@ class DualChannelTrunk(nn.Module):
         self.last_gate = None
 
     def _fuse(self, seq, img, aux):
+        """Runs the active branches and fuses them into one vector.
+
+        Args:
+            seq: 1D sequence input, shape (batch, time, seq_dim). Unused if
+                `use_1d` is False.
+            img: 2D image input, shape (batch, img_channels, height, width).
+                Unused if `use_2d` is False.
+            aux: Auxiliary scalar input, shape (batch, aux_dim). Unused if
+                `use_aux` is False.
+
+        Returns:
+            Tensor of shape (batch, fused_dim). Also sets `self.last_gate`
+            to the per-example gate (batch, 1) when `fusion="gate"` and both
+            branches are active, else None.
+        """
         self.last_gate = None
         feats = []
         fused = None
@@ -86,6 +132,25 @@ class DualChannelNet(DualChannelTrunk):
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear",
                 lstm_layers=1, lstm_heads=4, n_classes=1, squeeze_output=False):
+        """Initializes the trunk (see `DualChannelTrunk.__init__`) plus a head.
+
+        Args:
+            seq_dim: See `DualChannelTrunk.__init__`.
+            img_channels: See `DualChannelTrunk.__init__`.
+            aux_dim: See `DualChannelTrunk.__init__`.
+            hidden: See `DualChannelTrunk.__init__`.
+            fusion_dim: See `DualChannelTrunk.__init__`.
+            dropout: See `DualChannelTrunk.__init__`.
+            channels: See `DualChannelTrunk.__init__`.
+            fusion: See `DualChannelTrunk.__init__`.
+            lstm_layers: See `DualChannelTrunk.__init__`.
+            lstm_heads: See `DualChannelTrunk.__init__`.
+            n_classes: Width of the head's output layer -- 1 for
+                binary/regression, 3+ for multiclass.
+            squeeze_output: If True, squeezes the last dimension off the
+                output (for a single-logit head returned as shape (batch,)
+                rather than (batch, 1)).
+        """
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          fusion=fusion, lstm_layers=lstm_layers, lstm_heads=lstm_heads)
@@ -100,6 +165,17 @@ class DualChannelNet(DualChannelTrunk):
         )
 
     def forward(self, seq, img, aux=None):
+        """Fuses the branches and applies the head.
+
+        Args:
+            seq: See `DualChannelTrunk._fuse`.
+            img: See `DualChannelTrunk._fuse`.
+            aux: See `DualChannelTrunk._fuse`.
+
+        Returns:
+            Tensor of shape (batch, n_classes), or (batch,) if
+            `squeeze_output` and `n_classes == 1`.
+        """
         out = self.head(self._fuse(seq, img, aux))
         return out.squeeze(-1) if self.squeeze_output else out
 
@@ -111,6 +187,19 @@ class DualChannelDualHeadNet(DualChannelTrunk):
 
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", lstm_layers=1, lstm_heads=4):
+        """Initializes the trunk (see `DualChannelTrunk.__init__`) plus two heads.
+
+        Args:
+            seq_dim: See `DualChannelTrunk.__init__`.
+            img_channels: See `DualChannelTrunk.__init__`.
+            aux_dim: See `DualChannelTrunk.__init__`.
+            hidden: See `DualChannelTrunk.__init__`.
+            fusion_dim: See `DualChannelTrunk.__init__`.
+            dropout: See `DualChannelTrunk.__init__`.
+            channels: See `DualChannelTrunk.__init__`.
+            lstm_layers: See `DualChannelTrunk.__init__`.
+            lstm_heads: See `DualChannelTrunk.__init__`.
+        """
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          fusion="linear", lstm_layers=lstm_layers, lstm_heads=lstm_heads)
@@ -125,5 +214,15 @@ class DualChannelDualHeadNet(DualChannelTrunk):
         self.magnitude_out = nn.Linear(fusion_dim, 1)
 
     def forward(self, seq, img, aux=None):
+        """Fuses the branches and applies the shared trunk, then both heads.
+
+        Args:
+            seq: See `DualChannelTrunk._fuse`.
+            img: See `DualChannelTrunk._fuse`.
+            aux: See `DualChannelTrunk._fuse`.
+
+        Returns:
+            Tuple of (binary_logit, magnitude) tensors, each shape (batch,).
+        """
         trunk_out = self.trunk(self._fuse(seq, img, aux))
         return self.binary_out(trunk_out).squeeze(-1), self.magnitude_out(trunk_out).squeeze(-1)

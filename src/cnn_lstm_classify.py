@@ -32,6 +32,11 @@ Usage:
     python cnn_lstm_classify.py --dataset-dir dataset_dual_6s
     python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --channels 2d   # CNN-only ablation
     python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --fusion gate   # gated fusion
+
+Also imported (not just run standalone): cnn_lstm_stack.py imports
+`DualChannelBinaryNet` and `RamDualTensorDataset` from this module, loading
+this script's checkpoint (via `--ckpt-1d`/`--ckpt-2d`) as one branch of a
+stacked ensemble.
 """
 
 import argparse
@@ -66,6 +71,17 @@ class RamDualTensorDataset(Dataset):
     """
 
     def __init__(self, root_dir):
+        """Indexes every .pt sample under `root_dir`'s class subdirectories.
+
+        Args:
+            root_dir: Directory with one subdirectory per class, each
+                containing .pt files (`seismic-cli generate-dual-dataset`
+                output), e.g. `<root>/00_noise/`, `<root>/01_earthquake/`.
+
+        Raises:
+            FileNotFoundError: If `root_dir` doesn't exist.
+            RuntimeError: If no .pt files are found under `root_dir`.
+        """
         self.root_dir = Path(root_dir)
         if not self.root_dir.exists():
             raise FileNotFoundError(f"Dataset split not found: {self.root_dir}")
@@ -82,6 +98,11 @@ class RamDualTensorDataset(Dataset):
             raise RuntimeError(f"No .pt tensors found under {self.root_dir}")
 
     def sample_shapes(self):
+        """Returns (seq_shape, img_shape) of the first sample, as a quick check.
+
+        Returns:
+            Tuple of (seq tensor shape tuple, img tensor shape tuple).
+        """
         d = torch.load(self.samples[0][0], weights_only=True)
         return tuple(d["seq"].shape), tuple(d["img"].shape)
 
@@ -92,6 +113,17 @@ class RamDualTensorDataset(Dataset):
         cnn_from_tensor.py for the spectrogram-side version of this same
         problem (mixed station sampling rates), which `RamDualEncoder`
         avoids the same way (resample to a nominal rate before reshaping).
+
+        Args:
+            limit: If given, only checks the first `limit` samples instead
+                of the full dataset (cheaper, useful for a quick smoke test).
+
+        Returns:
+            Tuple of (seq_shape, img_shape) that every checked sample matched.
+
+        Raises:
+            ValueError: If any checked sample's seq or img shape differs
+                from the first sample's.
         """
         seq_shape, img_shape = self.sample_shapes()
         paths = self.samples if limit is None else self.samples[:limit]
@@ -109,6 +141,15 @@ class RamDualTensorDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """Returns one (seq, img, label) sample.
+
+        Args:
+            idx: Index into `self.samples`.
+
+        Returns:
+            Tuple of (float32 seq tensor, float32 img tensor, float32
+            scalar label tensor).
+        """
         fpath, label = self.samples[idx]
         d = torch.load(fpath, weights_only=True)
         return d["seq"].float(), d["img"].float(), torch.tensor(label, dtype=torch.float32)
@@ -131,11 +172,19 @@ class DualChannelBinaryNet(DualChannelNet):
 
     def __init__(self, seq_dim, img_channels, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear"):
+        """See `DualChannelNet.__init__` (`aux_dim=0`, `n_classes=1`,
+        `squeeze_output=False` always here -- the caller squeezes/unsqueezes
+        as needed to match `BCEWithLogitsLoss`'s (batch, 1) convention)."""
         super().__init__(seq_dim, img_channels, aux_dim=0, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
                          fusion=fusion, n_classes=1, squeeze_output=False)
 
     def forward(self, seq, img):
+        """See `DualChannelNet.forward` (`aux=None` always here).
+
+        Returns:
+            Tensor of shape (batch, 1) -- a single raw logit per sample.
+        """
         return super().forward(seq, img)
 
 
@@ -144,6 +193,11 @@ class DualChannelBinaryNet(DualChannelNet):
 # ---------------------------------------------------------------------------
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        argparse.Namespace with the script's CLI options.
+    """
     p = argparse.ArgumentParser(description="Dual-channel CNN+LSTM RAM classifier "
                                             "(earthquake vs. noise).")
     p.add_argument("--dataset-dir", required=True,
@@ -173,6 +227,8 @@ def parse_args():
 
 
 def main():
+    """Loads the dual-tensor dataset, trains `DualChannelBinaryNet`, and
+    reports test accuracy/AUC/MCC plus the majority-class floor."""
     args = parse_args()
     seed_everything(args.seed)
 
