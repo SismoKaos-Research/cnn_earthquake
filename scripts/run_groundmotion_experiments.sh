@@ -11,14 +11,15 @@
 #   F  pga_full        the degenerate target, for contrast only -- NOT a
 #                      like-for-like number, its window contains the input
 set -u
-PY="${PY:-/home/oguzb/Projects/sismokaos/data_downloader/.venv/bin/python}"
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PY="${PY:-$SCRIPT_DIR/../.venv/bin/python}"
+cd "$SCRIPT_DIR/../src"
 
 run () {
   local tag="$1"; shift
   echo ""
   echo "############ $tag ############"
-  "$PY" cnn_groundmotion.py --out-csv "groundmotion_cnn_${tag}.csv" "$@" 2>&1
+  "$PY" cnn_groundmotion.py --out-csv "../experiment_results/groundmotion_cnn_${tag}.csv" "$@" 2>&1
   echo "############ $tag done (exit $?) ############"
 }
 

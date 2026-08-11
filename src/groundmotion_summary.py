@@ -10,8 +10,9 @@ Usage:
     python groundmotion_summary.py
 
 Takes no CLI flags -- reads every `groundmotion_cnn_*.csv` file already
-present next to this script (in `src/`) and writes
-`groundmotion_grid_summary.csv` alongside them.
+present in `../experiment_results/` (relative to this script, i.e.
+`<repo_root>/experiment_results/`) and writes `groundmotion_grid_summary.csv`
+alongside them there.
 
 Not imported by anything else -- standalone script.
 """
@@ -34,15 +35,15 @@ QUESTIONS = {
 
 
 def main():
-    """Collates every `groundmotion_cnn_*.csv` in this script's directory into one table.
+    """Collates every `groundmotion_cnn_*.csv` in `../experiment_results/` into one table.
 
     Returns:
         None. Prints the comparison table (or a "no result CSVs found"
         message and returns early if none exist) and writes
         `groundmotion_grid_summary.csv` as a side effect.
     """
-    src = Path(__file__).parent
-    files = sorted(glob.glob(str(src / "groundmotion_cnn_*.csv")))
+    results_dir = Path(__file__).parent / ".." / "experiment_results"
+    files = sorted(glob.glob(str(results_dir / "groundmotion_cnn_*.csv")))
     if not files:
         print("No result CSVs found -- has the grid been run?")
         return
@@ -84,8 +85,8 @@ def main():
           "not\n  comparable to the _fwd runs and exist only to show the size of that "
           "degeneracy.")
 
-    r.to_csv(src / "groundmotion_grid_summary.csv", index=False)
-    print(f"\n[write] {src / 'groundmotion_grid_summary.csv'}")
+    r.to_csv(results_dir / "groundmotion_grid_summary.csv", index=False)
+    print(f"\n[write] {results_dir / 'groundmotion_grid_summary.csv'}")
 
 
 if __name__ == "__main__":

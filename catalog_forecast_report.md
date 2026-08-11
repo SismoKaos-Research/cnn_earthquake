@@ -246,7 +246,7 @@ one occurs" (MAE ≈ 0.24–0.25, beats every neural attempt at the same
 question). Not a consolation prize for the magnitude half — the best
 available answer, honestly arrived at.
 
-Raw per-variant numbers: `src/cnn_lstm_forecast_maghead_results.csv`. Combined
+Raw per-variant numbers: `experiment_results/cnn_lstm_forecast_maghead_results.csv`. Combined
 end-to-end prediction (binary network + ridge magnitude, run together on the
 same test windows): `src/catalog_forecast_predict.py`.
 
@@ -265,7 +265,7 @@ python cnn_lstm_forecast.py \
     --seed 42   # 43, 44
 ```
 
-Raw per-seed numbers: `src/cnn_lstm_forecast_results.csv`.
+Raw per-seed numbers: `experiment_results/cnn_lstm_forecast_results.csv`.
 
 **Magnitude head (§5) — same dataset command, plus `--stride-events 4` for
 the denser variant:**

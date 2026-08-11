@@ -3,7 +3,7 @@
 One-line summary: **a CNN over a spectrogram image of a short seismic
 window, plus two physics scalars (amplitude, distance), predicts earthquake
 magnitude directly.** Full detail: `report.md` §7.5–7.9. Raw numbers:
-`src/cnn_lstm_regression_results.csv`.
+`experiment_results/cnn_lstm_regression_results.csv`.
 
 ## What it is
 
