@@ -126,6 +126,35 @@ def load_aegean_events(catalog_path: str, min_magnitude: float = 4.5) -> np.ndar
     return np.sort(aegean.dt.to_numpy())
 
 
+def load_aegean_events_with_magnitude(catalog_path: str, min_magnitude: float = 3.0):
+    """Loads catalog events (times AND magnitudes) within the Aegean bounding box.
+
+    Companion to `load_aegean_events`, which only returns times -- this is
+    for magnitude-derived catalog features (mean magnitude, b-value, energy
+    release, magnitude deficit) that need a lower completeness threshold
+    than the M>=4.5 "major event" set used for labels/persistence, since
+    b-value estimation needs more data points than the rare large events
+    alone provide (16,724 M>=3.0 Aegean events vs. 261 M>=4.5 ones).
+
+    Args:
+        catalog_path: Path to a catalog CSV with 'Date', 'Latitude',
+            'Longitude', 'Magnitude' columns (data_large.csv format).
+        min_magnitude: Minimum magnitude to include (completeness
+            threshold for the returned "background" catalog).
+
+    Returns:
+        Tuple of (times, magnitudes) -- times is a sorted array of numpy
+        datetime64 event times, magnitudes is the matching float64 array,
+        same order.
+    """
+    cat = pd.read_csv(catalog_path)
+    cat["dt"] = pd.to_datetime(cat["Date"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+    lat0, lat1, lon0, lon1 = AEGEAN_BBOX
+    aegean = cat[(cat.Latitude.between(lat0, lat1)) & (cat.Longitude.between(lon0, lon1)) &
+                (cat.Magnitude >= min_magnitude) & cat.dt.notna()].sort_values("dt")
+    return aegean.dt.to_numpy(), aegean.Magnitude.to_numpy(dtype=np.float64)
+
+
 def truncate_to_reliable_catalog_end(hour_index: pd.DatetimeIndex, raw: np.ndarray,
                                      major_times: np.ndarray, buffer_days: float = 0):
     """Drops hours past the point where the catalog can no longer reliably
