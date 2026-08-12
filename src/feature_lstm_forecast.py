@@ -30,8 +30,8 @@ Pipeline:
 
 Usage:
     python feature_lstm_forecast.py \\
-        --features-csv ../../Sismokaos-featureExtract/results/GEDZ/GEDZ_2024_11_15-2025_02_23_ENZ_features.csv \\
-        --catalog-path ../../data_downloader/catalogs/data_large.csv
+        --features-csv ../../Sismokaos/feature-extract/results/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy \\
+        --catalog-path ../../Sismokaos/data_downloader/catalogs/data_large.csv
 
 Also imported (not just run standalone): raw_cnn_lstm_forecast.py and
 raw100hz_cnn_lstm_forecast.py both import `days_since_prev_major`,
@@ -81,17 +81,24 @@ def parse_hour_start(pencere_id: str):
 
 
 def load_hourly_features(features_csv: str) -> pd.DataFrame:
-    """Loads the combined features CSV and aggregates it to hourly means.
+    """Loads the combined features file and aggregates it to hourly means.
 
     Args:
         features_csv: Path to a Sismokaos-featureExtract combined features
-            CSV (one row per ~50s window, column 'Pencere_ID' identifying it).
+            file (one row per ~50s window, column 'Pencere_ID' identifying
+            it) -- either the original CSV format or the structured-.npy
+            format the pipeline now writes (same columns, loaded via
+            `np.load` instead of `pd.read_csv` when the path ends in
+            `.npy`).
 
     Returns:
         DataFrame indexed by hour-start datetime, one row per hour, columns
         = the mean of every feature column across that hour's windows.
     """
-    df = pd.read_csv(features_csv)
+    if str(features_csv).endswith(".npy"):
+        df = pd.DataFrame.from_records(np.load(features_csv, allow_pickle=False))
+    else:
+        df = pd.read_csv(features_csv)
     parsed = df["Pencere_ID"].apply(parse_hour_start)
     df["hour_start"] = [p[0] for p in parsed]
     df = df.dropna(subset=["hour_start"])
@@ -117,6 +124,44 @@ def load_aegean_events(catalog_path: str, min_magnitude: float = 4.5) -> np.ndar
     aegean = cat[(cat.Latitude.between(lat0, lat1)) & (cat.Longitude.between(lon0, lon1)) &
                 (cat.Magnitude >= min_magnitude) & cat.dt.notna()]
     return np.sort(aegean.dt.to_numpy())
+
+
+def truncate_to_reliable_catalog_end(hour_index: pd.DatetimeIndex, raw: np.ndarray,
+                                     major_times: np.ndarray, buffer_days: float = 0):
+    """Drops hours past the point where the catalog can no longer reliably
+    inform a forward-looking label.
+
+    Catalogs lag real time -- `major_times[-1]` is the last event anyone's
+    gotten around to cataloging, not the last real event. Hours near the
+    raw archive's end can have their forward-looking label search window
+    reach past `major_times[-1]` into a gap that's empty because nothing's
+    been entered yet, not because it was quiet -- a right-censoring
+    artifact that inflates apparent AUC for large horizons on whichever CV
+    block happens to land at the archive's tail (caught in this project by
+    a fold's AUC climbing suspiciously in lockstep with horizon length).
+
+    Args:
+        hour_index: DatetimeIndex of hour starts.
+        raw: Hourly array (waveform or features), shape (n_hours, ...),
+            first axis aligned with `hour_index`.
+        major_times: Sorted array of qualifying event times.
+        buffer_days: Extra safety margin subtracted from the last event's
+            time -- pass the largest horizon this run will evaluate, so no
+            eligible hour's forward window can reach past the catalog's
+            actual end.
+
+    Returns:
+        Tuple of (truncated hour_index, truncated raw). A no-op if the
+        cutoff falls after the archive's own end already.
+    """
+    cutoff = major_times[-1] - np.timedelta64(int(buffer_days * 24), "h")
+    n_keep = int((hour_index.to_numpy() <= cutoff).sum())
+    if n_keep < len(hour_index):
+        print(f"  [!] catalog's last event is {major_times[-1]} -- truncating archive from "
+             f"{hour_index[-1]} to {hour_index[n_keep - 1]} ({len(hour_index) - n_keep} hours "
+             f"dropped, buffer={buffer_days:.0f}d) to avoid right-censoring the forward-looking "
+             f"label near the archive's end.")
+    return hour_index[:n_keep], raw[:n_keep]
 
 
 def label_hours(hourly_index: pd.DatetimeIndex, major_times: np.ndarray, horizon_days: float) -> np.ndarray:
@@ -162,6 +207,34 @@ def days_since_prev_major(hourly_index: pd.DatetimeIndex, major_times: np.ndarra
         prev = major_times[major_times < ti]
         if len(prev):
             out[i] = (ti - prev[-1]) / np.timedelta64(1, "D")
+    return out
+
+
+def days_until_next_major(hourly_index: pd.DatetimeIndex, major_times: np.ndarray) -> np.ndarray:
+    """Computes days until the next qualifying event, per hour.
+
+    Symmetric counterpart to `days_since_prev_major`. Used by
+    `cnn_proximity_classify.py` to build a "is this hour close to a
+    qualifying event, looking either direction in time" label -- a regime
+    classification (was there an event nearby) rather than a forecast (will
+    one occur), so looking backward is fair game, not leakage: the label
+    isn't claiming to predict anything unknown at the time.
+
+    Args:
+        hourly_index: Hour-start timestamps, one per sample.
+        major_times: Sorted array of qualifying event times (see
+            `load_aegean_events`).
+
+    Returns:
+        float64 array, same length as `hourly_index`; NaN where no future
+        qualifying event exists (e.g. the last event in the catalog).
+    """
+    t = hourly_index.to_numpy()
+    out = np.full(len(t), np.nan)
+    for i, ti in enumerate(t):
+        nxt = major_times[major_times >= ti]
+        if len(nxt):
+            out[i] = (nxt[0] - ti) / np.timedelta64(1, "D")
     return out
 
 
@@ -211,21 +284,65 @@ def print_split_diagnostics(hourly_index: pd.DatetimeIndex, labels: np.ndarray,
                  "base-rate/persistence floors below (same skew), not against 0.5.")
 
 
-def walk_forward_splits(valid_end_indices: np.ndarray, n_folds: int):
+def walk_forward_splits(valid_end_indices: np.ndarray, n_folds: int, labels: np.ndarray = None,
+                        embargo: int = 0):
     """Expanding-window walk-forward splits, so one arbitrary swarm can only
     dominate a single fold's test set instead of the entire reported result.
 
-    Divides the eligible index range into n_folds+2 contiguous, equal-sized
-    blocks. Fold k trains on blocks 0..k, validates on block k+1, tests on
-    block k+2 -- training data only ever grows forward in time and every
-    fold's test block is strictly later than everything it trained or
-    validated on, so this stays a legitimate past-predicts-future evaluation
-    (unlike shuffling weeks across splits, which would let a model train on
-    data chronologically after some of what it's tested on).
+    Divides the eligible index range into n_folds+2 contiguous blocks. Fold k
+    trains on blocks 0..k, validates on block k+1, tests on block k+2 --
+    training data only ever grows forward in time and every fold's test
+    block is strictly later than everything it trained or validated on, so
+    this stays a legitimate past-predicts-future evaluation (unlike
+    shuffling weeks across splits, which would let a model train on data
+    chronologically after some of what it's tested on).
+
+    Args:
+        valid_end_indices: Eligible window end-indices, chronologically
+            sorted.
+        n_folds: Number of walk-forward folds.
+        labels: Optional per-`valid_end_indices` 0/1 label array (same
+            length and order as `valid_end_indices`, e.g.
+            `label_hours(...)[valid_end_indices]`). When given, block
+            boundaries are placed so each block holds an equal share of
+            total positive-label mass instead of an equal share of hours --
+            plain equal-width blocks let a single sustained swarm fill one
+            block almost entirely (e.g. three consecutive 0.9+ positive-rate
+            blocks landing wholly inside one fold's test split), which is
+            what produced a below-both-floors fold result. When `None`
+            (default) or the label array is entirely one class, falls back
+            to the original equal-width behavior.
+        embargo: Minimum index gap enforced between consecutive blocks (0
+            disables it). A window ending at index `e` covers raw hours
+            `[e-seq_hours+1, e]`, so with no gap the first val/test window
+            right after a block boundary shares up to `seq_hours-1` hours of
+            *input* with the last training window -- the model is scored on
+            a sample whose input nearly duplicates one it trained on
+            directly. Callers should pass `seq_hours - 1` (the exact value
+            that eliminates all window-input overlap across every block
+            boundary, train->val and val->test alike) once they know the
+            sequence length used to build windows from these indices.
     """
     n_blocks = n_folds + 2
-    edges = np.linspace(0, len(valid_end_indices), n_blocks + 1).astype(int)
+    if labels is None:
+        edges = np.linspace(0, len(valid_end_indices), n_blocks + 1).astype(int)
+    else:
+        cum = np.concatenate([[0], np.cumsum(labels)])
+        total = cum[-1]
+        if total == 0:
+            edges = np.linspace(0, len(valid_end_indices), n_blocks + 1).astype(int)
+        else:
+            targets = np.linspace(0, total, n_blocks + 1)
+            edges = np.searchsorted(cum, targets)
+            edges[0], edges[-1] = 0, len(valid_end_indices)
+            edges = np.maximum.accumulate(edges)
     blocks = [valid_end_indices[edges[i]:edges[i + 1]] for i in range(n_blocks)]
+    if embargo > 0:
+        for i in range(1, n_blocks):
+            if len(blocks[i - 1]) == 0:
+                continue
+            cutoff = blocks[i - 1][-1] + embargo
+            blocks[i] = blocks[i][blocks[i] > cutoff]
     return [(np.concatenate(blocks[:k + 1]), blocks[k + 1], blocks[k + 2])
            for k in range(n_folds)]
 
@@ -424,6 +541,8 @@ def train_one_seed(args, seed, feature_cols, features, labels,
             metric = safe_auc(ytr, tr_scores)
         else:
             metric = val_auc
+        print(f"  [seed {seed}] epoch {epoch+1}/{args.epochs} val AUC {val_auc:.4f} val loss {val_loss:.4f}"
+             + (f" train AUC {metric:.4f}" if use_loss_fallback else ""))
         improved = metric > best
         if improved:
             best, no_improve = metric, 0
@@ -560,15 +679,21 @@ def main():
     n = len(hourly)
     valid_end_indices = np.arange(args.seq_hours - 1, n)
 
+    # A window ending at index e covers [e-seq_hours+1, e], so with no gap the
+    # first val/test window right after a split boundary shares up to
+    # seq_hours-1 hours of *input* with the last training window. embargo
+    # removes that overlap (see walk_forward_splits' docstring).
+    embargo = args.seq_hours - 1
+
     if args.cv_folds <= 1:
         n_valid = len(valid_end_indices)
         i_train = int(n_valid * args.train_frac)
         i_val = int(n_valid * (args.train_frac + args.val_frac))
-        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train:i_val],
-                 valid_end_indices[i_val:])]
+        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train + embargo:i_val],
+                 valid_end_indices[i_val + embargo:])]
         fold_labels = ["single split"]
     else:
-        folds = walk_forward_splits(valid_end_indices, args.cv_folds)
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds, embargo=embargo)
         fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
 
     skip = set(args.skip)

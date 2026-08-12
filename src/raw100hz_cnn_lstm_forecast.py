@@ -21,8 +21,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from feature_lstm_forecast import (days_since_prev_major, load_aegean_events,
-                                   walk_forward_splits)
+from feature_lstm_forecast import (days_since_prev_major, label_hours,
+                                   load_aegean_events, walk_forward_splits)
 from model.sequence import SequenceHeadNet
 from raw_cnn_lstm_forecast import (load_hourly_raw, load_hourly_raw_consolidated,
                                    parse_args, run_horizon)
@@ -114,15 +114,31 @@ def main():
     n = len(hour_index)
     valid_end_indices = np.arange(args.seq_hours - 1, n)
 
+    horizons = ([float(h) for h in args.horizons.split(",")] if args.horizons
+               else [args.horizon_days])
+
+    # A window ending at index e covers raw hours [e-seq_hours+1, e], so with no
+    # gap the first val/test window right after a split boundary shares up to
+    # seq_hours-1 hours of *input* with the last training window. embargo removes
+    # that overlap (see walk_forward_splits' docstring).
+    embargo = args.seq_hours - 1
+
     if args.cv_folds <= 1:
         n_valid = len(valid_end_indices)
         i_train = int(n_valid * args.train_frac)
         i_val = int(n_valid * (args.train_frac + args.val_frac))
-        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train:i_val],
-                 valid_end_indices[i_val:])]
+        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train + embargo:i_val],
+                 valid_end_indices[i_val + embargo:])]
         fold_labels = ["single split"]
+    elif args.balanced_folds:
+        ref_labels = label_hours(hour_index, major_times, horizons[0])
+        print(f"  [balanced-folds] placing block boundaries by positive-label mass at "
+             f"horizon={horizons[0]:.0f}d (reused for every horizon in this run)")
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds,
+                                    labels=ref_labels[valid_end_indices], embargo=embargo)
+        fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
     else:
-        folds = walk_forward_splits(valid_end_indices, args.cv_folds)
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds, embargo=embargo)
         fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
 
     skip = set(args.skip)
@@ -133,9 +149,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     seeds = [int(s) for s in args.ensemble_seeds.split(",")]
-
-    horizons = ([float(h) for h in args.horizons.split(",")] if args.horizons
-               else [args.horizon_days])
 
     per_horizon = {}
     for horizon_days in horizons:

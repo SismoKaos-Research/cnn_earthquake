@@ -1,0 +1,123 @@
+================================================================
+Loading hand-crafted continuous features and building hourly labels...
+  17211 hourly feature vectors, 329 M>=4.5 AEGEAN events in the full catalog
+Device: cuda
+
+################################################################
+# horizon = 14 days
+################################################################
+  hourly positive rate: 0.388
+
+================================================================
+fold 1/2
+================================================================
+  splits (chronological): train=4261 val=4094 test=4094
+    train: positive rate 0.199
+    val  : positive rate 0.439
+    test : positive rate 0.741
+
+  positive rate over time (equal-width blocks):
+    2024-05-01 .. 2024-07-11  pos rate 0.432  n=1721  split~train
+    2024-07-11 .. 2024-09-21  pos rate 0.154  n=1721  split~train
+    2024-09-21 .. 2024-12-02  pos rate 0.000  n=1721  split~train
+    2024-12-02 .. 2025-02-11  pos rate 0.486  n=1721  split~val
+    2025-02-11 .. 2025-04-30  pos rate 0.510  n=1721  split~val
+    2025-04-30 .. 2025-07-11  pos rate 0.807  n=1721  split~test
+    2025-07-11 .. 2025-09-21  pos rate 0.774  n=1721  split~test
+    2025-09-21 .. 2026-03-15  pos rate 0.526  n=1721  split~test
+    2026-03-15 .. 2026-05-26  pos rate 0.195  n=1721  split~-
+    2026-05-26 .. 2026-08-10  pos rate 0.000  n=1722  split~-
+
+  [!] test positive rate (0.741) is 3.72x train's (0.199) -- likely a swarm or quiet period concentrated in one split rather than the model generalizing. Compare AUC against the base-rate/persistence floors below (same skew), not against 0.5.
+
+Training 3 seed(s): [42, 43, 44]
+  [seed 42] test AUC 0.4357
+  [seed 43] test AUC 0.4718
+  [seed 44] test AUC 0.5195
+
+--- Floors (test set) ---
+  base-rate (majority)   AUC 0.5000   n=4094
+  persistence             AUC 0.3910   n=4094
+
+--- Hand-feature LSTM ---
+  per-seed AUC: ['0.4357', '0.4718', '0.5195']  mean 0.4757  spread 0.0838
+  ENSEMBLE (mean of 3 seeds' probabilities)   AUC 0.5130   n=4094
+
+  Ensemble beats max(chance, persistence) by +0.0130 AUC.
+
+--- Hand-feature LSTM ensemble (fold 1/2, test set) ---
+  n                    4094
+  accuracy             0.3041
+  balanced_accuracy    0.5218
+  precision            0.8833
+  recall               0.0699
+  f1                   0.1295
+  roc_auc              0.5130
+  pr_auc               0.7667
+  mcc                  0.0812
+  brier                0.6113
+  log_loss             6.0278
+  confusion_matrix:
+    [1033, 28]
+    [2821, 212]
+
+================================================================
+fold 2/2
+================================================================
+  splits (chronological): train=8355 val=4094 test=4094
+    train: positive rate 0.317
+    val  : positive rate 0.741
+    test : positive rate 0.148
+
+  positive rate over time (equal-width blocks):
+    2024-05-01 .. 2024-07-11  pos rate 0.432  n=1721  split~train
+    2024-07-11 .. 2024-09-21  pos rate 0.154  n=1721  split~train
+    2024-09-21 .. 2024-12-02  pos rate 0.000  n=1721  split~train
+    2024-12-02 .. 2025-02-11  pos rate 0.486  n=1721  split~train
+    2025-02-11 .. 2025-04-30  pos rate 0.510  n=1721  split~train
+    2025-04-30 .. 2025-07-11  pos rate 0.807  n=1721  split~val
+    2025-07-11 .. 2025-09-21  pos rate 0.774  n=1721  split~val
+    2025-09-21 .. 2026-03-15  pos rate 0.526  n=1721  split~val
+    2026-03-15 .. 2026-05-26  pos rate 0.195  n=1721  split~test
+    2026-05-26 .. 2026-08-10  pos rate 0.000  n=1722  split~test
+
+  [!] test positive rate (0.148) is 0.47x train's (0.317) -- likely a swarm or quiet period concentrated in one split rather than the model generalizing. Compare AUC against the base-rate/persistence floors below (same skew), not against 0.5.
+
+Training 3 seed(s): [42, 43, 44]
+  [seed 42] test AUC 0.4283
+  [seed 43] test AUC 0.6517
+  [seed 44] test AUC 0.5251
+
+--- Floors (test set) ---
+  base-rate (majority)   AUC 0.5000   n=4094
+  persistence             AUC 0.3700   n=4094
+
+--- Hand-feature LSTM ---
+  per-seed AUC: ['0.4283', '0.6517', '0.5251']  mean 0.5350  spread 0.2235
+  ENSEMBLE (mean of 3 seeds' probabilities)   AUC 0.4766   n=4094
+
+  [!] Ensemble does NOT clear max(chance, persistence) -- not evidence of forecasting skill.
+
+--- Hand-feature LSTM ensemble (fold 2/2, test set) ---
+  n                    4094
+  accuracy             0.7411
+  balanced_accuracy    0.5687
+  precision            0.2314
+  recall               0.3240
+  f1                   0.2700
+  roc_auc              0.4766
+  pr_auc               0.1857
+  mcc                  0.1204
+  brier                0.2059
+  log_loss             0.9643
+  confusion_matrix:
+    [2838, 651]
+    [409, 196]
+
+================================================================
+Walk-forward CV summary (2/2 folds, horizon=14d)
+================================================================
+  ensemble AUC per fold: ['0.5130', '0.4766']
+  ensemble AUC:  mean 0.4948  std 0.0182
+  floor AUC:     mean 0.5000  std 0.0000
+  beats its own fold's floor in 1/2 folds

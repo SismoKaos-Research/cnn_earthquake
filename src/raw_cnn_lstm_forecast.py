@@ -33,8 +33,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from feature_lstm_forecast import (days_since_prev_major, label_hours,
                                    load_aegean_events, print_split_diagnostics,
-                                   safe_auc, walk_forward_splits)
+                                   safe_auc, truncate_to_reliable_catalog_end,
+                                   walk_forward_splits)
 from metrics import binary_report, print_report
+from sklearn.metrics import brier_score_loss
 from model.sequence import SequenceHeadNet
 from training import seed_everything
 
@@ -307,6 +309,23 @@ def parse_args():
                        "Useful once you already know a fold's test block is degenerate "
                        "(single-class -- see the split diagnostics) and don't want to spend "
                        "training time on it again.")
+    p.add_argument("--shift-diagnostic", action="store_true",
+                  help="Print an RBF-kernel MMD^2 + permutation-test significance check "
+                       "between each fold's train and test waveform windows (RMS, kurtosis, "
+                       "low/high-band PSD ratio per channel). Quantifies the same swarm/quiet "
+                       "distribution shift the positive-rate skew warning flags, but from the "
+                       "input waveform's own statistics rather than through the label. Off by "
+                       "default -- adds real per-fold cost (samples + Welch PSD + a permutation "
+                       "test over up to 150 windows/side).")
+    p.add_argument("--balanced-folds", action="store_true",
+                  help="When --cv-folds > 1, place walk-forward block boundaries by equal "
+                       "positive-label mass instead of equal hour count, using the first "
+                       "--horizons value (or --horizon-days) as the reference label set for "
+                       "boundary placement -- other horizons in a --horizons sweep reuse the "
+                       "same boundaries. Fixes a swarm sitting entirely inside one block (e.g. "
+                       "three consecutive 0.9+ positive-rate blocks landing wholly inside one "
+                       "fold's test split) at the cost of blocks no longer being equal-width "
+                       "in wall-clock time.")
     return p.parse_args()
 
 
@@ -405,6 +424,85 @@ def train_one_seed(args, seed, raw, labels, train_idx, val_idx, test_idx, device
     return yt, st
 
 
+def waveform_shift_mmd(raw, idx_a, idx_b, seq_hours, fs, n_sample=150, n_permute=300, rng_seed=0):
+    """Quantifies the distribution shift between two groups of raw-waveform
+    windows via RBF-kernel MMD^2 on simple per-channel engineered features,
+    with a permutation-test significance threshold -- the same swarm/quiet
+    shift `print_split_diagnostics`'s positive-rate skew warning flags, but
+    measured directly on the input waveform's own statistics rather than
+    through the label (so it can't be fooled by a horizon choice that merely
+    changes how the *same* underlying shift gets binarized).
+
+    Per window (pooled across its `seq_hours` hours), computes 3 features per
+    channel -- RMS, excess kurtosis, and log(low-band/high-band Welch PSD
+    power, split at fs/4) -- then estimates MMD^2 between the two groups'
+    (jointly standardized) feature vectors using a median-heuristic RBF
+    kernel, and a null distribution via label permutation (Gretton et al.
+    2012) to judge significance.
+
+    Args:
+        raw: Hourly raw waveform array, shape (n_hours, 3, hour_samples).
+        idx_a: Window end-indices for the first group (e.g. train).
+        idx_b: Window end-indices for the second group (e.g. test).
+        seq_hours: Number of consecutive hours per window.
+        fs: Sample rate in Hz of `raw`'s last axis (5.0 for the decimated
+            archive, 100.0 for the native-rate one).
+        n_sample: Max windows sampled per group -- full-archive feature
+            extraction is expensive, this bounds the cost.
+        n_permute: Number of label permutations for the null distribution.
+        rng_seed: Random seed for sampling and permutation.
+
+    Returns:
+        Dict with "mmd2" (point estimate), "null_95pct" (significance
+        threshold), "significant_shift" (mmd2 > null_95pct), "n_a", "n_b".
+    """
+    from scipy.signal import welch
+    from scipy.stats import kurtosis
+
+    rng = np.random.default_rng(rng_seed)
+
+    def window_features(end):
+        start = end - seq_hours + 1
+        seq = np.asarray(raw[start:end + 1])  # (T, 3, hour_samples)
+        feats = []
+        for c in range(seq.shape[1]):
+            x = seq[:, c, :].reshape(-1).astype(np.float64)
+            feats.append(np.sqrt(np.mean(x ** 2)))
+            feats.append(kurtosis(x, fisher=True, bias=False))
+            f, pxx = welch(x, fs=fs, nperseg=min(4096, len(x)))
+            low, high = pxx[f < fs / 4].sum(), pxx[f >= fs / 4].sum()
+            feats.append(np.log((low + 1e-12) / (high + 1e-12)))
+        return np.array(feats)
+
+    def sample_group(idx):
+        chosen = idx if len(idx) <= n_sample else rng.choice(idx, size=n_sample, replace=False)
+        return np.array([window_features(e) for e in chosen])
+
+    Xa, Xb = sample_group(idx_a), sample_group(idx_b)
+    pooled = np.concatenate([Xa, Xb])
+    mu, sd = pooled.mean(0), pooled.std(0) + 1e-12
+    Xa, Xb, pooled = (Xa - mu) / sd, (Xb - mu) / sd, (pooled - mu) / sd
+
+    def rbf_mmd2(A, B, gamma):
+        Kaa = np.exp(-gamma * ((A[:, None, :] - A[None, :, :]) ** 2).sum(-1))
+        Kbb = np.exp(-gamma * ((B[:, None, :] - B[None, :, :]) ** 2).sum(-1))
+        Kab = np.exp(-gamma * ((A[:, None, :] - B[None, :, :]) ** 2).sum(-1))
+        na, nb = len(A), len(B)
+        return ((Kaa.sum() - np.trace(Kaa)) / (na * (na - 1))
+               + (Kbb.sum() - np.trace(Kbb)) / (nb * (nb - 1)) - 2 * Kab.mean())
+
+    pooled_dists = ((pooled[:, None, :] - pooled[None, :, :]) ** 2).sum(-1)
+    gamma = 1.0 / max(np.median(pooled_dists[pooled_dists > 0]), 1e-12)
+
+    point = rbf_mmd2(Xa, Xb, gamma)
+    na = len(Xa)
+    null = np.array([rbf_mmd2(pooled[p[:na]], pooled[p[na:]], gamma)
+                     for p in (rng.permutation(len(pooled)) for _ in range(n_permute))])
+    null_95 = float(np.percentile(null, 95))
+    return {"mmd2": float(point), "null_95pct": null_95, "significant_shift": point > null_95,
+           "n_a": na, "n_b": len(Xb)}
+
+
 def run_fold(fold_label, args, raw, labels, dsp, hour_index, train_idx, val_idx, test_idx,
             seeds, device, model_cls=None, horizon_days=None):
     """Trains the seed ensemble on one split and reports it.
@@ -443,6 +541,13 @@ def run_fold(fold_label, args, raw, labels, dsp, hour_index, train_idx, val_idx,
             print(f"    {name:5s}: positive rate {labels[idx].mean():.3f}")
     print_split_diagnostics(hour_index, labels, train_idx, val_idx, test_idx)
 
+    if getattr(args, "shift_diagnostic", False) and len(train_idx) and len(test_idx):
+        fs = raw.shape[-1] / 3600.0
+        shift = waveform_shift_mmd(raw, train_idx, test_idx, args.seq_hours, fs)
+        flag = "[!] SIGNIFICANT" if shift["significant_shift"] else "not significant"
+        print(f"  [shift-diagnostic] train vs test waveform MMD^2={shift['mmd2']:.4f} "
+             f"(null 95th pct {shift['null_95pct']:.4f}, n={shift['n_a']}/{shift['n_b']}) -- {flag}")
+
     if len(train_idx) < 10 or len(test_idx) < 5:
         print("[ERROR] Not enough hourly data for a meaningful split.")
         return None
@@ -467,7 +572,9 @@ def run_fold(fold_label, args, raw, labels, dsp, hour_index, train_idx, val_idx,
     pers_dsp = dsp[test_idx]
     pers_pred = np.where(np.isnan(pers_dsp), 0, (pers_dsp <= horizon_days).astype(int)).astype(np.float64)
     pers_auc = safe_auc(yt_ref, pers_pred)
-    print(f"  persistence             AUC {pers_auc:.4f}   n={len(yt_ref)}")
+    single_class = len(np.unique(yt_ref)) < 2
+    pers_brier = float("nan") if single_class else float(brier_score_loss(yt_ref, pers_pred))
+    print(f"  persistence             AUC {pers_auc:.4f}   Brier {pers_brier:.4f}   n={len(yt_ref)}")
 
     print(f"\n--- Raw-waveform CNN-LSTM ---")
     per_seed_aucs = [safe_auc(yt_ref, s) for s in per_seed_scores]
@@ -478,6 +585,15 @@ def run_fold(fold_label, args, raw, labels, dsp, hour_index, train_idx, val_idx,
 
     floor = max(0.5, base_auc, pers_auc)
     report = binary_report(yt_ref, ensemble_score)
+    # Brier Skill Score vs. the persistence floor: how much the model reduces
+    # squared calibration error relative to "predict same as last hour", the
+    # probabilistic-calibration counterpart to the AUC-vs-floor comparison
+    # above (recommended by both the DL-forecasting-evaluation and
+    # ML-pitfalls literature reviewed alongside this fix, over plain AUC
+    # which can look fine while badly miscalibrated).
+    bss = (float("nan") if (single_class or not np.isfinite(pers_brier) or pers_brier == 0)
+          else 1.0 - report["brier"] / pers_brier)
+    report["brier_skill_score_vs_persistence"] = bss
     print_report(f"Raw-waveform CNN-LSTM ensemble ({fold_label}, test set)", report)
     return ensemble_auc, floor, report
 
@@ -554,20 +670,41 @@ def main():
     print(f"  {len(hour_index)} hourly raw vectors {raw.shape}, {len(major_times)} M>={args.threshold} "
          f"AEGEAN events in the full catalog")
 
+    max_horizon = max([float(h) for h in args.horizons.split(",")] if args.horizons
+                      else [args.horizon_days])
+    hour_index, raw = truncate_to_reliable_catalog_end(hour_index, raw, major_times,
+                                                        buffer_days=max_horizon)
+
     dsp = days_since_prev_major(hour_index, major_times)
 
     n = len(hour_index)
     valid_end_indices = np.arange(args.seq_hours - 1, n)
 
+    horizons = ([float(h) for h in args.horizons.split(",")] if args.horizons
+               else [args.horizon_days])
+
+    # A window ending at index e covers raw hours [e-seq_hours+1, e], so with no
+    # gap the first val/test window right after a split boundary shares up to
+    # seq_hours-1 hours of *input* with the last training window. embargo removes
+    # that overlap (see walk_forward_splits' docstring).
+    embargo = args.seq_hours - 1
+
     if args.cv_folds <= 1:
         n_valid = len(valid_end_indices)
         i_train = int(n_valid * args.train_frac)
         i_val = int(n_valid * (args.train_frac + args.val_frac))
-        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train:i_val],
-                 valid_end_indices[i_val:])]
+        folds = [(valid_end_indices[:i_train], valid_end_indices[i_train + embargo:i_val],
+                 valid_end_indices[i_val + embargo:])]
         fold_labels = ["single split"]
+    elif args.balanced_folds:
+        ref_labels = label_hours(hour_index, major_times, horizons[0])
+        print(f"  [balanced-folds] placing block boundaries by positive-label mass at "
+             f"horizon={horizons[0]:.0f}d (reused for every horizon in this run)")
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds,
+                                    labels=ref_labels[valid_end_indices], embargo=embargo)
+        fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
     else:
-        folds = walk_forward_splits(valid_end_indices, args.cv_folds)
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds, embargo=embargo)
         fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
 
     skip = set(args.skip)
@@ -578,9 +715,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     seeds = [int(s) for s in args.ensemble_seeds.split(",")]
-
-    horizons = ([float(h) for h in args.horizons.split(",")] if args.horizons
-               else [args.horizon_days])
 
     per_horizon = {}
     for horizon_days in horizons:
