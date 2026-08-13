@@ -32,10 +32,12 @@ Not imported by anything else -- standalone script.
 import argparse
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import brier_score_loss
+from torch.utils.data import DataLoader
 
 from feature_lstm_forecast import (days_since_prev_major, label_hours,
                                    load_aegean_events, safe_auc,
@@ -43,7 +45,6 @@ from feature_lstm_forecast import (days_since_prev_major, label_hours,
 from metrics import binary_report, print_report
 from raw_cnn_lstm_forecast import (RawCNNLSTM, RawSeqDataset, load_hourly_raw,
                                    load_hourly_raw_consolidated)
-from torch.utils.data import DataLoader
 from training import seed_everything
 
 
@@ -54,6 +55,17 @@ def parse_args():
     p.add_argument("--test-data-root", required=True, help="Different station, used entirely as test.")
     p.add_argument("--catalog-path", required=True)
     p.add_argument("--threshold", type=float, default=4.5)
+    p.add_argument("--stations", nargs="+", default=["BODT", "DAT"], metavar="NAME",
+                  help="Stations whose distance --max-station-dist-km is measured from "
+                       "(nearest one wins). Names index STATION_COORDS. Both stations in a "
+                       "cross-station run should normally be listed, so train and test see "
+                       "the same event set.")
+    p.add_argument("--max-station-dist-km", type=float, default=None,
+                  help="Keep only events within this many km of the nearest --stations "
+                       "entry. Off by default (whole AEGEAN_BBOX). Only 1 M>=4.5 event in "
+                       "the archive window falls within 100 km of BODT against 34 bbox-wide, "
+                       "so most labelled events sit far outside plausible sensing range. "
+                       "150 pairs well with --threshold 3.5 (66 such events near BODT/DAT).")
     p.add_argument("--horizon-days", type=float, default=14.0)
     p.add_argument("--consolidated", action="store_true", default=True)
     p.add_argument("--seq-hours", type=int, default=24)
@@ -66,6 +78,14 @@ def parse_args():
     p.add_argument("--weight-decay", type=float, default=0.1)
     p.add_argument("--patience", type=int, default=8)
     p.add_argument("--ensemble-seeds", type=str, default="42,43,44")
+    p.add_argument("--test-after-train", action="store_true",
+                  help="Restrict the test station to hours strictly AFTER the training "
+                       "window ends (plus embargo). Without it the two stations span the "
+                       "same period and share the same catalog labels, so hour H is in "
+                       "train (station A) and test (station B) with an identical label -- "
+                       "a model can ride shared seasonal/cultural noise structure from "
+                       "noise signature to period to label and appear to transfer with no "
+                       "precursor signal. Costs test hours; pair with a lower --train-frac.")
     p.add_argument("--train-frac", type=float, default=0.85,
                   help="Fraction of the training station's timeline used for training; the "
                        "rest is validation (for early stopping). No test split is carved from "
@@ -164,7 +184,12 @@ def main():
     print(f"Loading test station: {args.test_data_root}")
     hour_index_te, raw_te = load_hourly_raw_consolidated(args.test_data_root)
 
-    major_times = load_aegean_events(args.catalog_path, args.threshold)
+    major_times = load_aegean_events(args.catalog_path, args.threshold,
+                                     stations=args.stations,
+                                     max_dist_km=args.max_station_dist_km)
+    if args.max_station_dist_km:
+        print(f"  [distance cap] events restricted to <= {args.max_station_dist_km:.0f} km "
+             f"from nearest of {args.stations}")
     print(f"  train: {len(hour_index_tr)} hours {raw_tr.shape}; test: {len(hour_index_te)} hours "
          f"{raw_te.shape}; {len(major_times)} M>={args.threshold} AEGEAN events in the full catalog")
 
@@ -178,12 +203,33 @@ def main():
     dsp_te = days_since_prev_major(hour_index_te, major_times)
 
     n_tr, n_te = len(hour_index_tr), len(hour_index_te)
-    embargo = args.seq_hours - 1
+    # The label looks horizon_days forward, so a seq_hours-1 gap alone leaves the last
+    # ~horizon_days of train carrying labels decided by events inside val.
+    embargo = args.seq_hours - 1 + int(round(args.horizon_days * 24))
     valid_tr = np.arange(args.seq_hours - 1, n_tr)
     i_split = int(len(valid_tr) * args.train_frac)
     train_idx = valid_tr[:i_split]
     val_idx = valid_tr[i_split + embargo:]
+
     test_idx = np.arange(args.seq_hours - 1, n_te)  # entire test station
+    if args.test_after_train:
+        # Station split alone controls for site response and instrument character, but
+        # NOT for shared time: both stations span the same window and are labelled from
+        # the same catalog, so hour H appears in training (station A, label L(H)) and in
+        # test (station B, the SAME L(H)). Ambient noise carries strong seasonal and
+        # cultural structure that two stations 44 km apart share, so a model can map
+        # noise signature -> period -> label and "transfer" with no precursor signal at
+        # all. Holding the test station to hours strictly after training ends removes
+        # that path, making this a station AND time holdout.
+        train_end = hour_index_tr[train_idx[-1]]
+        cutoff = train_end + pd.Timedelta(hours=embargo)
+        test_idx = test_idx[hour_index_te[test_idx] > cutoff]
+        print(f"  [test-after-train] test station restricted to hours after {cutoff} "
+             f"(train ends {train_end}, +{embargo}h embargo)")
+        if len(test_idx) < 100:
+            raise SystemExit(f"[ERROR] --test-after-train left only {len(test_idx)} test "
+                             f"windows. Lower --train-frac so the training window ends "
+                             f"earlier, or drop the flag.")
 
     print(f"\n  train (BODT-side): n={len(train_idx)} positive rate {labels_tr[train_idx].mean():.3f}")
     print(f"  val   (BODT-side): n={len(val_idx)} positive rate {labels_tr[val_idx].mean():.3f}")

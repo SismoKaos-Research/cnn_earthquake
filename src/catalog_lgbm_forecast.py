@@ -29,8 +29,9 @@ import numpy as np
 from sklearn.metrics import brier_score_loss
 
 from cnn_lstm_catalog_waveform_fusion import FEATURE_NAMES, build_catalog_features
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, load_aegean_events_with_magnitude,
+from feature_lstm_forecast import (compute_beta_statistic, days_since_prev_major,
+                                   label_hours, label_hours_beta_precursor,
+                                   load_aegean_events, load_aegean_events_with_location,
                                    print_split_diagnostics, safe_auc,
                                    truncate_to_reliable_catalog_end, walk_forward_splits)
 from metrics import binary_report, print_report
@@ -48,9 +49,21 @@ def parse_args():
                   help="Minimum magnitude for the background catalog used in the richer "
                        "b-value/energy/deficit features (separate from --threshold, which "
                        "defines the 'major event' being forecast).")
+    p.add_argument("--keep-features", nargs="+", default=None, choices=FEATURE_NAMES,
+                  metavar="FEATURE", help="Restrict to this subset of features (by name, from "
+                       "FEATURE_NAMES) instead of all 11 -- e.g. an RFE-picked subset. "
+                       "Default: keep all.")
     p.add_argument("--horizon-days", type=float, default=14.0)
     p.add_argument("--max-days", type=int, default=None)
     p.add_argument("--consolidated", action="store_true")
+    p.add_argument("--beta-label", action="store_true",
+                  help="Convertito et al. 2024-style precursor labeling: narrow the standard "
+                       "'M>=threshold within horizon_days' positive class to hours that also "
+                       "show a statistically significant seismicity-rate acceleration "
+                       "(beta-statistic), instead of every hour within the horizon.")
+    p.add_argument("--beta-recent-days", type=float, default=7.0)
+    p.add_argument("--beta-baseline-days", type=float, default=30.0)
+    p.add_argument("--beta-threshold", type=float, default=1.645)
     p.add_argument("--train-frac", type=float, default=0.70)
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--cv-folds", type=int, default=1)
@@ -67,7 +80,7 @@ def parse_args():
 
 
 def run_fold(fold_label, cat_features, labels, dsp, hour_index, train_idx, val_idx, test_idx,
-            args):
+            args, feature_names):
     """Fits one LightGBM model on one split and reports it.
 
     Args:
@@ -140,7 +153,7 @@ def run_fold(fold_label, cat_features, labels, dsp, hour_index, train_idx, val_i
     report["brier_skill_score_vs_persistence"] = bss
     print_report(f"Catalog LightGBM ({fold_label}, test set)", report)
 
-    importances = dict(zip(FEATURE_NAMES, booster.feature_importance(importance_type="gain")))
+    importances = dict(zip(feature_names, booster.feature_importance(importance_type="gain")))
     print(f"  feature importance (gain): {importances}")
     return test_auc, floor, report
 
@@ -155,7 +168,13 @@ def main():
     else:
         hour_index, raw = load_hourly_raw(args.data_root, max_days=args.max_days)
     major_times = load_aegean_events(args.catalog_path, args.threshold)
-    bg_times, bg_mags = load_aegean_events_with_magnitude(args.catalog_path, args.bg_min_mag)
+    bg_times, bg_mags, bg_lats, bg_lons = load_aegean_events_with_location(
+        args.catalog_path, args.bg_min_mag)
+    # See cnn_lstm_catalog_waveform_fusion.py: skip the O(n_bg * NND_LOOKBACK) NND
+    # precompute when no location-derived feature is being kept.
+    if args.keep_features is not None and not any(
+            f in args.keep_features for f in ("nnd_log_eta_90d", "shannon_entropy_90d")):
+        bg_lats = bg_lons = None
     print(f"  {len(hour_index)} hourly timestamps, {len(major_times)} M>={args.threshold} "
          f"AEGEAN events in the full catalog, {len(bg_times)} M>={args.bg_min_mag} background events")
 
@@ -165,21 +184,46 @@ def main():
 
     dsp = days_since_prev_major(hour_index, major_times)
     cat_features = build_catalog_features(hour_index, major_times, dsp, bg_times, bg_mags,
-                                          args.bg_min_mag)
-    labels = label_hours(hour_index, major_times, args.horizon_days)
+                                          args.bg_min_mag, bg_lats, bg_lons)
+    if args.beta_label:
+        beta = compute_beta_statistic(hour_index, bg_times, args.beta_recent_days,
+                                      args.beta_baseline_days)
+        labels = label_hours_beta_precursor(hour_index, major_times, args.horizon_days, beta,
+                                            args.beta_threshold)
+        print(f"  beta-precursor labeling: recent={args.beta_recent_days}d "
+             f"baseline={args.beta_baseline_days}d threshold={args.beta_threshold} "
+             f"-> {(beta > args.beta_threshold).mean():.3f} of hours pass the beta test")
+    else:
+        labels = label_hours(hour_index, major_times, args.horizon_days)
     print(f"  hourly positive rate: {labels.mean():.3f}")
+
+    if args.keep_features is not None:
+        keep_idx = [FEATURE_NAMES.index(f) for f in args.keep_features]
+        cat_features = cat_features[:, keep_idx]
+        feature_names = args.keep_features
+        print(f"  restricting to {len(keep_idx)} feature(s): {feature_names}")
+    else:
+        feature_names = FEATURE_NAMES
 
     n = len(hour_index)
     valid_indices = np.arange(n)
 
+    # --embargo-hours covers autocorrelation between adjacent hourly snapshots; the
+    # label additionally looks horizon_days FORWARD, so without the horizon term the
+    # last ~horizon_days of each block carry labels determined by events in the NEXT
+    # block (train labels encoding val, val labels encoding test). Closing that
+    # overlapping-label leak matters here specifically because this script and
+    # catalog_feature_rfe.py are what rank features -- ranking under the leak would
+    # select features for the wrong objective (Lopez de Prado, AFML Ch. 7).
+    embargo = args.embargo_hours + int(round(args.horizon_days * 24))
     if args.cv_folds <= 1:
         i_train = int(n * args.train_frac)
         i_val = int(n * (args.train_frac + args.val_frac))
-        folds = [(valid_indices[:i_train], valid_indices[i_train + args.embargo_hours:i_val],
-                 valid_indices[i_val + args.embargo_hours:])]
+        folds = [(valid_indices[:i_train], valid_indices[i_train + embargo:i_val],
+                 valid_indices[i_val + embargo:])]
         fold_labels = ["single split"]
     else:
-        folds = walk_forward_splits(valid_indices, args.cv_folds, embargo=args.embargo_hours)
+        folds = walk_forward_splits(valid_indices, args.cv_folds, embargo=embargo)
         fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
 
     skip = set(args.skip)
@@ -192,7 +236,7 @@ def main():
         if k in skip:
             continue
         result = run_fold(fold_label, cat_features, labels, dsp, hour_index,
-                          train_idx, val_idx, test_idx, args)
+                          train_idx, val_idx, test_idx, args, feature_names)
         if result is not None:
             results.append(result)
 

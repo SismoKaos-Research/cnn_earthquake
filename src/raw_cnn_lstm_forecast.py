@@ -175,7 +175,14 @@ class RawSeqDataset(Dataset):
         self.seq_hours = seq_hours
         self.indices = indices
         if stats is None:
-            sub = np.concatenate([raw[max(0, i - seq_hours + 1):i + 1] for i in indices[:50]], axis=0)
+            # Sample windows spread across the whole split rather than its first 50.
+            # The opening hours of an archive are a narrow, unrepresentative slice
+            # (station conditions and seasonal noise drift), and the estimate matters
+            # most exactly where this dataset gets used hardest -- a cross-station run
+            # fits these stats on one station and applies them to another, so a
+            # 50-window estimate is a thin basis for that transfer.
+            stat_idx = indices[np.linspace(0, len(indices) - 1, min(500, len(indices))).astype(int)]
+            sub = np.concatenate([raw[max(0, i - seq_hours + 1):i + 1] for i in stat_idx], axis=0)
             mu = sub.mean(axis=(0, 2), keepdims=True)
             sd = sub.std(axis=(0, 2), keepdims=True) + 1e-6
             stats = (mu[0], sd[0])  # (3,1) each
@@ -269,6 +276,17 @@ def parse_args():
                   help="Sismokaos-featureExtract preprocessed dir (data/<EARTHQUAKE_NAME>).")
     p.add_argument("--catalog-path", required=True)
     p.add_argument("--threshold", type=float, default=4.5)
+    p.add_argument("--stations", nargs="+", default=["BODT", "DAT"], metavar="NAME",
+                  help="Stations whose distance --max-station-dist-km is measured from "
+                       "(nearest one wins). Names index STATION_COORDS.")
+    p.add_argument("--max-station-dist-km", type=float, default=None,
+                  help="Keep only events within this many km of the nearest --stations "
+                       "entry. Off by default (whole AEGEAN_BBOX). Motivation: over the "
+                       "archive window only 1 M>=4.5 event falls within 100 km of BODT "
+                       "against 34 across the bbox, so most labelled events sit 200-400 km "
+                       "from the instruments -- the leading explanation for the waveform "
+                       "branch's failures. 150 is a reasonable starting cap (66 M>=3.5 "
+                       "events within 150 km of BODT/DAT, vs 34 M>=4.5 bbox-wide).")
     p.add_argument("--horizon-days", type=float, default=30.0)
     p.add_argument("--horizons", type=str, default=None,
                   help="Comma-separated horizon-day values (e.g. 7,14,30,60,90) to sweep in "
@@ -666,7 +684,12 @@ def main():
         hour_index, raw = load_hourly_raw_consolidated(args.data_root)
     else:
         hour_index, raw = load_hourly_raw(args.data_root, max_days=args.max_days)
-    major_times = load_aegean_events(args.catalog_path, args.threshold)
+    major_times = load_aegean_events(args.catalog_path, args.threshold,
+                                     stations=args.stations,
+                                     max_dist_km=args.max_station_dist_km)
+    if args.max_station_dist_km:
+        print(f"  [distance cap] events restricted to <= {args.max_station_dist_km:.0f} km "
+             f"from nearest of {args.stations}")
     print(f"  {len(hour_index)} hourly raw vectors {raw.shape}, {len(major_times)} M>={args.threshold} "
          f"AEGEAN events in the full catalog")
 
@@ -687,7 +710,16 @@ def main():
     # gap the first val/test window right after a split boundary shares up to
     # seq_hours-1 hours of *input* with the last training window. embargo removes
     # that overlap (see walk_forward_splits' docstring).
-    embargo = args.seq_hours - 1
+    #
+    # The label additionally looks horizon_days FORWARD, so a seq_hours-1 gap alone
+    # still lets the last ~horizon_days of each block carry labels determined by
+    # events inside the next block (train labels encoding what happens in val, val
+    # labels encoding what happens in test). The horizon term below closes that
+    # overlapping-label leak (Lopez de Prado, Advances in Financial Machine
+    # Learning, Ch. 7). These folds are built once and reused across every horizon
+    # in a --horizons sweep, so size the gap for the LARGEST horizon or the shorter
+    # ones would silently re-open the leak for the longer ones.
+    embargo = args.seq_hours - 1 + int(round(max(horizons) * 24))
 
     if args.cv_folds <= 1:
         n_valid = len(valid_end_indices)

@@ -32,7 +32,7 @@ import numpy as np
 
 from cnn_lstm_catalog_waveform_fusion import CATALOG_DIM, FEATURE_NAMES, build_catalog_features
 from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, load_aegean_events_with_magnitude,
+                                   load_aegean_events, load_aegean_events_with_location,
                                    safe_auc, truncate_to_reliable_catalog_end,
                                    walk_forward_splits)
 from raw_cnn_lstm_forecast import load_hourly_raw, load_hourly_raw_consolidated
@@ -140,7 +140,8 @@ def main():
     else:
         hour_index, raw = load_hourly_raw(args.data_root, max_days=args.max_days)
     major_times = load_aegean_events(args.catalog_path, args.threshold)
-    bg_times, bg_mags = load_aegean_events_with_magnitude(args.catalog_path, args.bg_min_mag)
+    bg_times, bg_mags, bg_lats, bg_lons = load_aegean_events_with_location(
+        args.catalog_path, args.bg_min_mag)
     print(f"  {len(hour_index)} hourly timestamps, {len(major_times)} M>={args.threshold} "
          f"AEGEAN events, {len(bg_times)} M>={args.bg_min_mag} background events")
 
@@ -150,12 +151,18 @@ def main():
 
     dsp = days_since_prev_major(hour_index, major_times)
     cat_features = build_catalog_features(hour_index, major_times, dsp, bg_times, bg_mags,
-                                          args.bg_min_mag)
+                                          args.bg_min_mag, bg_lats, bg_lons)
     labels = label_hours(hour_index, major_times, args.horizon_days)
     print(f"  hourly positive rate: {labels.mean():.3f}\n")
 
     n = len(hour_index)
-    folds = walk_forward_splits(np.arange(n), args.cv_folds, embargo=args.embargo_hours)
+    # See catalog_lgbm_forecast.py: --embargo-hours alone leaves the label's
+    # horizon_days forward window straddling block boundaries, so train labels encode
+    # what happens in val and val labels encode what happens in test. RFE is the most
+    # leak-sensitive tool here -- it picks which features survive, so ranking under a
+    # leak selects for the wrong objective.
+    embargo = args.embargo_hours + int(round(args.horizon_days * 24))
+    folds = walk_forward_splits(np.arange(n), args.cv_folds, embargo=embargo)
 
     remaining = list(range(CATALOG_DIM))
     history = []

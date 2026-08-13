@@ -50,9 +50,10 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, load_aegean_events_with_magnitude,
-                                   print_split_diagnostics, safe_auc,
+from feature_lstm_forecast import (count_events_in_window, days_since_prev_major,
+                                   label_hours, label_hours_rate_change, load_aegean_events,
+                                   load_aegean_events_with_location, print_split_diagnostics,
+                                   rate_persistence_auc, safe_auc,
                                    truncate_to_reliable_catalog_end, walk_forward_splits)
 from metrics import binary_report, print_report
 from model.blocks import LSTMAttentionBranch
@@ -64,16 +65,118 @@ from training import seed_everything
 # same set label_hours/persistence use), mean_mag_30d, max_mag_90d, b_value_90d,
 # energy_sqrt_30d, mean_interevent_90d, cv_interevent_90d, magnitude_deficit_90d
 # (all from a lower-completeness-threshold "background" catalog -- more data points
-# than the rare M>=threshold events alone give for magnitude-distribution features).
-CATALOG_DIM = 11
+# than the rare M>=threshold events alone give for magnitude-distribution features),
+# nnd_log_eta_90d, shannon_entropy_90d (Zaliapin-Ben-Zion nearest-neighbour distance
+# and spatial Shannon entropy, per Convertito et al. 2024, Sci. Rep. 14:2964 -- the
+# same paper's coefficient-of-variation feature independently matches our
+# cv_interevent_90d, which RFE already found to be the strongest of the original 11).
+CATALOG_DIM = 13
 LN10 = np.log(10.0)
 FEATURE_NAMES = ["log1p_dsp", "count_7d", "count_30d", "count_90d", "mean_mag_30d",
                  "max_mag_90d", "b_value_90d", "energy_sqrt_30d", "mean_interevent_90d",
-                 "cv_interevent_90d", "mag_deficit_90d"]
+                 "cv_interevent_90d", "mag_deficit_90d", "nnd_log_eta_90d",
+                 "shannon_entropy_90d"]
+
+NND_FRACTAL_DIM = 1.6  # standard Zaliapin-Ben-Zion literature default
+NND_LOOKBACK = 500  # bound the O(n*lookback) nearest-neighbour search for tractability
+ENTROPY_GRID_SIZE = 10  # 10x10 spatial cells over AEGEAN_BBOX for Shannon entropy
+
+# Trailing-rate features, for --label-mode rate. None of the features above encode
+# the trailing count of the LOW-magnitude events that define the rate target:
+# count_7d/30d/90d count M>=threshold (4.5) events, not M>=rate_min_mag (3.0) ones.
+# That left the model trying to beat a persistence floor built from exactly the
+# number it was never given -- it lost fold 1 0.6573 vs 0.7991 while scoring a
+# POSITIVE Brier skill (+0.129), i.e. learning something real but unable to rank
+# without the rate signal. The ratio features are the acceleration term itself
+# (short-window rate over long-window rate), which is what the label asks about.
+RATE_WINDOWS = (3, 7, 14, 30, 90)
+RATE_RATIO_PAIRS = ((3, 14), (7, 30), (14, 90))
+RATE_FEATURE_NAMES = ([f"rate_log1p_count_{w}d" for w in RATE_WINDOWS]
+                      + [f"rate_logratio_{a}_{b}" for a, b in RATE_RATIO_PAIRS])
+ALL_FEATURE_NAMES = FEATURE_NAMES + RATE_FEATURE_NAMES
+
+
+def build_rate_features(hour_index, rate_times) -> np.ndarray:
+    """Backward-looking trailing-rate features for the rate-change target.
+
+    Args:
+        hour_index: DatetimeIndex of hour starts.
+        rate_times: Sorted array of the event times defining the rate (the
+            M>=rate_min_mag set that `label_hours_rate_change` uses).
+
+    Returns:
+        float32 array, shape (n_hours, len(RATE_FEATURE_NAMES)). Counts are
+        log1p'd (raw counts are heavy-tailed -- median 9, max 297 at 14d) and
+        ratios are log'd so acceleration and deceleration are symmetric around 0.
+    """
+    counts = {w: count_events_in_window(hour_index, rate_times, w, forward=False)
+             for w in RATE_WINDOWS}
+    cols = [np.log1p(counts[w].astype(np.float64)) for w in RATE_WINDOWS]
+    for a, b in RATE_RATIO_PAIRS:
+        # per-day rates, so the ratio is a clean acceleration factor rather than a
+        # window-length artifact; eps keeps quiet stretches (0 events) finite.
+        rate_a = counts[a] / float(a)
+        rate_b = counts[b] / float(b)
+        cols.append(np.log((rate_a + 1e-3) / (rate_b + 1e-3)))
+    return np.stack(cols, axis=1).astype(np.float32)
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Vectorized great-circle distance in km."""
+    r = 6371.0
+    lat1, lon1, lat2, lon2 = map(np.radians, (lat1, lon1, lat2, lon2))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    return 2 * r * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+
+
+def _nearest_neighbor_log_eta(times, mags, lats, lons, b_value=1.0,
+                              df=NND_FRACTAL_DIM, lookback=NND_LOOKBACK):
+    """Per-event Zaliapin-Ben-Zion nearest-neighbour distance, log10(eta).
+
+    eta_ij = T_ij * R_ij, rescaled time x rescaled distance to the closest
+    preceding candidate "parent" event i:
+        T_ij = (t_j - t_i) * 10^(-0.5 b m_i)
+        R_ij = (haversine_km(i, j))^df * 10^(-0.5 b m_i)
+    Small eta = temporally/spatially close to a prior event relative to its
+    magnitude -- the signature of a triggered (foreshock/aftershock-like)
+    event; large eta = an independent "background" event. Bounded to the
+    `lookback` most recent candidate parents per event (full O(n^2) is
+    intractable at ~17k events) -- true nearest neighbors are overwhelmingly
+    recent for local clustering, so this is a tractable approximation, not
+    the exact full-catalog nearest neighbor.
+
+    Args:
+        times: Sorted event times (datetime64).
+        mags: Matching magnitudes.
+        lats: Matching latitudes.
+        lons: Matching longitudes.
+        b_value: Gutenberg-Richter b-value for the rescaling.
+        df: Fractal dimension of the epicenter distribution.
+        lookback: Max number of preceding events considered as candidate parents.
+
+    Returns:
+        float64 array, length len(times); NaN for the first event (no candidates).
+    """
+    n = len(times)
+    log_eta = np.full(n, np.nan, dtype=np.float64)
+    if n < 2:
+        return log_eta
+    t_days = (times - times[0]) / np.timedelta64(1, "D")
+    for j in range(1, n):
+        lo = max(0, j - lookback)
+        dt = t_days[j] - t_days[lo:j]
+        dist_km = _haversine_km(lats[lo:j], lons[lo:j], lats[j], lons[j])
+        scale = 10.0 ** (-0.5 * b_value * mags[lo:j])
+        eta = dt * scale * (np.maximum(dist_km, 1e-6) ** df) * scale
+        eta = eta[eta > 0]
+        if len(eta):
+            log_eta[j] = np.log10(eta.min())
+    return log_eta
 
 
 def build_catalog_features(hour_index, major_times, dsp, bg_times=None, bg_mags=None,
-                           bg_min_mag=3.0) -> np.ndarray:
+                           bg_min_mag=3.0, bg_lats=None, bg_lons=None) -> np.ndarray:
     """Per-hour backward-looking catalog features -- no leakage.
 
     Timing features (0-3) come from `major_times` (the M>=threshold set
@@ -86,6 +189,9 @@ def build_catalog_features(hour_index, major_times, dsp, bg_times=None, bg_mags=
     of variation of inter-event times. `bg_times`/`bg_mags` default to
     `major_times` (with an all-zero-ish magnitude array) if not given, which
     degrades gracefully to just the 4 original timing features plus zeros.
+
+    Features 11-12 (nearest-neighbour log-eta, spatial Shannon entropy) need
+    `bg_lats`/`bg_lons`; without them they default to 0.0 for every hour.
 
     Args:
         hour_index: DatetimeIndex of hour starts.
@@ -100,6 +206,9 @@ def build_catalog_features(hour_index, major_times, dsp, bg_times=None, bg_mags=
         bg_min_mag: Completeness threshold of the background catalog --
             the Gutenberg-Richter reference magnitude for the b-value and
             magnitude-deficit calculations.
+        bg_lats: Matching latitudes for `bg_times`, same order (see
+            `load_aegean_events_with_location`). Optional.
+        bg_lons: Matching longitudes for `bg_times`, same order. Optional.
 
     Returns:
         float32 array, shape (n_hours, CATALOG_DIM).
@@ -108,6 +217,14 @@ def build_catalog_features(hour_index, major_times, dsp, bg_times=None, bg_mags=
         bg_times = major_times
     if bg_mags is None:
         bg_mags = np.full(len(bg_times), bg_min_mag, dtype=np.float64)
+
+    have_location = bg_lats is not None and bg_lons is not None
+    if have_location:
+        mean_excess_global = max(bg_mags.mean() - bg_min_mag, 1e-3)
+        b_value_global = (1.0 / LN10) / mean_excess_global
+        nnd_log_eta = _nearest_neighbor_log_eta(bg_times, bg_mags, bg_lats, bg_lons,
+                                                b_value=b_value_global)
+        lat0, lat1, lon0, lon1 = 36.0, 40.0, 25.0, 30.0  # AEGEAN_BBOX
 
     t = hour_index.to_numpy()
     feat = np.zeros((len(t), CATALOG_DIM), dtype=np.float32)
@@ -149,6 +266,25 @@ def build_catalog_features(hour_index, major_times, dsp, bg_times=None, bg_mags=
         # a proxy for "overdue" stress release.
         expected_max = bg_min_mag + (np.log10(max(n90, 1)) / max(b_value, 1e-3))
         feat[i, 10] = expected_max - feat[i, 5]
+
+        if have_location:
+            eta_90 = nnd_log_eta[mask_90]
+            eta_90 = eta_90[~np.isnan(eta_90)]
+            feat[i, 11] = eta_90.mean() if len(eta_90) else 0.0
+
+            if n90 >= 2:
+                lats_90, lons_90 = bg_lats[mask_90], bg_lons[mask_90]
+                energies = 10.0 ** (1.5 * mags_90)
+                lat_bin = np.clip(((lats_90 - lat0) / (lat1 - lat0) * ENTROPY_GRID_SIZE)
+                                  .astype(int), 0, ENTROPY_GRID_SIZE - 1)
+                lon_bin = np.clip(((lons_90 - lon0) / (lon1 - lon0) * ENTROPY_GRID_SIZE)
+                                  .astype(int), 0, ENTROPY_GRID_SIZE - 1)
+                cell_id = lat_bin * ENTROPY_GRID_SIZE + lon_bin
+                cell_energy = np.bincount(cell_id, weights=energies,
+                                          minlength=ENTROPY_GRID_SIZE ** 2)
+                total = cell_energy.sum()
+                p = cell_energy[cell_energy > 0] / total if total > 0 else np.array([])
+                feat[i, 12] = float(-np.sum(p * np.log(p))) if len(p) else 0.0
     return feat
 
 
@@ -176,10 +312,18 @@ class FusionSeqDataset(Dataset):
         self.seq_hours = seq_hours
         self.indices = indices
         if stats is None:
-            wsub = np.concatenate([raw[max(0, i - seq_hours + 1):i + 1] for i in indices[:50]], axis=0)
+            # Sample windows spread across the WHOLE training split, not the first 50.
+            # The archive's opening hours are unrepresentative for any trailing-window
+            # feature, whose lookback is still filling up there: measured on the rate
+            # features, sd over the first 50 windows understated the true training sd by
+            # up to 52x (rate_log1p_count_90d: 0.0157 vs 0.827), so dividing by it
+            # produced z-scores up to 156 and saturated the GELU MLP -- val AUC fell from
+            # epoch 1 and the "best" checkpoint was the untrained one.
+            stat_idx = indices[np.linspace(0, len(indices) - 1, min(500, len(indices))).astype(int)]
+            wsub = np.concatenate([raw[max(0, i - seq_hours + 1):i + 1] for i in stat_idx], axis=0)
             wave_mu = wsub.mean(axis=(0, 2), keepdims=True)[0]
             wave_sd = wsub.std(axis=(0, 2), keepdims=True)[0] + 1e-6
-            csub = np.concatenate([cat_features[max(0, i - seq_hours + 1):i + 1] for i in indices[:50]], axis=0)
+            csub = np.concatenate([cat_features[max(0, i - seq_hours + 1):i + 1] for i in stat_idx], axis=0)
             cat_mu = csub.mean(axis=0, keepdims=True)
             cat_sd = csub.std(axis=0, keepdims=True) + 1e-6
             stats = (wave_mu, wave_sd, cat_mu, cat_sd)
@@ -323,10 +467,31 @@ def parse_args():
     p.add_argument("--horizon-days", type=float, default=14.0)
     p.add_argument("--max-days", type=int, default=None)
     p.add_argument("--consolidated", action="store_true")
-    p.add_argument("--keep-features", nargs="+", default=None, choices=FEATURE_NAMES,
-                  metavar="FEATURE", help="Restrict the catalog branch to this subset of "
-                       "features (by name, from FEATURE_NAMES) instead of all 11 -- e.g. an "
-                       "RFE-picked subset. Default: keep all.")
+    p.add_argument("--label-mode", choices=["event", "rate"], default="event",
+                  help="'event' (default): does an M>=--threshold event occur within "
+                       "--horizon-days. Its positive class is driven by very few distinct "
+                       "events (4 in fold 1 at M>=4.5), so the effective sample size is far "
+                       "below the hour count. 'rate' (variant B): will the next "
+                       "--horizon-days contain MORE M>=--rate-min-mag events than the "
+                       "trailing window -- a rate/acceleration forecast in the ETAS/CSEP "
+                       "tradition, driven by ~10^3 events instead of ~10^1.")
+    p.add_argument("--rate-min-mag", type=float, default=3.0,
+                  help="Magnitude threshold defining the rate in --label-mode rate. Distinct "
+                       "from --threshold (rare-event label) and --bg-min-mag (features).")
+    p.add_argument("--rate-baseline-days", type=float, default=None,
+                  help="Trailing comparison window for --label-mode rate. Default: equal to "
+                       "--horizon-days, so the comparison is like-for-like.")
+    p.add_argument("--keep-features", nargs="+", default=None, metavar="FEATURE",
+                  help="Restrict the catalog branch to this subset of features, by name from "
+                       "FEATURE_NAMES (or ALL_FEATURE_NAMES when --rate-features is on) "
+                       "instead of all of them -- e.g. an RFE-picked subset. Default: keep all.")
+    p.add_argument("--rate-features", action="store_true",
+                  help="Append trailing-rate count/ratio features over the M>=--rate-min-mag "
+                       "catalog (windows 3/7/14/30/90d plus short-over-long ratios). Without "
+                       "these the model has no trailing-rate signal at all -- the counts in "
+                       "FEATURE_NAMES track M>=--threshold events -- so in --label-mode rate "
+                       "it is trying to beat a persistence floor built from a number it was "
+                       "never given.")
     p.add_argument("--channels", default="all", choices=["all", "catalog", "waveform"])
     p.add_argument("--seq-hours", type=int, default=24)
     p.add_argument("--cnn-out", type=int, default=32)
@@ -345,10 +510,23 @@ def parse_args():
                        "gentler steps than the fused model does).")
     p.add_argument("--weight-decay", type=float, default=0.1)
     p.add_argument("--patience", type=int, default=8)
+    p.add_argument("--checkpoint-metric", choices=["auc", "loss"], default="auc",
+                  help="Metric used to pick the best epoch's weights. Val AUC swings hard "
+                       "epoch-to-epoch on the catalog branch (thin val positive class, ~335 "
+                       "positives) while val loss stays comparatively smooth -- try 'loss' "
+                       "there if AUC-based selection looks noisy.")
     p.add_argument("--ensemble-seeds", type=str, default="42,43,44")
     p.add_argument("--train-frac", type=float, default=0.70)
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--cv-folds", type=int, default=1)
+    p.add_argument("--balanced-folds", action="store_true",
+                  help="With --cv-folds > 1, place walk-forward block boundaries by equal "
+                       "positive-label mass instead of equal hour count, so a single "
+                       "sustained swarm cannot fill one block almost entirely. Boundaries "
+                       "come from the label series alone, before training, and apply to "
+                       "every fold -- distinct from selecting whichever fold scores best, "
+                       "which would be test-set selection. Blocks stop being equal-width "
+                       "in wall-clock time as a result.")
     p.add_argument("--skip", type=int, nargs="+", default=[], metavar="FOLD")
     return p.parse_args()
 
@@ -402,7 +580,7 @@ def train_one_seed(args, seed, raw, cat_features, labels, train_idx, val_idx, te
                 ys.extend(y.cpu().tolist())
         return np.array(ys, dtype=np.int64), np.array(ss), sum(losses) / max(len(ys), 1)
 
-    best = -1.0
+    best = float("inf") if args.checkpoint_metric == "loss" else -1.0
     no_improve, best_state = 0, None
     for epoch in range(args.epochs):
         model.train()
@@ -417,9 +595,10 @@ def train_one_seed(args, seed, raw, cat_features, labels, train_idx, val_idx, te
         yv, sv, val_loss = evaluate(val_loader)
         val_auc = safe_auc(yv, sv)
         print(f"  [seed {seed}] epoch {epoch+1}/{args.epochs} val AUC {val_auc:.4f} val loss {val_loss:.4f}")
-        improved = val_auc > best
+        metric = val_loss if args.checkpoint_metric == "loss" else val_auc
+        improved = metric < best if args.checkpoint_metric == "loss" else metric > best
         if improved:
-            best, no_improve = val_auc, 0
+            best, no_improve = metric, 0
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
         else:
             no_improve += 1
@@ -434,7 +613,7 @@ def train_one_seed(args, seed, raw, cat_features, labels, train_idx, val_idx, te
 
 
 def run_fold(fold_label, args, raw, cat_features, labels, dsp, hour_index, train_idx, val_idx, test_idx,
-            seeds, device):
+            seeds, device, rate_trailing=None):
     """Trains the seed ensemble on one split and reports it.
 
     Args:
@@ -443,11 +622,16 @@ def run_fold(fold_label, args, raw, cat_features, labels, dsp, hour_index, train
         raw: Hourly raw waveform array.
         cat_features: Per-hour catalog feature array.
         labels: Per-hour binary labels.
-        dsp: Days-since-previous-major-event array, for the persistence floor.
+        dsp: Days-since-previous-major-event array, for the persistence floor
+            in `--label-mode event`. Ignored when `rate_trailing` is given.
         hour_index: DatetimeIndex of hour starts, for split diagnostics.
         train_idx: Window end-indices for the training split.
         val_idx: Window end-indices for the validation split.
         test_idx: Window end-indices for the test split.
+        rate_trailing: Trailing-window event counts from
+            `label_hours_rate_change`, present only in `--label-mode rate`.
+            When given, the persistence floor is computed from the trailing
+            rate instead of days-since-previous-event.
         seeds: List of random seeds to train and ensemble.
         device: torch device to train on.
 
@@ -482,10 +666,23 @@ def run_fold(fold_label, args, raw, cat_features, labels, dsp, hour_index, train
     base_pred = np.full_like(yt_ref, int(round(pos_tr)), dtype=np.float64)
     base_auc = safe_auc(yt_ref, base_pred)
     print(f"  base-rate (majority)   AUC {base_auc:.4f}   n={len(yt_ref)}")
-    pers_dsp = dsp[test_idx]
-    pers_pred = np.where(np.isnan(pers_dsp), 0, (pers_dsp <= args.horizon_days).astype(int)).astype(np.float64)
-    pers_auc = safe_auc(yt_ref, pers_pred)
     single_class = len(np.unique(yt_ref)) < 2
+    if rate_trailing is not None:
+        # Rate-change target: the trailing event count is the natural backward-looking
+        # predictor, but it is ANTI-correlated with a rate-INCREASE label (Omori decay
+        # -- busy now implies calmer next), so the achievable baseline is max(auc,
+        # 1-auc), not auc. Predicting "increase iff currently quieter than the training
+        # median" is the corresponding hard rule, used for the Brier term.
+        pers_auc = rate_persistence_auc(yt_ref, rate_trailing[test_idx])
+        thresh = np.median(rate_trailing[train_idx])
+        pers_pred = (rate_trailing[test_idx] < thresh).astype(np.float64)
+        if safe_auc(yt_ref, rate_trailing[test_idx].astype(np.float64)) > 0.5:
+            pers_pred = 1.0 - pers_pred  # trailing rate positively correlated here
+    else:
+        pers_dsp = dsp[test_idx]
+        pers_pred = np.where(np.isnan(pers_dsp), 0,
+                             (pers_dsp <= args.horizon_days).astype(int)).astype(np.float64)
+        pers_auc = safe_auc(yt_ref, pers_pred)
     pers_brier = float("nan") if single_class else float(brier_score_loss(yt_ref, pers_pred))
     print(f"  persistence             AUC {pers_auc:.4f}   Brier {pers_brier:.4f}   n={len(yt_ref)}")
 
@@ -520,7 +717,15 @@ def main():
     else:
         hour_index, raw = load_hourly_raw(args.data_root, max_days=args.max_days)
     major_times = load_aegean_events(args.catalog_path, args.threshold)
-    bg_times, bg_mags = load_aegean_events_with_magnitude(args.catalog_path, args.bg_min_mag)
+    bg_times, bg_mags, bg_lats, bg_lons = load_aegean_events_with_location(
+        args.catalog_path, args.bg_min_mag)
+    # The NND precompute inside build_catalog_features is O(n_bg * NND_LOOKBACK)
+    # haversine in a Python loop and fires whenever coordinates are supplied. Skip it
+    # when this run's feature subset doesn't include a location-derived feature --
+    # otherwise a 2-feature run pays the full cost for columns it then discards.
+    if args.keep_features is not None and not any(
+            f in args.keep_features for f in ("nnd_log_eta_90d", "shannon_entropy_90d")):
+        bg_lats = bg_lons = None
     print(f"  {len(hour_index)} hourly raw vectors {raw.shape}, {len(major_times)} M>={args.threshold} "
          f"AEGEAN events in the full catalog, {len(bg_times)} M>={args.bg_min_mag} background events")
 
@@ -529,17 +734,56 @@ def main():
 
     dsp = days_since_prev_major(hour_index, major_times)
     cat_features = build_catalog_features(hour_index, major_times, dsp, bg_times, bg_mags,
-                                          args.bg_min_mag)
+                                          args.bg_min_mag, bg_lats, bg_lons)
+
+    # Rate features must be appended BEFORE --keep-features subsets, so the flag can
+    # select them by name alongside the originals.
+    rate_times = None
+    active_names = FEATURE_NAMES
+    if args.label_mode == "rate" or args.rate_features:
+        rate_times, _, _, _ = load_aegean_events_with_location(args.catalog_path,
+                                                               args.rate_min_mag)
+    if args.rate_features:
+        cat_features = np.hstack([cat_features, build_rate_features(hour_index, rate_times)])
+        active_names = ALL_FEATURE_NAMES
+        print(f"  + {len(RATE_FEATURE_NAMES)} trailing-rate features "
+             f"(M>={args.rate_min_mag}, windows {RATE_WINDOWS}d)")
+
     if args.keep_features is not None:
-        keep_idx = [FEATURE_NAMES.index(f) for f in args.keep_features]
+        unknown = [f for f in args.keep_features if f not in active_names]
+        if unknown:
+            raise SystemExit(f"[ERROR] --keep-features got {unknown}, which are rate features; "
+                             f"pass --rate-features to enable them.")
+        keep_idx = [active_names.index(f) for f in args.keep_features]
         cat_features = cat_features[:, keep_idx]
         print(f"  restricting catalog branch to {len(keep_idx)} feature(s): {args.keep_features}")
-    labels = label_hours(hour_index, major_times, args.horizon_days)
+
+    rate_trailing = None
+    if args.label_mode == "rate":
+        labels, fwd_counts, rate_trailing = label_hours_rate_change(
+            hour_index, rate_times, args.horizon_days, args.rate_baseline_days)
+        base = args.rate_baseline_days or args.horizon_days
+        print(f"  [label-mode=rate] target: more M>={args.rate_min_mag} events in the next "
+             f"{args.horizon_days:.0f}d than in the trailing {base:.0f}d")
+        print(f"    {len(rate_times)} M>={args.rate_min_mag} events define the rate; forward "
+             f"counts: median {int(np.median(fwd_counts))} mean {fwd_counts.mean():.1f} "
+             f"max {fwd_counts.max()}")
+        print(f"    trailing-rate persistence floor (Omori-inverted): "
+             f"{rate_persistence_auc(labels, rate_trailing):.4f} -- this, not 0.5, is the bar")
+    else:
+        labels = label_hours(hour_index, major_times, args.horizon_days)
     print(f"  hourly positive rate: {labels.mean():.3f}")
 
     n = len(hour_index)
     valid_end_indices = np.arange(args.seq_hours - 1, n)
-    embargo = args.seq_hours - 1
+    # seq_hours-1 removes *input*-window overlap across a block boundary; the label
+    # additionally looks horizon_days forward, so without the extra horizon term the
+    # last ~horizon_days of each block carry labels determined by events inside the
+    # NEXT block -- i.e. train labels encoding what happens in val, and val labels
+    # encoding what happens in test (~9% of samples at horizon=14d, seq=24h). That's
+    # the overlapping-label leakage that purging/embargo exists to prevent
+    # (Lopez de Prado, Advances in Financial Machine Learning, Ch. 7).
+    embargo = args.seq_hours - 1 + int(round(args.horizon_days * 24))
 
     if args.cv_folds <= 1:
         n_valid = len(valid_end_indices)
@@ -548,6 +792,30 @@ def main():
         folds = [(valid_end_indices[:i_train], valid_end_indices[i_train + embargo:i_val],
                  valid_end_indices[i_val + embargo:])]
         fold_labels = ["single split"]
+    elif args.balanced_folds:
+        # Place block boundaries by equal positive-label MASS rather than equal hour
+        # count, so one sustained swarm can't fill a block almost entirely. Decided
+        # from the label series before any model runs and applied uniformly to every
+        # fold -- this is not the same as picking whichever fold scores best, which
+        # would be test-set selection.
+        print("  [balanced-folds] block boundaries placed by positive-label mass, "
+             "not equal hour count")
+        folds = walk_forward_splits(valid_end_indices, args.cv_folds,
+                                    labels=labels[valid_end_indices], embargo=embargo)
+        fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
+        # Equal positive-MASS boundaries degenerate when the positive class is rare and
+        # clustered: the blocks holding the clusters come out nearly all-positive. At
+        # --label-mode event this produced a 0.999-positive test block (AUC there is
+        # meaningless). Measured, not hypothetical -- so fail loudly rather than
+        # reporting a number computed on a single-class split.
+        for k, (_, va, te) in enumerate(folds, 1):
+            for split_name, idx in (("val", va), ("test", te)):
+                if len(idx) and not 0.02 <= labels[idx].mean() <= 0.98:
+                    print(f"  [!] --balanced-folds made fold {k}'s {split_name} block "
+                         f"{labels[idx].mean():.3f}-positive -- near-degenerate, so its AUC "
+                         f"would be uninformative. Re-run without --balanced-folds (this "
+                         f"flag suits balanced targets like --label-mode rate, not rare "
+                         f"clustered ones).")
     else:
         folds = walk_forward_splits(valid_end_indices, args.cv_folds, embargo=embargo)
         fold_labels = [f"fold {k + 1}/{args.cv_folds}" for k in range(args.cv_folds)]
@@ -566,7 +834,8 @@ def main():
         if k in skip:
             continue
         result = run_fold(fold_label, args, raw, cat_features, labels, dsp, hour_index,
-                          train_idx, val_idx, test_idx, seeds, device)
+                          train_idx, val_idx, test_idx, seeds, device,
+                          rate_trailing=rate_trailing)
         if result is not None:
             results.append(result)
 
