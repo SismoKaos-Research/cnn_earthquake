@@ -59,6 +59,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
+from metrics import predict_mean_baseline, print_report, regression_report
 from model.dual_channel import DualChannelNet
 from cnn_regression import AUX_COLUMNS, detect_aux_columns, regression_metrics, report_baselines
 from training import seed_everything
@@ -392,8 +393,8 @@ def main():
 
         yv, pv = evaluate(val_loader)
         vm = regression_metrics(yv, pv)
-        print(f"Epoch {epoch+1}/{args.epochs} | train {running/len(train_ds):.4f} "
-             f"| val MAE {vm['MAE']:.4f}  RMSE {vm['RMSE']:.4f}  R2 {vm['R2']:+.4f}")
+        print(f"  [seed {args.seed}] epoch {epoch+1}/{args.epochs} val MAE {vm['MAE']:.4f} "
+             f"train loss {running/len(train_ds):.4f} RMSE {vm['RMSE']:.4f} R2 {vm['R2']:+.4f}")
         if vm["MAE"] < best_val_mae:
             best_val_mae, no_improve = vm["MAE"], 0
             torch.save(model.state_dict(), save_path)
@@ -409,15 +410,32 @@ def main():
     tm = regression_metrics(yt, yp)
 
     ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
-    print(f"\n--- Dual-channel model (channels='{args.channels}') ---")
-    print(f"  MAE {tm['MAE']:.3f}  RMSE {tm['RMSE']:.3f}  R2 {tm['R2']:+.3f}  "
-         f"median-AE {tm['median_AE']:.3f}  max-error {tm['max_error']:.3f}")
+
+    # Two floors, in increasing order of difficulty. The constant-mean floor only
+    # shows the target has variance; the ridge-on-(amplitude, distance) floor is the
+    # physics formula local magnitude is actually built from, and is the one that
+    # matters -- beating a constant proves nothing about seismology.
+    print("\n--- Floors (test set) ---")
+    y_tr = np.asarray([train_ds[i][2] for i in range(len(train_ds))], dtype=np.float64) \
+        if not hasattr(train_ds, "targets") else np.asarray(train_ds.targets, dtype=np.float64)
+    mean_floor = predict_mean_baseline(y_tr, yt)
+    print(f"  constant-mean            MAE {mean_floor['MAE']:.4f}  RMSE {mean_floor['RMSE']:.4f}  "
+          f"R2 {mean_floor['R2']:+.4f}")
+    if ridge_mae is not None:
+        print(f"  ridge(amplitude,distance) MAE {ridge_mae:.4f}   <- the physics floor")
+
+    print_report(f"Magnitude regressor [channels={args.channels}] (seed {args.seed}, test set)",
+                 regression_report(yt, yp))
+
+    print(f"\n  vs constant-mean floor:  {mean_floor['MAE'] - tm['MAE']:+.4f} MAE "
+          f"({100 * (mean_floor['MAE'] - tm['MAE']) / mean_floor['MAE']:+.1f}%)")
     if ridge_mae is not None:
         delta = ridge_mae - tm["MAE"]
         verdict = ("adds information beyond amplitude+distance"
                   if delta > 0.01 else
                   "NO measurable gain over amplitude+distance alone")
-        print(f"  vs ridge baseline: {delta:+.3f} MAE  ->  {verdict}")
+        print(f"  vs ridge physics floor:  {delta:+.4f} MAE "
+              f"({100 * delta / ridge_mae:+.1f}%)  ->  {verdict}")
 
     if getattr(model, "use_1d", False) and getattr(model, "use_2d", False):
         print(f"\n  learned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}")

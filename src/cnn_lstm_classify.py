@@ -1,15 +1,25 @@
 """
 Dual-channel CNN + LSTM/self-attention (1D2D-EDL, Wang & Zhao 2025) for
-earthquake-vs-noise classification, applied directly on RAM-transformed
-waveforms instead of the catalog forecasting task in `cnn_lstm.py`.
+earthquake-vs-noise classification on short arrival-anchored windows, rather
+than the catalog forecasting task in `cnn_lstm.py`.
+
+The script is **representation-agnostic**: it loads whatever `{seq, img}`
+tensor pair the dataset directory holds, so the 2D channel's meaning is set
+by which dataset you point it at, not by anything here.
+
+    - `dataset_specdual_*` -> log-power SPECTROGRAM (current default; what
+      every result in spectrogram_classifier_report.md and
+      MAGNITUDE_CNN_CHEATSHEET.md was produced with)
+    - `dataset_dual_*`     -> RAM image (legacy; still loads, no longer used)
 
     1D channel : LSTM -> multi-head self-attention over the raw standardized
-                 (m, 3) Z/N/E waveform `seismic-cli generate-dual-dataset`
+                 (m, 3) Z/N/E waveform `seismic-cli generate-spec-dual-dataset`
                  writes -- per the paper's Sec. 3.3.1, NOT a reshaped version
-                 of the RAM image (see seismic_cli/ram_dual.py's docstring
-                 for the design mistake this corrected).
-    2D channel : CNN over the (3, target_n, target_n) RAM image, built from
-                 the same window independently of the 1D channel.
+                 of the 2D image (see seismic_cli/ram_dual.py's docstring for
+                 the design mistake this corrected).
+    2D channel : CNN over the (3, freq, time) spectrogram -- or the
+                 (3, target_n, target_n) RAM image on a legacy dataset -- built
+                 from the same window independently of the 1D channel.
     fusion     : --fusion linear (paper's default): F = a*F_1d + b*F_2d,
                  a fixed pair of scalars learned jointly with both branches.
                  --fusion gate: F = g(x)*F_1d + (1-g(x))*F_2d, a per-example
@@ -19,9 +29,11 @@ waveforms instead of the catalog forecasting task in `cnn_lstm.py`.
     head       : single logit, earthquake vs. noise (BCEWithLogitsLoss).
 
 `--channels 1d`/`2d` ablate either branch (fusion is then a no-op).
-`--channels 2d` alone is architecturally close to the existing CNN-only RAM
-classifier (`cnn_train.py`), so it doubles as that baseline's comparison
-point here.
+`--channels 2d` alone is architecturally close to the existing single-branch
+CNN classifier (`cnn_train.py`), so it doubles as that baseline's comparison
+point here -- and on the spectrogram datasets it is also the BEST known
+configuration: every fusion variant scored lower (0.9793 AUC for `2d` alone
+vs 0.9743-0.9761 for the fusion variants, spectrogram_classifier_report.md).
 
 Training conventions (label smoothing, unsmoothed-loss diagnostic, AMP, val
 AUC/MCC, matched 0.5 threshold) match `training.py`, the shared core for the
@@ -29,9 +41,15 @@ image-only classifiers -- kept as its own loop rather than forced through
 that module, since it assumes a single-tensor model, not two paired inputs.
 
 Usage:
-    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s
-    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --channels 2d   # CNN-only ablation
-    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s --fusion gate   # gated fusion
+    # the headline detector: 0.9786 +/- 0.0014 AUC over seeds 42/43/44
+    python cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --channels 2d --batch-size 32
+    python cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --fusion gate  # gated fusion
+    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s                    # legacy RAM
+
+Note `RamDualTensorDataset` and `RamDualEncoder` keep "Ram" in their names for
+import compatibility (cnn_lstm_stack.py and seismic_cli/ram_dual.py both
+reference them); the names are historical and neither class assumes a RAM
+image -- both take whatever 2D tensor the dataset supplies.
 
 Also imported (not just run standalone): cnn_lstm_stack.py imports
 `DualChannelBinaryNet` and `RamDualTensorDataset` from this module, loading
@@ -52,7 +70,8 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import majority_class_baseline
+from metrics import (binary_report, majority_class_baseline, print_report,
+                     safe_auc)
 from model.dual_channel import DualChannelNet
 from training import seed_everything
 
@@ -198,10 +217,14 @@ def parse_args():
     Returns:
         argparse.Namespace with the script's CLI options.
     """
-    p = argparse.ArgumentParser(description="Dual-channel CNN+LSTM RAM classifier "
-                                            "(earthquake vs. noise).")
+    p = argparse.ArgumentParser(description="Dual-channel CNN+LSTM earthquake/noise "
+                                            "classifier (spectrogram or legacy RAM 2D "
+                                            "channel + raw-waveform 1D channel).")
     p.add_argument("--dataset-dir", required=True,
-                   help="Directory from `seismic-cli generate-dual-dataset`.")
+                   help="Directory from `seismic-cli generate-spec-dual-dataset` "
+                        "(spectrogram 2D channel, current default) or "
+                        "`generate-dual-dataset` (legacy RAM images). The 2D "
+                        "representation is decided here, not by any flag.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_classify")
     p.add_argument("--channels", default="all", choices=["all", "1d", "2d"],
                    help="Ablation switch: 'all' is the full dual-channel model, "
@@ -221,43 +244,43 @@ def parse_args():
     p.add_argument("--fusion-dim", type=int, default=96)
     p.add_argument("--dropout", type=float, default=0.4)
     p.add_argument("--patience", type=int, default=10)
-    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Single-seed shorthand. Ignored if --ensemble-seeds or "
+                        "--random-seeds is given.")
+    p.add_argument("--ensemble-seeds", type=str, default=None,
+                   help="Comma-separated seeds to train and ensemble, e.g. '42,43,44'. "
+                        "Reports each seed's test AUC, their spread, and the "
+                        "probability-averaged ensemble. Matches "
+                        "cnn_lstm_catalog_waveform_fusion.py's flag of the same name.")
+    p.add_argument("--random-seeds", type=int, default=None, metavar="N",
+                   help="Draw N random seeds instead of --ensemble-seeds. Fixed seeds "
+                        "sample run-to-run variance exactly once and then hide it. The "
+                        "drawn seeds print as a ready-to-paste --ensemble-seeds value.")
     p.add_argument("--num-workers", type=int, default=4)
-    return p.parse_args()
+    a = p.parse_args()
+    if a.ensemble_seeds is None and a.random_seeds is None:
+        a.ensemble_seeds = str(a.seed)
+    return a
 
 
-def main():
-    """Loads the dual-tensor dataset, trains `DualChannelBinaryNet`, and
-    reports test accuracy/AUC/MCC plus the majority-class floor."""
-    args = parse_args()
-    seed_everything(args.seed)
+def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, device):
+    """Trains and evaluates one seed, mirroring `cnn_lstm_catalog_waveform_fusion
+    .train_one_seed` so both branches of the project have the same shape.
 
-    train_ds = RamDualTensorDataset(f"{args.dataset_dir}/train")
-    val_ds = RamDualTensorDataset(f"{args.dataset_dir}/val")
-    test_ds = RamDualTensorDataset(f"{args.dataset_dir}/test")
+    The training body is unchanged from the single-seed version that produced
+    0.9793 -- this only lifts it into a function so seeds can be looped and
+    ensembled. Seed 42 must still reproduce 0.9793/0.8667/0.9328 exactly; if it
+    does not, this refactor changed behaviour and is wrong.
 
-    seq_shape, img_shape = train_ds.validate_shapes()
-    for name, ds in (("val", val_ds), ("test", test_ds)):
-        s, i = ds.sample_shapes()
-        if s != seq_shape or i != img_shape:
-            raise ValueError(f"{name} tensors are seq {s} img {i}, but train is "
-                             f"seq {seq_shape} img {img_shape}.")
-
-    print("=" * 64)
-    print(f"Dual-channel RAM classifier | channels='{args.channels}'")
-    print(f"  seq {seq_shape} | img {img_shape}")
-    for name, ds in (("train", train_ds), ("val", val_ds), ("test", test_ds)):
-        n_pos = sum(1 for _, lbl in ds.samples if lbl == ds.class_to_idx.get("01_earthquake", 1))
-        print(f"  {name:5s}: n={len(ds):6d}  earthquake={n_pos}  noise={len(ds) - n_pos}")
-    print("=" * 64)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    Returns:
+        Tuple of (y_true, y_score, y_pred, gates, n_params) for the test split,
+        from the best-val-AUC epoch's weights.
+    """
+    seed_everything(seed)
     model = DualChannelBinaryNet(seq_shape[-1], img_shape[0], hidden=args.hidden,
                                  fusion_dim=args.fusion_dim, dropout=args.dropout,
                                  channels=args.channels, fusion=args.fusion).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Device: {device} | parameters: {n_params:,} | train samples: {len(train_ds)} "
-          f"({n_params / max(1, len(train_ds)):.1f} params/sample)")
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
                                    num_workers=args.num_workers, pin_memory=True)
@@ -270,7 +293,9 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    save_path = os.path.join(args.save_dir, "best_cnnlstm_classify.pth")
+    # Per-seed checkpoint: a shared filename would let seed N+1 overwrite seed N's
+    # best weights partway through the loop.
+    save_path = os.path.join(args.save_dir, f"best_cnnlstm_classify_seed{seed}.pth")
     best_auc, no_improve = -1.0, 0
 
     for epoch in range(args.epochs):
@@ -325,8 +350,8 @@ def main():
         except ValueError:
             val_auc = val_mcc = 0.0
 
-        print(f"Epoch {epoch+1}/{args.epochs} | loss {avg_loss:.4f} (unsmoothed {avg_loss_raw:.4f}) "
-              f"| val acc {val_acc:.4f} auc {val_auc:.4f} mcc {val_mcc:.4f}")
+        print(f"  [seed {seed}] epoch {epoch+1}/{args.epochs} val AUC {val_auc:.4f} "
+              f"val loss {avg_loss_raw:.4f} val acc {val_acc:.4f} mcc {val_mcc:.4f}")
 
         if val_auc > best_auc:
             best_auc, no_improve = val_auc, 0
@@ -355,13 +380,8 @@ def main():
                 all_gates.extend(model.last_gate.float().cpu().squeeze(1).tolist())
 
     all_labels = np.array(all_labels); all_preds = np.array(all_preds)
-    print(f"\n--- Dual-channel RAM classifier (channels='{args.channels}', fusion='{args.fusion}') ---")
-    print(f"Final Test Accuracy: {(all_labels == all_preds).mean() * 100:.2f}%")
-    try:
-        print(f"Final Test AUC:      {roc_auc_score(all_labels, all_probs):.4f}")
-        print(f"Final Test MCC:      {matthews_corrcoef(all_labels, all_preds):.4f}")
-    except ValueError:
-        pass
+    all_probs = np.array(all_probs)
+    print(f"  [seed {seed}] test AUC {safe_auc(all_labels, all_probs):.4f}")
 
     if getattr(model, "use_1d", False) and getattr(model, "use_2d", False):
         if args.fusion == "gate":
@@ -376,19 +396,90 @@ def main():
             print(f"\nlearned fusion weights: 1D={model.w1.item():+.3f}  2D={model.w2.item():+.3f}"
                   "\n(relative magnitude indicates which representation the model leaned on)")
 
-    cm = confusion_matrix(all_labels, all_preds)
-    print("\nConfusion Matrix:")
+    return all_labels, all_probs, all_preds, all_gates, n_params
+
+
+def main():
+    """Loads the dual-tensor dataset once, trains every seed on it, and reports
+    per-seed metrics, their spread, and the probability-averaged ensemble against
+    the majority-class floor."""
+    args = parse_args()
+
+    train_ds = RamDualTensorDataset(f"{args.dataset_dir}/train")
+    val_ds = RamDualTensorDataset(f"{args.dataset_dir}/val")
+    test_ds = RamDualTensorDataset(f"{args.dataset_dir}/test")
+
+    seq_shape, img_shape = train_ds.validate_shapes()
+    for name, ds in (("val", val_ds), ("test", test_ds)):
+        s, i = ds.sample_shapes()
+        if s != seq_shape or i != img_shape:
+            raise ValueError(f"{name} tensors are seq {s} img {i}, but train is "
+                             f"seq {seq_shape} img {img_shape}.")
+
+    print("=" * 64)
+    print(f"Dual-channel event/noise classifier | channels='{args.channels}'")
+    print(f"  seq {seq_shape} | img {img_shape}")
+    for name, ds in (("train", train_ds), ("val", val_ds), ("test", test_ds)):
+        n_pos = sum(1 for _, lbl in ds.samples if lbl == ds.class_to_idx.get("01_earthquake", 1))
+        print(f"  {name:5s}: n={len(ds):6d}  earthquake={n_pos}  noise={len(ds) - n_pos}")
+    print("=" * 64)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.random_seeds:
+        # Fixed seeds sample run-to-run variance once and then hide it. Drawn seeds
+        # are printed as a paste-ready --ensemble-seeds so the run stays replayable.
+        seeds = [int(s) for s in
+                 np.random.default_rng().integers(0, 2**31 - 1, size=args.random_seeds)]
+        print(f"  [random-seeds] drew {len(seeds)} seeds: "
+              f"--ensemble-seeds {','.join(str(s) for s in seeds)}")
+    else:
+        seeds = [int(s) for s in args.ensemble_seeds.split(",")]
+    print(f"Device: {device} | training {len(seeds)} seed(s): {seeds}")
+
+    per_seed_probs, per_seed_preds, y_ref, n_params = [], [], None, None
+    for seed in seeds:
+        y, probs, preds, _gates, n_params = train_one_seed(
+            args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, device)
+        if y_ref is None:
+            y_ref = y
+        per_seed_probs.append(probs)
+        per_seed_preds.append(preds)
+
+    print(f"\n  model parameters: {n_params:,} | train samples: {len(train_ds)} "
+          f"({n_params / max(1, len(train_ds)):.1f} params/sample)")
+
+    print("\n--- Floors (test set) ---")
+    # Labels come from ds.samples rather than by indexing the dataset -- __getitem__
+    # would load 50k tensors off disk just to read an int.
+    train_labels = np.array([lbl for _, lbl in train_ds.samples])
+    maj, maj_acc, maj_bal = majority_class_baseline(train_labels, y_ref)
+    print(f"  majority-class ({maj})   accuracy {maj_acc:.4f}  balanced {maj_bal:.4f}  "
+          f"AUC 0.5000   n={len(y_ref)}")
+
+    # Per-seed spread is the headline reliability number. A tight spread is what
+    # separates a result from a lucky draw -- the forecasting branch's spread ran
+    # ~0.17, which is how a single good seed carried an ensemble for a whole day.
+    per_seed_aucs = [safe_auc(y_ref, p) for p in per_seed_probs]
+    print(f"\n  per-seed test AUC: {[f'{a:.4f}' for a in per_seed_aucs]}")
+    print(f"    mean {np.mean(per_seed_aucs):.4f}  std {np.std(per_seed_aucs):.4f}  "
+          f"spread {max(per_seed_aucs) - min(per_seed_aucs):.4f}")
+
+    ensemble_probs = np.mean(per_seed_probs, axis=0)
+    ensemble_preds = (ensemble_probs > 0.5).astype(float)
+    report = binary_report(y_ref, ensemble_probs, y_pred=ensemble_preds)
+    print_report(f"Event/noise detector [channels={args.channels}, fusion={args.fusion}] "
+                 f"({len(seeds)}-seed ensemble, test set)", report)
+    print(f"\n  ROC-AUC {report['roc_auc']:.4f}  vs majority-class floor 0.5000  "
+          f"-> {'BEATS' if report['roc_auc'] > 0.5 else 'AT/BELOW'} floor")
+
+    cm = confusion_matrix(y_ref, ensemble_preds)
+    print("\nConfusion Matrix (ensemble):")
     print(cm)
     if cm.size == 4:
         tn, fp, fn, tp = cm.ravel()
         print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
-    print("\nClassification Report:")
-    print(classification_report(all_labels, all_preds, digits=4))
-
-    train_labels = np.array([lbl for _, lbl in train_ds.samples])
-    maj, maj_acc, maj_bal = majority_class_baseline(train_labels, all_labels)
-    print(f"\nmajority-class floor: predicting {maj} always -> "
-         f"accuracy {maj_acc:.4f}  balanced {maj_bal:.4f}")
+    print("\nClassification Report (ensemble):")
+    print(classification_report(y_ref, ensemble_preds, digits=4))
 
 
 if __name__ == "__main__":
