@@ -263,6 +263,33 @@ def parse_args():
     return a
 
 
+def trivial_amplitude_floor(test_ds, y_ref):
+    """
+    AUC of single amplitude statistics read straight off the test tensors.
+
+    These windows are separated mostly by how loud they are, so "how loud is
+    it" is the baseline a learned detector actually has to beat -- not the
+    majority class. Measured on the 6s spectrogram corpus, `seq abs-max` alone
+    reaches ~0.95 while the majority-class bar sits at 0.50, so quoting the
+    latter overstates a model's edge by an order of magnitude.
+
+    One pass over the test split (~9.5k tensors); trivial next to training.
+    Returns {name: oriented AUC}.
+    """
+    seq_std, seq_absmax, img_mean = [], [], []
+    for fpath, _lbl in test_ds.samples:
+        d = torch.load(fpath, weights_only=True)
+        s = d["seq"].float()
+        seq_std.append(float(s.std()))
+        seq_absmax.append(float(s.abs().max()))
+        img_mean.append(float(d["img"].float().mean()))
+    out = {}
+    for name, vals in (("seq std", seq_std), ("seq abs-max", seq_absmax),
+                       ("img mean dB", img_mean)):
+        out[name] = safe_auc(y_ref, np.asarray(vals), oriented=True)
+    return out
+
+
 def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, device):
     """Trains and evaluates one seed, mirroring `cnn_lstm_catalog_waveform_fusion
     .train_one_seed` so both branches of the project have the same shape.
@@ -293,9 +320,17 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    # Per-seed checkpoint: a shared filename would let seed N+1 overwrite seed N's
-    # best weights partway through the loop.
-    save_path = os.path.join(args.save_dir, f"best_cnnlstm_classify_seed{seed}.pth")
+    # The checkpoint name must identify the RUN, not just the seed. Seed alone was
+    # not enough: two runs launched concurrently with the same seeds wrote the same
+    # files, and each then reloaded the other's weights at the end of training.
+    # When the architectures differed that surfaced as a state_dict KeyError; when
+    # they matched it was silent, and a seed scored 0.2480 -- an inverted model,
+    # reported as if it were a training outcome. Config plus dataset identity plus
+    # PID makes collision impossible even for two identical commands run at once.
+    run_tag = (f"{args.channels}_{args.fusion}"
+               f"_{os.path.basename(os.path.normpath(args.dataset_dir))}_pid{os.getpid()}")
+    save_path = os.path.join(args.save_dir,
+                             f"best_cnnlstm_classify_{run_tag}_seed{seed}.pth")
     best_auc, no_improve = -1.0, 0
 
     for epoch in range(args.epochs):
@@ -456,6 +491,17 @@ def main():
     print(f"  majority-class ({maj})   accuracy {maj_acc:.4f}  balanced {maj_bal:.4f}  "
           f"AUC 0.5000   n={len(y_ref)}")
 
+    # The majority-class bar is vacuous on a balanced set, and quoting it made an
+    # earlier result look like +0.48 when it was worth +0.04. These windows are
+    # separated mostly by loudness, so the honest bar is what a single amplitude
+    # scalar achieves with no learning at all. Oriented (max(a, 1-a)) because an
+    # anti-predictive rule is just as exploitable as a predictive one.
+    amp_floor = trivial_amplitude_floor(test_ds, y_ref)
+    for name, auc_val in amp_floor.items():
+        print(f"  {name:<22s} AUC {auc_val:.4f}   (single scalar, no learning)")
+    best_floor_name, best_floor = max(amp_floor.items(), key=lambda kv: kv[1])
+    print(f"  -> strongest trivial floor: {best_floor_name} at {best_floor:.4f}")
+
     # Per-seed spread is the headline reliability number. A tight spread is what
     # separates a result from a lucky draw -- the forecasting branch's spread ran
     # ~0.17, which is how a single good seed carried an ensemble for a whole day.
@@ -464,13 +510,32 @@ def main():
     print(f"    mean {np.mean(per_seed_aucs):.4f}  std {np.std(per_seed_aucs):.4f}  "
           f"spread {max(per_seed_aucs) - min(per_seed_aucs):.4f}")
 
+    # A seed below chance is anti-predictive, and averaging its probabilities into
+    # the ensemble drags the ensemble below its own members -- which is how a run
+    # once reported an ensemble AUC of 0.9108 while two of three seeds scored
+    # above 0.94. Treat it as a failed run to investigate, never as a data point:
+    # the usual causes are a corrupted/clobbered checkpoint or a diverged seed.
+    inverted = [(s, a) for s, a in zip(seeds, per_seed_aucs) if a < 0.5]
+    if inverted:
+        print("\n  " + "!" * 60)
+        for s, a in inverted:
+            print(f"  !! seed {s} scored AUC {a:.4f} -- BELOW CHANCE (anti-predictive).")
+        print(f"  !! {len(inverted)}/{len(seeds)} seed(s) failed. The ensemble below "
+              f"averages them in and is NOT a valid result.")
+        print(f"  !! Check for a clobbered checkpoint (another run sharing --save-dir) "
+              f"or divergence in that seed's training curve.")
+        print("  " + "!" * 60)
+
     ensemble_probs = np.mean(per_seed_probs, axis=0)
     ensemble_preds = (ensemble_probs > 0.5).astype(float)
     report = binary_report(y_ref, ensemble_probs, y_pred=ensemble_preds)
     print_report(f"Event/noise detector [channels={args.channels}, fusion={args.fusion}] "
                  f"({len(seeds)}-seed ensemble, test set)", report)
+    edge = report["roc_auc"] - best_floor
     print(f"\n  ROC-AUC {report['roc_auc']:.4f}  vs majority-class floor 0.5000  "
           f"-> {'BEATS' if report['roc_auc'] > 0.5 else 'AT/BELOW'} floor")
+    print(f"  ROC-AUC {report['roc_auc']:.4f}  vs {best_floor_name} floor {best_floor:.4f}  "
+          f"-> {'+' if edge >= 0 else ''}{edge:.4f}   <- the number that matters")
 
     cm = confusion_matrix(y_ref, ensemble_preds)
     print("\nConfusion Matrix (ensemble):")

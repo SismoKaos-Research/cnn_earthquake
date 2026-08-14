@@ -20,12 +20,17 @@ from sklearn.metrics import (accuracy_score, average_precision_score,
                              r2_score, recall_score, roc_auc_score)
 
 
-def safe_auc(y, score):
+def safe_auc(y, score, oriented=False):
     """Computes ROC-AUC, guarding against an undefined single-class split.
 
     Args:
         y: True binary labels.
         score: Predicted scores or probabilities for the positive class.
+        oriented: If True, return `max(auc, 1 - auc)`. Use this for BASELINES,
+            where the sign of the statistic is arbitrary -- a rule scoring 0.20
+            is 0.80-accurate once you flip it, so reporting 0.20 as the bar
+            understates it. Leave False for a trained model, where scoring
+            below chance is a failure to surface, not a sign to flip.
 
     Returns:
         ROC-AUC as a float, or NaN if `y` contains only one class (AUC is
@@ -34,7 +39,8 @@ def safe_auc(y, score):
     y = np.asarray(y)
     if len(np.unique(y)) < 2:
         return float("nan")
-    return float(roc_auc_score(y, score))
+    auc = float(roc_auc_score(y, score))
+    return max(auc, 1.0 - auc) if oriented else auc
 
 
 def safe_mcc(y, pred):
