@@ -75,7 +75,6 @@ from metrics import (binary_report, majority_class_baseline, print_report,
 from model.dual_channel import DualChannelNet
 from training import seed_everything
 
-
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
@@ -535,14 +534,8 @@ def main():
     print(f"\n  ROC-AUC {report['roc_auc']:.4f}  vs majority-class floor 0.5000  "
           f"-> {'BEATS' if report['roc_auc'] > 0.5 else 'AT/BELOW'} floor")
     print(f"  ROC-AUC {report['roc_auc']:.4f}  vs {best_floor_name} floor {best_floor:.4f}  "
-          f"-> {'+' if edge >= 0 else ''}{edge:.4f}   <- the number that matters")
+          f"-> {'+' if edge >= 0 else ''}{edge:.4f}   <- the number that matters! look at this!!!")
 
-    cm = confusion_matrix(y_ref, ensemble_preds)
-    print("\nConfusion Matrix (ensemble):")
-    print(cm)
-    if cm.size == 4:
-        tn, fp, fn, tp = cm.ravel()
-        print(f"TN={tn}, FP={fp}, FN={fn}, TP={tp}")
     print("\nClassification Report (ensemble):")
     print(classification_report(y_ref, ensemble_preds, digits=4))
 

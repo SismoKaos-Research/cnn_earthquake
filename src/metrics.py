@@ -16,8 +16,8 @@ from sklearn.metrics import (accuracy_score, average_precision_score,
                              classification_report, cohen_kappa_score,
                              confusion_matrix, f1_score, log_loss,
                              matthews_corrcoef, mean_absolute_error,
-                             median_absolute_error, precision_score,
-                             r2_score, recall_score, roc_auc_score)
+                             median_absolute_error, precision_score, r2_score,
+                             recall_score, roc_auc_score)
 
 
 def safe_auc(y, score, oriented=False):
