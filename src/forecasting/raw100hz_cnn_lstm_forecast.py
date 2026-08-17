@@ -24,7 +24,7 @@ import torch.nn as nn
 from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events
 from seismolib.splits import walk_forward_splits
 from seismolib.model.sequence import SequenceHeadNet
-from raw_cnn_lstm_forecast import parse_args, run_horizon
+from forecasting.raw_cnn_lstm_forecast import parse_args, run_horizon
 from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 
 NATIVE_HOUR_SAMPLES = 3600 * 100  # 3600s * 100Hz, vs. raw_cnn_lstm_forecast.py's 3600*5Hz

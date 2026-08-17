@@ -37,7 +37,7 @@ from sklearn.metrics import (brier_score_loss, classification_report,
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from cnn_train import ImprovedSeismicCNN, ResBlock, SEBlock  # noqa: F401
+from detection.cnn_train import ImprovedSeismicCNN, ResBlock, SEBlock  # noqa: F401
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

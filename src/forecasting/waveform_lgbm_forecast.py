@@ -34,7 +34,7 @@ from seismolib.metrics import safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report
 from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
-from waveform_dwt_features import build_hourly_waveform_features, feature_names
+from features.waveform_dwt_features import build_hourly_waveform_features, feature_names
 
 
 def parse_args():

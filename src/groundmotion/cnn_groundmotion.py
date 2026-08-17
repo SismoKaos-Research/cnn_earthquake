@@ -79,8 +79,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from torch.utils.data import DataLoader, TensorDataset
 
-from cnn_lstm import LSTMAttentionBranch
-from groundmotion_baselines import TARGETS, load
+from forecasting.cnn_lstm import LSTMAttentionBranch
+from groundmotion.groundmotion_baselines import TARGETS, load
 from seismolib.metrics import print_report, regression_report
 from seismolib.training import seed_everything
 

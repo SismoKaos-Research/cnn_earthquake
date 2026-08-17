@@ -1,5 +1,0 @@
-================================================================
-Logging initialized. Saving all terminal output to: raw_forecast_run_20260816_145753.log
-================================================================
-Loading input data (Directory or Massive CSV)...
-  [streaming] Reading massive CSV in chunks of 100,000 rows: ../sismokaos-cli/dataset_rust_pre/aegean_bodt_2024_2026_preprocessed.csv

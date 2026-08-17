@@ -41,7 +41,7 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_proximity_classify import CNNProximityClassifier
+from forecasting.cnn_proximity_classify import CNNProximityClassifier
 from seismolib.catalog import load_aegean_events
 from seismolib.metrics import safe_auc
 from seismolib.splits import walk_forward_splits

@@ -44,7 +44,7 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm import DualChannelRiskNet, risk_classes_from_manifest
+from forecasting.cnn_lstm import DualChannelRiskNet, risk_classes_from_manifest
 from seismolib.training import seed_everything
 
 # Populated from the manifest in main(); see `risk_classes_from_manifest`.

@@ -43,7 +43,7 @@ import torch.optim as optim
 from sklearn.metrics import balanced_accuracy_score
 from torch.utils.data import DataLoader, Dataset
 
-from cnn_lstm_daily_3class import CLASS_NAMES, HOURS_PER_DAY, build_3class_daily_chunks
+from forecasting.cnn_lstm_daily_3class import CLASS_NAMES, HOURS_PER_DAY, build_3class_daily_chunks
 from seismolib.catalog import load_aegean_events, truncate_to_reliable_catalog_end
 from seismolib.metrics import majority_class_baseline, multiclass_report, print_report
 from seismolib.model.blocks import LSTMAttentionBranch

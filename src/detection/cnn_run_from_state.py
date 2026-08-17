@@ -27,7 +27,7 @@ import os
 
 import pandas as pd
 import torch
-from cnn_train import ImprovedSeismicCNN
+from detection.cnn_train import ImprovedSeismicCNN
 from sklearn.metrics import (brier_score_loss, classification_report,
                              confusion_matrix, matthews_corrcoef,
                              roc_auc_score)

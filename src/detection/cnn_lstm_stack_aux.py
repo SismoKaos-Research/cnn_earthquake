@@ -32,7 +32,7 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader
 
-from cnn_lstm_classify_aux import DualChannelAuxBinaryNet, RamDualAuxTensorDataset
+from detection.cnn_lstm_classify_aux import DualChannelAuxBinaryNet, RamDualAuxTensorDataset
 
 
 def parse_args():

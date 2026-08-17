@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from feature_lstm_forecast import HourlySeqDataset
+from forecasting.feature_lstm_forecast import HourlySeqDataset
 from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report, safe_auc

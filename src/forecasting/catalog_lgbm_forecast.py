@@ -28,7 +28,7 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.metrics import brier_score_loss
 
-from cnn_lstm_catalog_waveform_fusion import FEATURE_NAMES, build_catalog_features
+from forecasting.cnn_lstm_catalog_waveform_fusion import FEATURE_NAMES, build_catalog_features
 from seismolib.catalog import compute_beta_statistic, days_since_prev_major, label_hours, label_hours_beta_precursor, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
 from seismolib.metrics import safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits

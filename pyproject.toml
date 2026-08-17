@@ -7,7 +7,17 @@ build-backend = "hatchling.build"
 # script lived together in src/ and was run from there -- which is exactly the
 # flat layout this package exists to replace.
 [tool.hatch.build.targets.wheel]
-packages = ["src/seismolib"]
+packages = [
+    "src/seismolib",
+    # The family packages are registered too, so the handful of legitimate
+    # cross-family imports resolve by name rather than by which directory the
+    # script was launched from.
+    "src/forecasting",
+    "src/detection",
+    "src/magnitude",
+    "src/groundmotion",
+    "src/features",
+]
 
 [project]
 name = "model-cnn-lstm"

@@ -40,7 +40,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset, \
+from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset, \
     trivial_amplitude_floor
 from seismolib.metrics import binary_report, print_report, safe_auc
 

@@ -13,13 +13,13 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PY="${PY:-$SCRIPT_DIR/../.venv/bin/python}"
-cd "$SCRIPT_DIR/../src"
+cd "$SCRIPT_DIR/../src/groundmotion"
 
 run () {
   local tag="$1"; shift
   echo ""
   echo "############ $tag ############"
-  "$PY" cnn_groundmotion.py --out-csv "../experiment_results/groundmotion_cnn_${tag}.csv" "$@" 2>&1
+  "$PY" cnn_groundmotion.py --out-csv "$SCRIPT_DIR/../docs/experiment_results/groundmotion_cnn_${tag}.csv" "$@" 2>&1
   echo "############ $tag done (exit $?) ############"
 }
 
