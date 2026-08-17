@@ -5,6 +5,7 @@ loaders assemble them into the (hours, channels, samples) block the
 sequence models consume, with a memory-mapped path for the consolidated
 form."""
 
+import json
 import re
 from pathlib import Path
 
@@ -18,6 +19,89 @@ _DATE_DIR_RE = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 
 
 HOUR_SAMPLES = 36000  # 3600s * 5Hz
+
+
+def load_raw_f32(path):
+    """Memory-maps the flat f32 output of `sismokaos-cli preprocess`.
+
+    Returns `(samples, metadata)` where `samples` is a read-only
+    `(n_samples, 3)` memmap in E/N/Z order and `metadata` is the sidecar dict.
+
+    This replaces the Parquet -> `parquet_to_memory.py` -> `.dat` round trip:
+    the CLI now writes this layout directly, so there is nothing to convert.
+    Nothing is read into RAM here -- the OS pages in only what gets indexed.
+
+    Args:
+        path: Path to the `.f32` file. Its `.f32.json` sidecar must sit beside
+            it; the sidecar carries the sample rate and the segment table.
+
+    Raises:
+        FileNotFoundError: If either the data file or its sidecar is missing.
+        ValueError: If the file length disagrees with the sidecar's sample
+            count, which means one of the two is stale.
+    """
+    path = Path(path)
+    meta_path = path.with_suffix(".f32.json")
+    if not meta_path.exists():
+        raise FileNotFoundError(
+            f"Sidecar {meta_path} not found. The .f32 file alone does not carry "
+            f"its sample rate or segment table and cannot be timed without it.")
+    meta = json.loads(meta_path.read_text())
+
+    a = np.memmap(path, dtype="<f4", mode="r").reshape(-1, 3)
+    if a.shape[0] != meta["samples"]:
+        raise ValueError(
+            f"{path} holds {a.shape[0]} samples but {meta_path.name} claims "
+            f"{meta['samples']}; one of them is stale.")
+    return a, meta
+
+
+def raw_f32_times(meta, index=None):
+    """Absolute epoch seconds for samples of a `load_raw_f32` array.
+
+    The time axis is **piecewise** linear: the CLI restarts its clock at every
+    data gap, so a single start time plus `i/fs` would place every sample after
+    the first gap at the wrong moment. This walks the sidecar's segment table
+    instead.
+
+    Args:
+        meta: The metadata dict from `load_raw_f32`.
+        index: Sample indices to time. Defaults to every sample.
+
+    Returns:
+        float64 array of Unix epoch seconds, same shape as `index`.
+    """
+    fs = meta["fs"]
+    segs = meta["segments"]
+    if index is None:
+        index = np.arange(meta["samples"])
+    index = np.asarray(index)
+
+    offsets = np.array([s["sample_offset"] for s in segs])
+    epochs = np.array([s["start_epoch"] for s in segs])
+    # Which segment each index falls in: the last one starting at or before it.
+    which = np.searchsorted(offsets, index, side="right") - 1
+    which = np.clip(which, 0, len(segs) - 1)
+    return epochs[which] + (index - offsets[which]) / fs
+
+
+def raw_f32_to_hours(path, hour_samples=HOUR_SAMPLES):
+    """Reshapes a flat `.f32` stream into `(hours, 3, hour_samples)`.
+
+    Trailing samples that do not fill a whole hour are dropped rather than
+    zero-padded, so every returned hour is real data.
+
+    This is a view over the memmap wherever the shape allows, so it stays out
+    of RAM.
+    """
+    a, meta = load_raw_f32(path)
+    n_hours = a.shape[0] // hour_samples
+    if n_hours == 0:
+        raise ValueError(
+            f"{path} holds {a.shape[0]} samples, fewer than one {hour_samples}-sample hour.")
+    trimmed = a[: n_hours * hour_samples]
+    # (hours, samples, channels) -> (hours, channels, samples)
+    return trimmed.reshape(n_hours, hour_samples, 3).transpose(0, 2, 1), meta
 
 
 def load_really_long_csv(csv_path: str, chunksize: int = 100_000) -> pd.DataFrame:
