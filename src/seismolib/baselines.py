@@ -8,6 +8,7 @@ import numpy as np
 
 from seismolib.metrics import safe_auc
 
+
 def rate_persistence_auc(labels: np.ndarray, trailing_counts: np.ndarray) -> float:
     """AUC of the trivial trailing-rate baseline for `label_hours_rate_change`.
 

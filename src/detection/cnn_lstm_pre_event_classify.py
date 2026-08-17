@@ -41,9 +41,9 @@ Not imported by anything else -- standalone script.
 import numpy as np
 import torch
 
+from forecasting.raw_cnn_lstm_forecast import parse_args, run_fold
 from seismolib.catalog import days_since_prev_major, load_aegean_events
 from seismolib.splits import walk_forward_splits
-from forecasting.raw_cnn_lstm_forecast import parse_args, run_fold
 from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 
 

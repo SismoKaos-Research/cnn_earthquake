@@ -29,12 +29,14 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.metrics import brier_score_loss
 
-from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, truncate_to_reliable_catalog_end
-from seismolib.metrics import safe_auc
+from features.waveform_dwt_features import (build_hourly_waveform_features,
+                                            feature_names)
+from seismolib.catalog import (days_since_prev_major, label_hours,
+                               load_aegean_events,
+                               truncate_to_reliable_catalog_end)
+from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
-from seismolib.metrics import binary_report, print_report
 from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
-from features.waveform_dwt_features import build_hourly_waveform_features, feature_names
 
 
 def parse_args():

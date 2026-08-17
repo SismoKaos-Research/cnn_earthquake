@@ -4,6 +4,7 @@ Was copied verbatim into three scripts before it lived here."""
 
 import sys
 
+
 class DualLogger:
     """Intercepts sys.stdout to print to both the terminal and a log file."""
     def __init__(self, filepath):

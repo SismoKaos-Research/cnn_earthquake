@@ -27,13 +27,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from forecasting.feature_lstm_forecast import HourlySeqDataset
-from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events
-from seismolib.splits import print_split_diagnostics, walk_forward_splits
-from seismolib.metrics import binary_report, print_report, safe_auc
-from seismolib.training import seed_everything
+from seismolib.catalog import (days_since_prev_major, label_hours,
+                               load_aegean_events)
 from seismolib.logging import DualLogger
-
-
+from seismolib.metrics import binary_report, print_report, safe_auc
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
+from seismolib.training import seed_everything
 
 
 def load_hourly_features(features_csv: str) -> pd.DataFrame:

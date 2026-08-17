@@ -59,12 +59,13 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
-from seismolib.catalog import days_since_prev_major, days_until_next_major, label_hours, load_aegean_events
-from seismolib.metrics import safe_auc
+from seismolib.catalog import (days_since_prev_major, days_until_next_major,
+                               label_hours, load_aegean_events)
+from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
-from seismolib.metrics import binary_report, print_report
-from seismolib.waveform import RawWaveformEncoder, load_hourly_raw, load_hourly_raw_consolidated
 from seismolib.training import seed_everything
+from seismolib.waveform import (RawWaveformEncoder, load_hourly_raw,
+                                load_hourly_raw_consolidated)
 
 
 def label_proximity(dsp: np.ndarray, dun: np.ndarray, close_days: float) -> np.ndarray:

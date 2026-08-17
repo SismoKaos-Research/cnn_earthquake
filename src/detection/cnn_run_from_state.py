@@ -27,12 +27,13 @@ import os
 
 import pandas as pd
 import torch
-from detection.cnn_train import ImprovedSeismicCNN
 from sklearn.metrics import (brier_score_loss, classification_report,
                              confusion_matrix, matthews_corrcoef,
                              roc_auc_score)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+from detection.cnn_train import ImprovedSeismicCNN
 
 WEIGHTS_PATH = "trained_model/best_seismic_model.pth"
 DATA_DIR = "./dataset/test"              # ImageFolder root

@@ -59,11 +59,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from seismolib.metrics import predict_mean_baseline, print_report, regression_report
+from magnitude.cnn_regression import (AUX_COLUMNS, detect_aux_columns,
+                                      regression_metrics, report_baselines)
+from seismolib.metrics import (predict_mean_baseline, print_report,
+                               regression_report)
 from seismolib.model.dual_channel import DualChannelNet
-from magnitude.cnn_regression import AUX_COLUMNS, detect_aux_columns, regression_metrics, report_baselines
 from seismolib.training import seed_everything
-
 
 # ---------------------------------------------------------------------------
 # Splits -- mirrors cnn_groundmotion.py's respilt/report_split (report.md

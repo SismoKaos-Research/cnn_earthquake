@@ -84,7 +84,6 @@ from groundmotion.groundmotion_baselines import TARGETS, load
 from seismolib.metrics import print_report, regression_report
 from seismolib.training import seed_everything
 
-
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------

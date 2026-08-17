@@ -43,11 +43,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from forecasting.cnn_proximity_classify import CNNProximityClassifier
 from seismolib.catalog import load_aegean_events
-from seismolib.metrics import safe_auc
+from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.splits import walk_forward_splits
-from seismolib.metrics import binary_report, print_report
-from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 from seismolib.training import seed_everything
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 
 
 def build_chunks(hour_index, major_times, chunk_hours: int, horizon_days: float):

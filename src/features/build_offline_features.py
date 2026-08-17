@@ -11,8 +11,10 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from features.catalog_feature_processor import build_catalog_features
-from seismolib.catalog import load_aegean_events, truncate_to_reliable_catalog_end
-from features.waveform_dwt_features import build_hourly_waveform_features, feature_names
+from features.waveform_dwt_features import (build_hourly_waveform_features,
+                                            feature_names)
+from seismolib.catalog import (load_aegean_events,
+                               truncate_to_reliable_catalog_end)
 
 
 def parse_args():

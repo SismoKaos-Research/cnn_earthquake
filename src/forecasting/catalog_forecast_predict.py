@@ -24,7 +24,8 @@ import pandas as pd
 import torch
 from sklearn.linear_model import Ridge
 
-from forecasting.cnn_lstm_forecast import AUX_FEATURES, DenseWindowDataset, DualChannelForecastNet, safe_auc
+from forecasting.cnn_lstm_forecast import (AUX_FEATURES, DenseWindowDataset,
+                                           DualChannelForecastNet, safe_auc)
 
 
 def parse_args():

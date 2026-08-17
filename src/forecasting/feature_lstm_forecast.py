@@ -29,52 +29,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from seismolib.metrics import binary_report, print_report, safe_auc  # noqa: F401
-from seismolib.model.sequence import SequenceHeadNet
-from seismolib.training import seed_everything
-from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, load_hourly_features
+from seismolib.catalog import (days_since_prev_major, label_hours,
+                               load_aegean_events, load_hourly_features)
 from seismolib.logging import DualLogger
+from seismolib.metrics import (binary_report, print_report,  # noqa: F401
+                               safe_auc)
+from seismolib.model.sequence import SequenceHeadNet
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+from seismolib.training import seed_everything
 
 
 class HourlySeqDataset(Dataset):

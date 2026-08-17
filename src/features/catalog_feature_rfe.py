@@ -30,8 +30,12 @@ import argparse
 import lightgbm as lgb
 import numpy as np
 
-from forecasting.cnn_lstm_catalog_waveform_fusion import CATALOG_DIM, FEATURE_NAMES, build_catalog_features
-from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
+from forecasting.cnn_lstm_catalog_waveform_fusion import (
+    CATALOG_DIM, FEATURE_NAMES, build_catalog_features)
+from seismolib.catalog import (days_since_prev_major, label_hours,
+                               load_aegean_events,
+                               load_aegean_events_with_location,
+                               truncate_to_reliable_catalog_end)
 from seismolib.metrics import safe_auc
 from seismolib.splits import walk_forward_splits
 from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated

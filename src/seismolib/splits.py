@@ -7,6 +7,7 @@ event counts beside each split rather than row counts alone."""
 import numpy as np
 import pandas as pd
 
+
 def print_split_diagnostics(hourly_index: pd.DatetimeIndex, labels: np.ndarray,
                             train_idx: np.ndarray, val_idx: np.ndarray, test_idx: np.ndarray,
                             n_blocks: int = 10, skew_ratio: float = 1.5) -> None:

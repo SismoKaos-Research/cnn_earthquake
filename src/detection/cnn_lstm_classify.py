@@ -70,8 +70,8 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from seismolib.metrics import (binary_report, majority_class_baseline, print_report,
-                     safe_auc)
+from seismolib.metrics import (binary_report, majority_class_baseline,
+                               print_report, safe_auc)
 from seismolib.model.dual_channel import DualChannelNet
 from seismolib.training import seed_everything
 

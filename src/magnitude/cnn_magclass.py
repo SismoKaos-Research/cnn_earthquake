@@ -49,7 +49,8 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (accuracy_score, classification_report,
-                             confusion_matrix, matthews_corrcoef, roc_auc_score)
+                             confusion_matrix, matthews_corrcoef,
+                             roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
 from magnitude.cnn_regression import AUX_COLUMNS, RegressionSeismicCNN

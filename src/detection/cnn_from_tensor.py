@@ -20,7 +20,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
-from seismolib.training import build_arg_parser, print_config, resolve_preset, run_training
+from seismolib.training import (build_arg_parser, print_config, resolve_preset,
+                                run_training)
 
 
 class SeismicTensorDataset(Dataset):
@@ -135,6 +136,7 @@ def main():
     train_tf = None
     if args.random_erasing > 0:
         from torchvision import transforms
+
         # RandomErasing works directly on tensors. It is the only label-safe
         # augmentation here: flips would reverse time or invert frequency.
         train_tf = transforms.RandomErasing(p=args.random_erasing, scale=(0.02, 0.15))

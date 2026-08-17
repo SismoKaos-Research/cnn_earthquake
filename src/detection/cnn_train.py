@@ -25,9 +25,10 @@ before loading a state-dict checkpoint into it.
 from torchvision import datasets, transforms
 
 # Re-exported for backwards compatibility with cnn_run_from_state.py etc.
-from seismolib.training import (PRESETS, SHORT_WINDOW_THRESHOLD_SEC,  # noqa: F401
-                      ImprovedSeismicCNN, ResBlock, SEBlock, build_arg_parser,
-                      print_config, resolve_preset, run_training)
+from seismolib.training import PRESETS  # noqa: F401
+from seismolib.training import (SHORT_WINDOW_THRESHOLD_SEC, ImprovedSeismicCNN,
+                                ResBlock, SEBlock, build_arg_parser,
+                                print_config, resolve_preset, run_training)
 
 
 def main():

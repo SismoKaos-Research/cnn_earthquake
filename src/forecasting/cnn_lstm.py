@@ -50,7 +50,8 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
 from torch.utils.data import DataLoader, Dataset
 
 from seismolib.metrics import multiclass_report, print_report
-from seismolib.model.blocks import LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
+from seismolib.model.blocks import \
+    LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
 from seismolib.model.dual_channel import DualChannelNet
 from seismolib.training import seed_everything
 

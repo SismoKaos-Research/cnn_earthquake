@@ -39,7 +39,8 @@ from scipy.cluster import hierarchy
 from scipy.spatial.distance import squareform
 from scipy.stats import spearmanr
 
-from seismolib.metrics import predict_mean_baseline, print_report, regression_report
+from seismolib.metrics import (predict_mean_baseline, print_report,
+                               regression_report)
 
 
 def load_data(npz_path):

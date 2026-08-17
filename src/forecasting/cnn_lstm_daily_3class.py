@@ -44,11 +44,13 @@ from sklearn.metrics import balanced_accuracy_score
 from torch.utils.data import DataLoader, Dataset
 
 from seismolib.catalog import load_aegean_events
-from seismolib.splits import walk_forward_splits
-from seismolib.metrics import majority_class_baseline, multiclass_report, print_report
+from seismolib.metrics import (majority_class_baseline, multiclass_report,
+                               print_report)
 from seismolib.model.blocks import LSTMAttentionBranch
-from seismolib.waveform import RawWaveformEncoder, load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.splits import walk_forward_splits
 from seismolib.training import seed_everything
+from seismolib.waveform import (RawWaveformEncoder, load_hourly_raw,
+                                load_hourly_raw_consolidated)
 
 CLASS_NAMES = ["none", "event", "event_after"]
 HOURS_PER_DAY = 24

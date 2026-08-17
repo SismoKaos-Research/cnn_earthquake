@@ -26,12 +26,15 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from forecasting.cnn_lstm_catalog_waveform_fusion import FEATURE_NAMES, build_catalog_features
-from seismolib.catalog import days_since_prev_major, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
-from seismolib.splits import walk_forward_splits
-from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 from features.waveform_dwt_features import build_hourly_waveform_features
 from features.waveform_dwt_features import feature_names as dwt_feature_names
+from forecasting.cnn_lstm_catalog_waveform_fusion import (
+    FEATURE_NAMES, build_catalog_features)
+from seismolib.catalog import (days_since_prev_major, load_aegean_events,
+                               load_aegean_events_with_location,
+                               truncate_to_reliable_catalog_end)
+from seismolib.splits import walk_forward_splits
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 
 
 def parse_args():

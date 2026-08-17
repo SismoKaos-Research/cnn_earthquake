@@ -54,13 +54,17 @@ from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
 from seismolib.baselines import rate_persistence_auc
-from seismolib.catalog import count_events_in_window, days_since_prev_major, label_hours, label_hours_rate_change, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
-from seismolib.metrics import safe_auc
-from seismolib.splits import print_split_diagnostics, walk_forward_splits
-from seismolib.metrics import binary_report, print_report
+from seismolib.catalog import (count_events_in_window, days_since_prev_major,
+                               label_hours, label_hours_rate_change,
+                               load_aegean_events,
+                               load_aegean_events_with_location,
+                               truncate_to_reliable_catalog_end)
+from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.model.blocks import LSTMAttentionBranch
-from seismolib.waveform import RawWaveformEncoder, load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.training import seed_everything
+from seismolib.waveform import (RawWaveformEncoder, load_hourly_raw,
+                                load_hourly_raw_consolidated)
 
 # log1p(days since prev major event), count_7d/30d/90d (major events, M>=threshold --
 # same set label_hours/persistence use), mean_mag_30d, max_mag_90d, b_value_90d,
