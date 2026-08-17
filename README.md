@@ -11,13 +11,34 @@ feature-derived waveform, a 2D CNN branch over a RAM-image or spectrogram
 encoding, fused and classified/regressed — adapted, corrected, and extended
 across all four tasks.
 
-**Start here:** [`report.md`](report.md) is the full technical writeup —
+**Start here:** [`docs/report.md`](docs/report.md) is the full technical writeup —
 architecture, every experiment, every defect found and fixed, and the
-reproduction commands for each result. [`accuracy_summary.md`](accuracy_summary.md)
-is a one-page table of every headline number. The `*_CHEATSHEET.md` files and
-[`catalog_forecast_report.md`](catalog_forecast_report.md) /
-[`spectrogram_classifier_report.md`](spectrogram_classifier_report.md) cover
-specific sub-investigations in more depth than `report.md`'s summary of them.
+reproduction commands for each result. [`docs/accuracy_summary.md`](docs/accuracy_summary.md)
+is a one-page table of every headline number. Both span all four tasks, which
+is why they sit in `docs/` rather than under any one of them.
+
+## Layout
+
+Scripts are grouped by the task they serve, with that task's reports beside
+them. Each directory has its own README indexing what is inside.
+
+| Directory | | Contents |
+|---|---|---|
+| [`src/forecasting/`](src/forecasting/) | 18 | Catalog and raw-waveform forecasting, fusion, LOEO |
+| [`src/detection/`](src/detection/) | 12 | Earthquake-vs-noise classification, stacking, cross-corpus evaluation |
+| [`src/features/`](src/features/) | 9 | Feature engineering, RFE, dataset builders |
+| [`src/magnitude/`](src/magnitude/) | 5 | Magnitude regression and classification |
+| [`src/groundmotion/`](src/groundmotion/) | 3 | Peak ground motion |
+| [`src/seismolib/`](src/seismolib/) | — | Shared library: metrics, training, catalog, splits, waveform, baselines, models |
+| [`docs/`](docs/) | — | Cross-cutting write-ups and `experiment_results/` |
+
+`seismolib` holds everything two families would otherwise each copy. Install it
+once and every script resolves it regardless of where it is run from:
+
+```bash
+uv pip install -e .
+python3 src/detection/cnn_lstm_classify.py --help
+```
 
 This repo (on GitHub as `cnn_earthquake`) is the model/training half of a
 two-repo pipeline. The companion repo — referred to below as `Sismokaos`
