@@ -90,6 +90,10 @@ def parse_args():
     p.add_argument("--feature-columns", default=None,
                    help="Comma-separated columns. Defaults to the RFE subset "
                         f"({','.join(OPTIMIZED_CATALOG_FEATURES)}) when present.")
+    p.add_argument("--no-dsp-feature", action="store_true",
+                   help="Do not append log1p_dsp to the features. Off by default: "
+                        "without it the model is asked to beat a persistence floor "
+                        "built from a quantity it cannot see.")
     p.add_argument("--cv-folds", type=int, default=2)
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--batch-size", type=int, default=64)
@@ -242,6 +246,18 @@ def main():
     major_times = load_aegean_events(args.catalog_path, args.threshold)
     labels = label_hours(hours, major_times, args.horizon_days)
     dsp = days_since_prev_major(hours, major_times)
+
+    # The persistence floor below ranks by `dsp`. Unless the feature table
+    # already carries it, the model cannot see that quantity at all -- it is
+    # asked to beat a bar built from a number it was never given. The same
+    # omission cost a rate-target run 0.14 AUC elsewhere in this repo
+    # (`cnn_lstm_catalog_waveform_fusion.py`, the RATE_FEATURE_NAMES comment).
+    # 3650 days stands in for "no previous event on record", matching that
+    # script's convention so the two feature sets line up.
+    if not args.no_dsp_feature and "log1p_dsp" not in names:
+        feats = np.column_stack(
+            [feats, np.log1p(np.nan_to_num(dsp, nan=3650.0)).astype(np.float32)])
+        names = list(names) + ["log1p_dsp"]
 
     print("=" * 66)
     print(f"GRU/CNN forecaster | {'catalog + waveform' if use_waveform else 'catalog only'}")
