@@ -41,10 +41,10 @@ Not imported by anything else -- standalone script.
 import numpy as np
 import torch
 
-from feature_lstm_forecast import (days_since_prev_major, load_aegean_events,
-                                   walk_forward_splits)
-from raw_cnn_lstm_forecast import (load_hourly_raw, load_hourly_raw_consolidated,
-                                   parse_args, run_fold)
+from seismolib.catalog import days_since_prev_major, load_aegean_events
+from seismolib.splits import walk_forward_splits
+from raw_cnn_lstm_forecast import parse_args, run_fold
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 
 
 def build_curated_anchors(hour_index, major_times, chunk_hours, seed=0):

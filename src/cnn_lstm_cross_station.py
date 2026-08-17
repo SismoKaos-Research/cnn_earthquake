@@ -39,12 +39,11 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader
 
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, safe_auc,
-                                   truncate_to_reliable_catalog_end)
+from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, truncate_to_reliable_catalog_end
+from seismolib.metrics import safe_auc
 from seismolib.metrics import binary_report, print_report
-from raw_cnn_lstm_forecast import (RawCNNLSTM, RawSeqDataset, load_hourly_raw,
-                                   load_hourly_raw_consolidated)
+from raw_cnn_lstm_forecast import RawCNNLSTM
+from seismolib.waveform import RawSeqDataset, load_hourly_raw, load_hourly_raw_consolidated
 from seismolib.training import seed_everything
 
 

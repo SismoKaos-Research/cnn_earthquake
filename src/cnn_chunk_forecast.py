@@ -42,9 +42,11 @@ from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_proximity_classify import CNNProximityClassifier
-from feature_lstm_forecast import load_aegean_events, safe_auc, walk_forward_splits
+from seismolib.catalog import load_aegean_events
+from seismolib.metrics import safe_auc
+from seismolib.splits import walk_forward_splits
 from seismolib.metrics import binary_report, print_report
-from raw_cnn_lstm_forecast import load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 from seismolib.training import seed_everything
 
 

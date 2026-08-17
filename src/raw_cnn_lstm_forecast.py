@@ -29,183 +29,27 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, print_split_diagnostics,
-                                   safe_auc, truncate_to_reliable_catalog_end,
-                                   walk_forward_splits)
+from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, truncate_to_reliable_catalog_end
+from seismolib.metrics import safe_auc
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report
 from seismolib.model.sequence import SequenceHeadNet
 from seismolib.training import seed_everything
-
-_DATE_DIR_RE = re.compile(r"^\d{4}_\d{2}_\d{2}$")
-HOUR_SAMPLES = 36000  # 3600s * 5Hz
-
-
-class DualLogger:
-    """Intercepts sys.stdout to print to both the terminal and a log file."""
-    def __init__(self, filepath):
-        self.terminal = sys.stdout
-        self.log = open(filepath, "a", encoding="utf-8")
-
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
+from seismolib.waveform import RawSeqDataset, RawWaveformEncoder, load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.logging import DualLogger
 
 
-def load_really_long_csv(csv_path: str, chunksize: int = 100_000) -> pd.DataFrame:
-    """Loads a really long CSV file in memory-efficient chunks.
-
-    Designed for massive Rust feature outputs or raw exports where loading the 
-    entire file at once would risk an Out-Of-Memory (OOM) crash.
-    """
-    print(f"  [streaming] Reading massive CSV in chunks of {chunksize:,} rows: {csv_path}")
-    chunks = []
-    
-    # Iterate through the CSV in chunks to keep RAM usage strictly bounded
-    for chunk in pd.read_csv(csv_path, chunksize=chunksize, low_memory=False):
-        # Vectorized absolute time assignment using Zaman_Dk minutes (Unix Epoch)
-        if "Zaman_Dk" in chunk.columns:
-            exact_times = pd.to_datetime(chunk["Zaman_Dk"], unit="m")
-            chunk = chunk.copy().assign(hour_start=exact_times.dt.floor("h"))
-        chunks.append(chunk)
-        
-    df = pd.concat(chunks, ignore_index=True)
-    
-    # If hour_start was successfully created, aggregate to hourly means
-    if "hour_start" in df.columns:
-        feature_cols = [c for c in df.columns if c not in ("Pencere_ID", "Zaman_Dk", "hour_start", "index")]
-        hourly = df.groupby("hour_start")[feature_cols].mean().sort_index()
-        return hourly
-    return df
 
 
-def load_hourly_raw(data_root: str, hour_samples: int = HOUR_SAMPLES, max_days: int = None):
-    """Loads every hour's raw waveform .npy file into one in-RAM array."""
-    root = Path(data_root)
-    
-    # If the user passed a really long CSV instead of a directory, delegate to CSV loader
-    if root.is_file() or str(data_root).endswith(".csv"):
-        return load_really_long_csv(str(data_root))
-
-    date_dirs = sorted(d for d in root.iterdir() if d.is_dir() and _DATE_DIR_RE.match(d.name))
-    if max_days is not None:
-        date_dirs = date_dirs[:max_days]
-
-    entries = []
-    for date_dir in date_dirs:
-        for npy_path in sorted(date_dir.glob("*.npy")):
-            parts = npy_path.stem.split("_")
-            if len(parts) < 2:
-                continue
-            try:
-                hour_dt = datetime.strptime(parts[0] + parts[1], "%Y%m%d%H%M%S")
-            except ValueError:
-                continue
-            entries.append((hour_dt, npy_path))
-    entries.sort(key=lambda e: e[0])
-    hour_index = pd.DatetimeIndex([e[0] for e in entries])
-
-    raw = np.empty((len(entries), 3, hour_samples), dtype=np.float32)
-    for h, (_, npy_path) in enumerate(entries):
-        struct = np.load(npy_path)
-        for c, comp in enumerate(("E", "N", "Z")):
-            x = (struct[comp].astype(np.float32) if comp in struct.dtype.names
-                else np.full(len(struct), np.nan, dtype=np.float32))
-            if len(x) != hour_samples:
-                fixed = np.full(hour_samples, np.nan, dtype=np.float32)
-                n = min(hour_samples, len(x))
-                fixed[:n] = x[:n]
-                x = fixed
-            nan = np.isnan(x)
-            if nan.any() and (~nan).sum() > 3:
-                x[nan] = np.interp(np.flatnonzero(nan), np.flatnonzero(~nan), x[~nan])
-            raw[h, c] = np.nan_to_num(x, nan=0.0)
-    return hour_index, raw
 
 
-def load_hourly_raw_consolidated(consolidated_dir: str, mmap: bool = True):
-    """Loads a directory built by consolidate_hourly_raw.py."""
-    d = Path(consolidated_dir)
-    hours = np.load(d / "hours.npy")
-    hour_index = pd.DatetimeIndex(pd.to_datetime(hours, unit="s"))
-    raw = np.load(d / "raw.npy", mmap_mode="r" if mmap else None)
-    return hour_index, raw
 
 
-class RawSeqDataset(Dataset):
-    """Windows of `seq_hours` consecutive hourly raw waveforms or features."""
-
-    def __init__(self, raw, labels: np.ndarray, seq_hours: int, indices: np.ndarray, stats=None):
-        self.raw = raw
-        self.labels = labels
-        self.seq_hours = seq_hours
-        self.indices = indices
-        
-        # Support both 3D raw arrays (n_hours, 3, samples) and 2D feature DataFrames/arrays (n_hours, n_features)
-        self.is_tabular = isinstance(raw, pd.DataFrame) or (isinstance(raw, np.ndarray) and raw.ndim == 2)
-        
-        if stats is None:
-            stat_idx = indices[np.linspace(0, len(indices) - 1, min(500, len(indices))).astype(int)]
-            if self.is_tabular:
-                sub = np.concatenate([raw.iloc[max(0, i - seq_hours + 1):i + 1].to_numpy() for i in stat_idx], axis=0)
-                mu, sd = np.nanmean(sub, axis=0), np.nanstd(sub, axis=0) + 1e-6
-                mu = np.where(np.isfinite(mu), mu, 0.0)
-                sd = np.where(np.isfinite(sd) & (sd > 1e-8), sd, 1.0)
-                stats = (mu, sd)
-            else:
-                sub = np.concatenate([raw[max(0, i - seq_hours + 1):i + 1] for i in stat_idx], axis=0)
-                mu = sub.mean(axis=(0, 2), keepdims=True)
-                sd = sub.std(axis=(0, 2), keepdims=True) + 1e-6
-                stats = (mu[0], sd[0])
-        self.stats = stats
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        end = self.indices[idx]
-        start = end - self.seq_hours + 1
-        
-        if self.is_tabular:
-            seq = self.raw.iloc[start:end + 1].copy().to_numpy() if isinstance(self.raw, pd.DataFrame) else self.raw[start:end + 1].copy()
-            mu, sd = self.stats
-            seq = (seq - mu) / sd
-            seq = np.nan_to_num(seq, nan=0.0, posinf=0.0, neginf=0.0)
-        else:
-            seq = self.raw[start:end + 1]
-            mu, sd = self.stats
-            seq = (seq - mu[None]) / sd[None]
-            
-        return (torch.from_numpy(seq).float(),
-                torch.tensor(self.labels[end], dtype=torch.float32))
 
 
-class RawWaveformEncoder(nn.Module):
-    """1D CNN that embeds one hour's raw 3-component waveform."""
 
-    def __init__(self, out_dim=32, dropout=0.3):
-        super().__init__()
 
-        def block(cin, cout, k, s):
-            return nn.Sequential(nn.Conv1d(cin, cout, k, stride=s, padding=k // 2),
-                                 nn.BatchNorm1d(cout), nn.GELU(), nn.Dropout(dropout))
 
-        self.net = nn.Sequential(
-            block(3, 16, 7, 4),
-            block(16, 32, 5, 4),
-            block(32, 32, 5, 4),
-            block(32, out_dim, 3, 4),
-            nn.AdaptiveAvgPool1d(1),
-        )
-        self.out_dim = out_dim
-
-    def forward(self, x):
-        return self.net(x).squeeze(-1)
 
 
 class RawCNNLSTM(SequenceHeadNet):

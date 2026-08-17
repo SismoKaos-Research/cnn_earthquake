@@ -29,12 +29,11 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.metrics import brier_score_loss
 
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, print_split_diagnostics,
-                                   safe_auc, truncate_to_reliable_catalog_end,
-                                   walk_forward_splits)
+from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events, truncate_to_reliable_catalog_end
+from seismolib.metrics import safe_auc
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report
-from raw_cnn_lstm_forecast import load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 from waveform_dwt_features import build_hourly_waveform_features, feature_names
 
 

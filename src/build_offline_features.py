@@ -11,8 +11,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from catalog_feature_processor import build_catalog_features
-from feature_lstm_forecast import (load_aegean_events,
-                                   truncate_to_reliable_catalog_end)
+from seismolib.catalog import load_aegean_events, truncate_to_reliable_catalog_end
 from waveform_dwt_features import build_hourly_waveform_features, feature_names
 
 

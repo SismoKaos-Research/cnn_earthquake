@@ -28,11 +28,9 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from cnn_lstm_catalog_waveform_fusion import (FEATURE_NAMES,
                                               build_catalog_features)
-from feature_lstm_forecast import (days_since_prev_major, load_aegean_events,
-                                   load_aegean_events_with_location,
-                                   truncate_to_reliable_catalog_end,
-                                   walk_forward_splits)
-from raw_cnn_lstm_forecast import load_hourly_raw, load_hourly_raw_consolidated
+from seismolib.catalog import days_since_prev_major, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
+from seismolib.splits import walk_forward_splits
+from seismolib.waveform import load_hourly_raw, load_hourly_raw_consolidated
 from waveform_dwt_features import build_hourly_waveform_features
 from waveform_dwt_features import feature_names as dwt_feature_names
 

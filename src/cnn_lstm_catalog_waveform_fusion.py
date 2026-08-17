@@ -53,15 +53,13 @@ import torch.optim as optim
 from sklearn.metrics import brier_score_loss
 from torch.utils.data import DataLoader, Dataset
 
-from feature_lstm_forecast import (count_events_in_window, days_since_prev_major,
-                                   label_hours, label_hours_rate_change, load_aegean_events,
-                                   load_aegean_events_with_location, print_split_diagnostics,
-                                   rate_persistence_auc, safe_auc,
-                                   truncate_to_reliable_catalog_end, walk_forward_splits)
+from seismolib.baselines import rate_persistence_auc
+from seismolib.catalog import count_events_in_window, days_since_prev_major, label_hours, label_hours_rate_change, load_aegean_events, load_aegean_events_with_location, truncate_to_reliable_catalog_end
+from seismolib.metrics import safe_auc
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report
 from seismolib.model.blocks import LSTMAttentionBranch
-from raw_cnn_lstm_forecast import (RawWaveformEncoder, load_hourly_raw,
-                                   load_hourly_raw_consolidated)
+from seismolib.waveform import RawWaveformEncoder, load_hourly_raw, load_hourly_raw_consolidated
 from seismolib.training import seed_everything
 
 # log1p(days since prev major event), count_7d/30d/90d (major events, M>=threshold --

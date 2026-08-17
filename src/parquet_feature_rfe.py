@@ -15,9 +15,9 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from feature_lstm_forecast import (days_since_prev_major, label_hours,
-                                   load_aegean_events, safe_auc,
-                                   walk_forward_splits)
+from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events
+from seismolib.metrics import safe_auc
+from seismolib.splits import walk_forward_splits
 
 
 def parse_args():

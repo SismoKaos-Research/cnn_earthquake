@@ -26,28 +26,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from feature_lstm_forecast import (HourlySeqDataset, days_since_prev_major,
-                                   label_hours, load_aegean_events,
-                                   print_split_diagnostics,
-                                   walk_forward_splits)
+from feature_lstm_forecast import HourlySeqDataset
+from seismolib.catalog import days_since_prev_major, label_hours, load_aegean_events
+from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.training import seed_everything
+from seismolib.logging import DualLogger
 
 
-class DualLogger:
-    """Intercepts sys.stdout to print to both the terminal and a log file."""
-    def __init__(self, filepath):
-        self.terminal = sys.stdout
-        self.log = open(filepath, "a", encoding="utf-8")
-
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
 
 
 def load_hourly_features(features_csv: str) -> pd.DataFrame:
