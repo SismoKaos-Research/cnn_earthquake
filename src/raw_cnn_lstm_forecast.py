@@ -33,9 +33,9 @@ from feature_lstm_forecast import (days_since_prev_major, label_hours,
                                    load_aegean_events, print_split_diagnostics,
                                    safe_auc, truncate_to_reliable_catalog_end,
                                    walk_forward_splits)
-from metrics import binary_report, print_report
-from model.sequence import SequenceHeadNet
-from training import seed_everything
+from seismolib.metrics import binary_report, print_report
+from seismolib.model.sequence import SequenceHeadNet
+from seismolib.training import seed_everything
 
 _DATE_DIR_RE = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 HOUR_SAMPLES = 36000  # 3600s * 5Hz

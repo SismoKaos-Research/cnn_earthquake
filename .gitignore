@@ -14,8 +14,8 @@ pretrained_encoder.pth
 
 results/
 raw/
-data/
-data-old/
+/data/
+/data-old/
 trained_model*/
 dataset*/
 *.log

@@ -45,10 +45,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from cnn_lstm_daily_3class import CLASS_NAMES, HOURS_PER_DAY, build_3class_daily_chunks
 from feature_lstm_forecast import load_aegean_events, truncate_to_reliable_catalog_end
-from metrics import majority_class_baseline, multiclass_report, print_report
-from model.blocks import LSTMAttentionBranch
+from seismolib.metrics import majority_class_baseline, multiclass_report, print_report
+from seismolib.model.blocks import LSTMAttentionBranch
 from raw_cnn_lstm_forecast import RawWaveformEncoder, load_hourly_raw_consolidated
-from training import seed_everything
+from seismolib.training import seed_everything
 
 WEEK_DAYS = 7
 

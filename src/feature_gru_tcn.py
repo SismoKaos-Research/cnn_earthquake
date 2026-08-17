@@ -30,8 +30,8 @@ from feature_lstm_forecast import (HourlySeqDataset, days_since_prev_major,
                                    label_hours, load_aegean_events,
                                    print_split_diagnostics,
                                    walk_forward_splits)
-from metrics import binary_report, print_report, safe_auc
-from training import seed_everything
+from seismolib.metrics import binary_report, print_report, safe_auc
+from seismolib.training import seed_everything
 
 
 class DualLogger:

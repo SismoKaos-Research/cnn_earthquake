@@ -68,9 +68,9 @@ import torch.optim as optim
 from sklearn.linear_model import Ridge
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import binary_report, print_report, regression_report, safe_auc, safe_mcc
-from model.dual_channel import DualChannelDualHeadNet
-from training import seed_everything
+from seismolib.metrics import binary_report, print_report, regression_report, safe_auc, safe_mcc
+from seismolib.model.dual_channel import DualChannelDualHeadNet
+from seismolib.training import seed_everything
 
 AUX_FEATURES = ["log_duration_days", "log_rate", "log_rate_recent", "rate_accel",
                "mean_mag", "max_mag", "mag_std", "log_total_energy",

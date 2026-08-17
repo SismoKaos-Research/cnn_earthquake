@@ -58,11 +58,11 @@ from feature_lstm_forecast import (count_events_in_window, days_since_prev_major
                                    load_aegean_events_with_location, print_split_diagnostics,
                                    rate_persistence_auc, safe_auc,
                                    truncate_to_reliable_catalog_end, walk_forward_splits)
-from metrics import binary_report, print_report
-from model.blocks import LSTMAttentionBranch
+from seismolib.metrics import binary_report, print_report
+from seismolib.model.blocks import LSTMAttentionBranch
 from raw_cnn_lstm_forecast import (RawWaveformEncoder, load_hourly_raw,
                                    load_hourly_raw_consolidated)
-from training import seed_everything
+from seismolib.training import seed_everything
 
 # log1p(days since prev major event), count_7d/30d/90d (major events, M>=threshold --
 # same set label_hours/persistence use), mean_mag_30d, max_mag_90d, b_value_90d,

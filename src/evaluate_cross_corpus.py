@@ -42,7 +42,7 @@ from torch.utils.data import DataLoader
 
 from cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset, \
     trivial_amplitude_floor
-from metrics import binary_report, print_report, safe_auc
+from seismolib.metrics import binary_report, print_report, safe_auc
 
 
 def parse_args():

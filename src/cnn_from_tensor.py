@@ -20,7 +20,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
-from training import build_arg_parser, print_config, resolve_preset, run_training
+from seismolib.training import build_arg_parser, print_config, resolve_preset, run_training
 
 
 class SeismicTensorDataset(Dataset):

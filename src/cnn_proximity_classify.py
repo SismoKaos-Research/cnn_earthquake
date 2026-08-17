@@ -62,10 +62,10 @@ from torch.utils.data import DataLoader, Dataset
 from feature_lstm_forecast import (days_since_prev_major, days_until_next_major,
                                    label_hours, load_aegean_events, print_split_diagnostics,
                                    safe_auc, walk_forward_splits)
-from metrics import binary_report, print_report
+from seismolib.metrics import binary_report, print_report
 from raw_cnn_lstm_forecast import (RawWaveformEncoder, load_hourly_raw,
                                    load_hourly_raw_consolidated)
-from training import seed_everything
+from seismolib.training import seed_everything
 
 
 def label_proximity(dsp: np.ndarray, dun: np.ndarray, close_days: float) -> np.ndarray:

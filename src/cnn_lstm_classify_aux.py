@@ -44,9 +44,9 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import majority_class_baseline
-from model.dual_channel import DualChannelNet
-from training import seed_everything
+from seismolib.metrics import majority_class_baseline
+from seismolib.model.dual_channel import DualChannelNet
+from seismolib.training import seed_everything
 
 AUX_FEATURES = ["log_snr", "log_rms"]
 CHANNEL_CHOICES = ["all", "1d", "2d", "aux", "1d+aux", "2d+aux"]

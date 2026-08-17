@@ -53,7 +53,7 @@ from sklearn.metrics import (accuracy_score, classification_report,
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_regression import AUX_COLUMNS, RegressionSeismicCNN
-from training import seed_everything
+from seismolib.training import seed_everything
 
 # ---------------------------------------------------------------------------
 # Data

@@ -59,10 +59,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import predict_mean_baseline, print_report, regression_report
-from model.dual_channel import DualChannelNet
+from seismolib.metrics import predict_mean_baseline, print_report, regression_report
+from seismolib.model.dual_channel import DualChannelNet
 from cnn_regression import AUX_COLUMNS, detect_aux_columns, regression_metrics, report_baselines
-from training import seed_everything
+from seismolib.training import seed_everything
 
 
 # ---------------------------------------------------------------------------

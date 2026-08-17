@@ -46,9 +46,9 @@ import torch.optim as optim
 from sklearn.linear_model import Ridge
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import regression_report
-from model.trunk2d import SETrunk2D
-from training import seed_everything
+from seismolib.metrics import regression_report
+from seismolib.model.trunk2d import SETrunk2D
+from seismolib.training import seed_everything
 
 AUX_COLUMNS = ["log_snr", "log_distance"]
 PER_COMPONENT_AUX_COLUMNS = ["log_snr_0", "log_snr_1", "log_snr_2", "log_distance"]

@@ -41,7 +41,7 @@ from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_regression import AUX_COLUMNS, RegressionSeismicCNN
-from training import seed_everything
+from seismolib.training import seed_everything
 
 RISK_CLASSES = ["00_noise", "01_low_risk", "02_high_risk"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(RISK_CLASSES)}

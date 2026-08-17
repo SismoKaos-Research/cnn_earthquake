@@ -39,9 +39,9 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import majority_class_baseline
-from model.trunk2d import SETrunk2D
-from training import seed_everything
+from seismolib.metrics import majority_class_baseline
+from seismolib.model.trunk2d import SETrunk2D
+from seismolib.training import seed_everything
 
 AUX_FEATURES = ["log_snr", "log_rms"]
 

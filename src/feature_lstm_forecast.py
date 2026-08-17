@@ -29,9 +29,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import binary_report, print_report, safe_auc  # noqa: F401
-from model.sequence import SequenceHeadNet
-from training import seed_everything
+from seismolib.metrics import binary_report, print_report, safe_auc  # noqa: F401
+from seismolib.model.sequence import SequenceHeadNet
+from seismolib.training import seed_everything
 
 AEGEAN_BBOX = (36.0, 40.0, 25.0, 30.0)  # lat0, lat1, lon0, lon1
 

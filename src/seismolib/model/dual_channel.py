@@ -10,7 +10,7 @@ cnn_lstm_regression.py (DualChannelRegressionNet), cnn_lstm_forecast.py
 import torch
 import torch.nn as nn
 
-from model.blocks import CNNBranch, GatedFusion, LSTMAttentionBranch
+from seismolib.model.blocks import CNNBranch, GatedFusion, LSTMAttentionBranch
 
 
 class DualChannelTrunk(nn.Module):

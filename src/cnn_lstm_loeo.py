@@ -45,7 +45,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 
 from cnn_lstm import DualChannelRiskNet, risk_classes_from_manifest
-from training import seed_everything
+from seismolib.training import seed_everything
 
 # Populated from the manifest in main(); see `risk_classes_from_manifest`.
 # Hardcoding these was a real defect: the tercile boundaries `catalog.py`

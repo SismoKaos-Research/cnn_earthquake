@@ -49,10 +49,10 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
                              cohen_kappa_score, confusion_matrix)
 from torch.utils.data import DataLoader, Dataset
 
-from metrics import multiclass_report, print_report
-from model.blocks import LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
-from model.dual_channel import DualChannelNet
-from training import seed_everything
+from seismolib.metrics import multiclass_report, print_report
+from seismolib.model.blocks import LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
+from seismolib.model.dual_channel import DualChannelNet
+from seismolib.training import seed_everything
 
 RISK_CLASSES = ["lt_1y", "1_5y", "gt_5y"]
 CLASS_TO_IDX = {c: i for i, c in enumerate(RISK_CLASSES)}

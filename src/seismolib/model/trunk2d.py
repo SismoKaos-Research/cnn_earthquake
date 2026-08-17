@@ -8,7 +8,7 @@ Not a runnable script -- imported only. Callers: training.py
 import torch
 import torch.nn as nn
 
-from model.blocks import ResBlock
+from seismolib.model.blocks import ResBlock
 
 
 class SETrunk2D(nn.Module):

@@ -49,7 +49,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 
-from metrics import regression_report
+from seismolib.metrics import regression_report
 
 # target key -> (linear column, log column, unit, matched-unit input peak, degenerate?)
 #

@@ -29,8 +29,8 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader
 
-from model.blocks import ResBlock, SEBlock  # re-exported for existing `from training import ResBlock` callers
-from model.trunk2d import SETrunk2D
+from seismolib.model.blocks import ResBlock, SEBlock  # re-exported for existing `from training import ResBlock` callers
+from seismolib.model.trunk2d import SETrunk2D
 
 # --------------------------------------------------------------------------
 # Model

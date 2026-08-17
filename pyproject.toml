@@ -1,3 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# `seismolib` is installed (editable) so scripts resolve it no matter which
+# directory they sit in. Without this, imports would only work while every
+# script lived together in src/ and was run from there -- which is exactly the
+# flat layout this package exists to replace.
+[tool.hatch.build.targets.wheel]
+packages = ["src/seismolib"]
+
 [project]
 name = "model-cnn-lstm"
 version = "0.1.0"

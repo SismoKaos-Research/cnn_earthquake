@@ -8,7 +8,7 @@ Not a runnable script -- imported only. Callers: feature_lstm_forecast.py
 
 import torch.nn as nn
 
-from model.blocks import LSTMAttentionBranch
+from seismolib.model.blocks import LSTMAttentionBranch
 
 
 class SequenceHeadNet(nn.Module):

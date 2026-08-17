@@ -23,7 +23,7 @@ import torch.nn as nn
 
 from feature_lstm_forecast import (days_since_prev_major, label_hours,
                                    load_aegean_events, walk_forward_splits)
-from model.sequence import SequenceHeadNet
+from seismolib.model.sequence import SequenceHeadNet
 from raw_cnn_lstm_forecast import (load_hourly_raw, load_hourly_raw_consolidated,
                                    parse_args, run_horizon)
 

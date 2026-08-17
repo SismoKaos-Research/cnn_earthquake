@@ -81,8 +81,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from cnn_lstm import LSTMAttentionBranch
 from groundmotion_baselines import TARGETS, load
-from metrics import print_report, regression_report
-from training import seed_everything
+from seismolib.metrics import print_report, regression_report
+from seismolib.training import seed_everything
 
 
 # ---------------------------------------------------------------------------
