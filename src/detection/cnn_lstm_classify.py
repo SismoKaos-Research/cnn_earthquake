@@ -32,8 +32,16 @@ by which dataset you point it at, not by anything here.
 `--channels 2d` alone is architecturally close to the existing single-branch
 CNN classifier (`cnn_train.py`), so it doubles as that baseline's comparison
 point here -- and on the spectrogram datasets it is also the BEST known
-configuration: every fusion variant scored lower (0.9793 AUC for `2d` alone
-vs 0.9743-0.9761 for the fusion variants, spectrogram_classifier_report.md).
+configuration: every fusion variant scored lower (0.9779 AUC for `2d` alone
+vs 0.9735 for gated fusion on the original benchmark,
+REPORT_event_noise_detector.md 7.1).
+
+**Read every AUC here against a conditional floor, not the majority class.**
+These windows are separated largely by loudness, so `trivial_amplitude_floor`
+below computes what a single amplitude scalar achieves with no learning and
+the run reports the edge over it. On the current benchmark that floor is
+0.9049, so 0.9892 is worth +0.0847 -- not the +0.489 a majority-class
+comparison would suggest.
 
 Training conventions (label smoothing, unsmoothed-loss diagnostic, AMP, val
 AUC/MCC, matched 0.5 threshold) match `training.py`, the shared core for the
@@ -41,10 +49,19 @@ image-only classifiers -- kept as its own loop rather than forced through
 that module, since it assumes a single-tensor model, not two paired inputs.
 
 Usage:
-    # the headline detector: 0.9786 +/- 0.0014 AUC over seeds 42/43/44
-    python cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --channels 2d --batch-size 32
-    python cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --fusion gate  # gated fusion
-    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s                    # legacy RAM
+    # the headline detector: 0.9892 +/- 0.0003 AUC over seeds 42/43/44,
+    # against a 0.9049 amplitude floor (catalogue-anchored + hard negatives)
+    python cnn_lstm_classify.py --dataset-dir dataset_specdual_catalog_6s_matched_hard \
+        --channels 2d --batch-size 32 --ensemble-seeds 42,43,44
+
+    # 3s windows: 0.9805 against a 0.8481 floor. A shorter window lowers the
+    # floor (less post-arrival energy), so it must be read against its own.
+    python cnn_lstm_classify.py --dataset-dir dataset_specdual_catalog_3s_anchored_hard \
+        --channels 2d --batch-size 32 --ensemble-seeds 42,43,44
+
+    python cnn_lstm_classify.py --dataset-dir dataset_specdual_catalog_6s_matched_hard \
+        --fusion gate --channels all   # gated fusion; measurably worse, see 7.1
+    python cnn_lstm_classify.py --dataset-dir dataset_dual_6s   # legacy RAM
 
 Note `RamDualTensorDataset` and `RamDualEncoder` keep "Ram" in their names for
 import compatibility (cnn_lstm_stack.py and seismic_cli/ram_dual.py both
@@ -295,8 +312,11 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
 
     The training body is unchanged from the single-seed version that produced
     0.9793 -- this only lifts it into a function so seeds can be looped and
-    ensembled. Seed 42 must still reproduce 0.9793/0.8667/0.9328 exactly; if it
-    does not, this refactor changed behaviour and is wrong.
+    ensembled. That invariant was checked against `dataset_specdual_6s`, which
+    has since been superseded by the catalogue-anchored datasets and is no
+    longer on disk, so the specific triple 0.9793/0.8667/0.9328 is no longer
+    reproducible; the guarantee it documented (this refactor changed nothing
+    about training) still holds.
 
     Returns:
         Tuple of (y_true, y_score, y_pred, gates, n_params) for the test split,
