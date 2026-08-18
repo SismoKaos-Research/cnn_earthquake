@@ -399,7 +399,15 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    save_path = os.path.join(args.save_dir, "best_cnnlstm_regression.pth")
+    # The checkpoint name must identify the RUN, not just the task. A fixed
+    # filename means two runs sharing --save-dir overwrite each other, and the
+    # second silently reloads the first's weights at the end of training. That
+    # exact bug produced -- and forced the retraction of -- an ensemble AUC of
+    # 0.9108 on the detection side (report.md 8.1). Config, split, seed and PID
+    # together make collision impossible even for two identical commands.
+    run_tag = (f"{args.channels}_{args.split_by}_seed{args.seed}"
+               f"_split{args.seed_split}_pid{os.getpid()}")
+    save_path = os.path.join(args.save_dir, f"best_cnnlstm_regression_{run_tag}.pth")
     best_val_mae, no_improve = float("inf"), 0
 
     def evaluate(loader):
