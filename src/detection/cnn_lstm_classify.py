@@ -206,13 +206,14 @@ class DualChannelBinaryNet(DualChannelNet):
     to combine."""
 
     def __init__(self, seq_dim, img_channels, hidden=64, fusion_dim=128,
-                dropout=0.3, channels="all", fusion="linear"):
+                dropout=0.3, channels="all", fusion="linear", branch1d="lstm"):
         """See `DualChannelNet.__init__` (`aux_dim=0`, `n_classes=1`,
         `squeeze_output=False` always here -- the caller squeezes/unsqueezes
         as needed to match `BCEWithLogitsLoss`'s (batch, 1) convention)."""
         super().__init__(seq_dim, img_channels, aux_dim=0, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
-                         fusion=fusion, n_classes=1, squeeze_output=False)
+                         fusion=fusion, n_classes=1, squeeze_output=False,
+                         branch1d=branch1d)
 
     def forward(self, seq, img):
         """See `DualChannelNet.forward` (`aux=None` always here).
@@ -252,6 +253,15 @@ def parse_args():
                         "-- linear fusion underperformed the best single branch on "
                         "both RAM and spectrogram 2D representations). Only affects "
                         "--channels all.")
+    p.add_argument("--branch-1d", default="lstm", choices=["lstm", "cnn", "cnn-lstm"],
+                   help="Architecture of the 1D (raw-waveform) branch. lstm: the "
+                        "existing LSTM+attention over raw 100Hz samples, which every "
+                        "published result here used. cnn-lstm: a strided 1D conv "
+                        "encoder first, then that same LSTM+attention -- the order "
+                        "EQTransformer and PhaseNet use, and the thing the 1D branch "
+                        "has never been given. cnn: conv encoder only, to isolate "
+                        "whether the recurrence adds anything once local features "
+                        "exist. No effect under --channels 2d.")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=2e-4)
@@ -325,7 +335,8 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     seed_everything(seed)
     model = DualChannelBinaryNet(seq_shape[-1], img_shape[0], hidden=args.hidden,
                                  fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                 channels=args.channels, fusion=args.fusion).to(device)
+                                 channels=args.channels, fusion=args.fusion,
+                                 branch1d=args.branch_1d).to(device)
     n_params = sum(p.numel() for p in model.parameters())
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
@@ -346,7 +357,7 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     # they matched it was silent, and a seed scored 0.2480 -- an inverted model,
     # reported as if it were a training outcome. Config plus dataset identity plus
     # PID makes collision impossible even for two identical commands run at once.
-    run_tag = (f"{args.channels}_{args.fusion}"
+    run_tag = (f"{args.channels}_{args.fusion}_{args.branch_1d}"
                f"_{os.path.basename(os.path.normpath(args.dataset_dir))}_pid{os.getpid()}")
     save_path = os.path.join(args.save_dir,
                              f"best_cnnlstm_classify_{run_tag}_seed{seed}.pth")

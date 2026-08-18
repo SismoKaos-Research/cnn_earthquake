@@ -10,7 +10,8 @@ cnn_lstm_regression.py (DualChannelRegressionNet), cnn_lstm_forecast.py
 import torch
 import torch.nn as nn
 
-from seismolib.model.blocks import CNNBranch, GatedFusion, LSTMAttentionBranch
+from seismolib.model.blocks import (CNNBranch, ConvSeqBranch, GatedFusion,
+                                    LSTMAttentionBranch)
 
 
 class DualChannelTrunk(nn.Module):
@@ -27,7 +28,7 @@ class DualChannelTrunk(nn.Module):
 
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear",
-                lstm_layers=1, lstm_heads=4):
+                lstm_layers=1, lstm_heads=4, branch1d="lstm"):
         """Initializes the 1D/2D/aux branches and fusion.
 
         Args:
@@ -47,6 +48,12 @@ class DualChannelTrunk(nn.Module):
                 takes effect when both 1D and 2D are active.
             lstm_layers: Number of stacked LSTM layers in the 1D branch.
             lstm_heads: Number of attention heads in the 1D branch.
+            branch1d: Architecture of the 1D branch. "lstm" (default) is
+                `LSTMAttentionBranch`, which reads raw samples directly and is
+                what every existing result used. "cnn-lstm" prepends a strided
+                1D convolutional encoder (`ConvSeqBranch`), matching the
+                CNN-then-recurrence order EQTransformer and PhaseNet use;
+                "cnn" keeps the convolutions and drops the recurrence.
 
         Raises:
             ValueError: If `channels` disables every branch, or `fusion` is
@@ -64,9 +71,20 @@ class DualChannelTrunk(nn.Module):
         if fusion not in ("linear", "gate"):
             raise ValueError(f"--fusion must be 'linear' or 'gate', got {fusion!r}")
 
+        if branch1d not in ("lstm", "cnn", "cnn-lstm"):
+            raise ValueError(
+                f"branch1d must be 'lstm', 'cnn' or 'cnn-lstm', got {branch1d!r}")
+        self.branch1d = branch1d
+
         if self.use_1d:
-            self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden, layers=lstm_layers,
-                                          heads=lstm_heads, dropout=dropout)
+            if branch1d == "lstm":
+                self.b1 = LSTMAttentionBranch(seq_dim, hidden=hidden,
+                                              layers=lstm_layers,
+                                              heads=lstm_heads, dropout=dropout)
+            else:
+                self.b1 = ConvSeqBranch(seq_dim, hidden=hidden, layers=lstm_layers,
+                                        heads=lstm_heads, dropout=dropout,
+                                        use_lstm=(branch1d == "cnn-lstm"))
             self.p1 = nn.Linear(self.b1.out_dim, fusion_dim)
         if self.use_2d:
             self.b2 = CNNBranch(img_channels, dropout=dropout)
@@ -131,7 +149,8 @@ class DualChannelNet(DualChannelTrunk):
 
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
                 dropout=0.3, channels="all", fusion="linear",
-                lstm_layers=1, lstm_heads=4, n_classes=1, squeeze_output=False):
+                lstm_layers=1, lstm_heads=4, n_classes=1, squeeze_output=False,
+                branch1d="lstm"):
         """Initializes the trunk (see `DualChannelTrunk.__init__`) plus a head.
 
         Args:
@@ -153,7 +172,8 @@ class DualChannelNet(DualChannelTrunk):
         """
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
-                         fusion=fusion, lstm_layers=lstm_layers, lstm_heads=lstm_heads)
+                         fusion=fusion, lstm_layers=lstm_layers, lstm_heads=lstm_heads,
+                         branch1d=branch1d)
         self.squeeze_output = squeeze_output
         self.head = nn.Sequential(
             nn.LayerNorm(self.fused_dim),

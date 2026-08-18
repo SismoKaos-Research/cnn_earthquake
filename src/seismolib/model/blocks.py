@@ -133,6 +133,84 @@ class LSTMAttentionBranch(nn.Module):
         return h.mean(dim=1)             # pool over time
 
 
+class ConvSeqBranch(nn.Module):
+    """1D CNN over the raw waveform, optionally followed by BiLSTM + attention.
+
+    `LSTMAttentionBranch` feeds 600 raw 100 Hz samples straight into an LSTM,
+    so the only local structure available to it is whatever recurrence can
+    accumulate one 10 ms sample at a time. The detectors this project compares
+    itself against do the opposite: EQTransformer is CNN -> BiLSTM -> attention
+    and PhaseNet is a U-Net of 1D convolutions, both extracting local waveform
+    features convolutionally before any recurrence.
+
+    This branch adds that missing front end. Strided convolutions reduce the
+    sequence roughly 8x before the recurrent layer, which also makes the
+    self-attention that follows ~64x cheaper (its cost is quadratic in
+    sequence length).
+
+    `use_lstm=False` stops after the convolutions and mean-pools, isolating
+    whether the recurrence contributes anything once local features exist.
+
+    Args:
+        in_dim: Channels per timestep of the input sequence (3 for Z/N/E).
+        hidden: LSTM hidden size per direction. Output width is ``hidden * 2``
+            with an LSTM, or ``conv_width`` without one.
+        layers: Stacked LSTM layers.
+        heads: Attention heads. Must divide ``hidden * 2``.
+        dropout: Dropout after the convolution stages and inside attention.
+        conv_width: Channel width of the final convolution stage.
+    """
+
+    def __init__(self, in_dim, hidden=64, layers=1, heads=4, dropout=0.2,
+                 use_lstm=True, conv_width=96):
+        super().__init__()
+        self.use_lstm = use_lstm
+
+        def stage(cin, cout, k, s):
+            return nn.Sequential(
+                nn.Conv1d(cin, cout, kernel_size=k, stride=s, padding=k // 2,
+                          bias=False),
+                nn.BatchNorm1d(cout), nn.GELU())
+
+        # 600 -> 300 -> 150 -> 75 at 100 Hz. Kernels stay wide enough at the
+        # first stage (70 ms) to see an arrival's onset rather than one cycle.
+        self.conv = nn.Sequential(
+            stage(in_dim, conv_width // 4, 7, 2),
+            stage(conv_width // 4, conv_width // 2, 5, 2),
+            nn.Dropout(dropout),
+            stage(conv_width // 2, conv_width, 5, 2),
+        )
+
+        if use_lstm:
+            self.lstm = nn.LSTM(conv_width, hidden, num_layers=layers,
+                                batch_first=True, bidirectional=True,
+                                dropout=dropout if layers > 1 else 0.0)
+            d = hidden * 2
+            self.attn = nn.MultiheadAttention(d, heads, dropout=dropout,
+                                              batch_first=True)
+            self.norm = nn.LayerNorm(d)
+            self.out_dim = d
+        else:
+            self.out_dim = conv_width
+
+    def forward(self, x):
+        """Encodes a raw waveform sequence into one pooled embedding.
+
+        Args:
+            x: Input sequence, shape (batch, time, in_dim).
+
+        Returns:
+            Tensor of shape (batch, out_dim), mean-pooled over time.
+        """
+        h = self.conv(x.transpose(1, 2)).transpose(1, 2)   # (B, T', conv_width)
+        if not self.use_lstm:
+            return h.mean(dim=1)
+        h, _ = self.lstm(h)
+        a, _ = self.attn(h, h, h)
+        h = self.norm(h + a)
+        return h.mean(dim=1)
+
+
 class CNNBranch(nn.Module):
     """Compact CNN over the RAM image. The images are small (32x32 by default),
     so a 4-stage ResNet would be heavily over-provisioned here."""
