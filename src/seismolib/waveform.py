@@ -18,7 +18,8 @@ from torch.utils.data import Dataset
 _DATE_DIR_RE = re.compile(r"^\d{4}_\d{2}_\d{2}$")
 
 
-HOUR_SAMPLES = 36000  # 3600s * 5Hz
+HOUR_SAMPLES = 36000  # 3600s * 10Hz. The 5Hz archives use 18000; pass
+                      # hour_samples explicitly when reading those.
 
 
 def load_raw_f32(path):
