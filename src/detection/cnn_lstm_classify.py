@@ -105,18 +105,27 @@ class RamDualTensorDataset(Dataset):
     always earthquake -- matching BCEWithLogitsLoss's positive-class convention.
     """
 
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, seq_transform="none"):
         """Indexes every .pt sample under `root_dir`'s class subdirectories.
 
         Args:
             root_dir: Directory with one subdirectory per class, each
                 containing .pt files (`seismic-cli generate-dual-dataset`
                 output), e.g. `<root>/00_noise/`, `<root>/01_earthquake/`.
+            seq_transform: Amplitude handling for the 1D `seq` channel.
+                "none" (default) returns it unchanged, reproducing every
+                existing result. "asinh" applies a signed log compression --
+                see `__getitem__` for why the raw channel is not safe to feed
+                a network under mixed precision.
 
         Raises:
             FileNotFoundError: If `root_dir` doesn't exist.
             RuntimeError: If no .pt files are found under `root_dir`.
+            ValueError: If `seq_transform` is not a known option.
         """
+        if seq_transform not in ("none", "asinh"):
+            raise ValueError(f"seq_transform must be 'none' or 'asinh', got {seq_transform!r}")
+        self.seq_transform = seq_transform
         self.root_dir = Path(root_dir)
         if not self.root_dir.exists():
             raise FileNotFoundError(f"Dataset split not found: {self.root_dir}")
@@ -187,7 +196,22 @@ class RamDualTensorDataset(Dataset):
         """
         fpath, label = self.samples[idx]
         d = torch.load(fpath, weights_only=True)
-        return d["seq"].float(), d["img"].float(), torch.tensor(label, dtype=torch.float32)
+        seq = d["seq"].float()
+        if self.seq_transform == "asinh":
+            # `seq` is in multiples of the station's own noise sigma, and that
+            # distribution has a very long tail: on the catalogue-anchored 6s
+            # benchmark it reaches 3.6e5, while fp16 tops out at 65504. Under
+            # AMP the largest windows therefore become inf on the autocast of
+            # the INPUT, before any layer runs, and one such batch turns the
+            # weights NaN for the rest of the run. Seven windows out of 95,324
+            # are enough to do it, which is why this went unnoticed for as long
+            # as only --channels 2d was run on this dataset.
+            #
+            # asinh is the standard compression for this: signed, monotonic
+            # (so amplitude ordering -- the dominant discriminant -- is
+            # preserved), linear near zero and logarithmic in the tail.
+            seq = torch.asinh(seq)
+        return seq, d["img"].float(), torch.tensor(label, dtype=torch.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +277,15 @@ def parse_args():
                         "-- linear fusion underperformed the best single branch on "
                         "both RAM and spectrogram 2D representations). Only affects "
                         "--channels all.")
+    p.add_argument("--seq-transform", default="none", choices=["none", "asinh"],
+                   help="Amplitude handling for the 1D waveform channel. none: raw "
+                        "station-sigma multiples, as every existing result used. "
+                        "asinh: signed log compression, monotonic so amplitude "
+                        "ordering is preserved. Needed for any --channels 1d/all run "
+                        "under mixed precision on this corpus -- the raw channel "
+                        "reaches 3.6e5 where fp16 stops at 65504, and a single "
+                        "overflowing window makes the whole run NaN. No effect on "
+                        "--channels 2d, which never reads seq.")
     p.add_argument("--branch-1d", default="lstm", choices=["lstm", "cnn", "cnn-lstm"],
                    help="Architecture of the 1D (raw-waveform) branch. lstm: the "
                         "existing LSTM+attention over raw 100Hz samples, which every "
@@ -382,6 +415,16 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
             scaler.update()
             optimizer.zero_grad()
 
+            if not torch.isfinite(loss):
+                # Eleven epochs of NaN followed by an opaque sklearn
+                # "Input contains NaN" is how this used to present. Fail here,
+                # where the cause is still visible.
+                raise RuntimeError(
+                    f"Non-finite training loss at epoch {epoch + 1}. Batch "
+                    f"max|seq|={float(seq.abs().max()):.3e}, max|img|="
+                    f"{float(img.abs().max()):.3e}. If the seq value is near or "
+                    f"above fp16's 65504 limit, rerun with --seq-transform asinh; "
+                    f"AMP casts the input before any layer sees it.")
             running_loss += loss.item() * labels.size(0)
             with torch.no_grad():
                 raw = F.binary_cross_entropy_with_logits(outputs.detach().float(), labels_raw)
@@ -470,9 +513,12 @@ def main():
     the majority-class floor."""
     args = parse_args()
 
-    train_ds = RamDualTensorDataset(f"{args.dataset_dir}/train")
-    val_ds = RamDualTensorDataset(f"{args.dataset_dir}/val")
-    test_ds = RamDualTensorDataset(f"{args.dataset_dir}/test")
+    train_ds = RamDualTensorDataset(f"{args.dataset_dir}/train",
+                                     seq_transform=args.seq_transform)
+    val_ds = RamDualTensorDataset(f"{args.dataset_dir}/val",
+                                   seq_transform=args.seq_transform)
+    test_ds = RamDualTensorDataset(f"{args.dataset_dir}/test",
+                                    seq_transform=args.seq_transform)
 
     seq_shape, img_shape = train_ds.validate_shapes()
     for name, ds in (("val", val_ds), ("test", test_ds)):
