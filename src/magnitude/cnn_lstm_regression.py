@@ -74,7 +74,7 @@ from seismolib.training import seed_everything
 # default event-disjoint grouping.
 # ---------------------------------------------------------------------------
 
-def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
+def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15), detector_manifest=None):
     """Re-partitions rows without moving any tensor on disk. The manifest's
     original `split` names the DIRECTORY a tensor lives in, so it is
     preserved as `file_split`; only the LOGICAL split (used for train/val/
@@ -92,6 +92,15 @@ def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
       both    -- station-disjoint, then every val/test row whose event also
                  appears in train is DROPPED. Neither term can leak. Costs
                  rows; the count dropped is reported, not hidden.
+      detector -- like "both", but the station partition is COPIED from a
+                 detector manifest instead of being drawn here. Required
+                 when this regressor is the second stage of a cascade: if
+                 the two stages partition stations independently, the
+                 detector's test stations land in the regressor's training
+                 set (measured at 77% on the pre-existing datasets) and an
+                 end-to-end evaluation silently leaks. Stations absent from
+                 the detector manifest belong to no detector split, so they
+                 cannot leak and are assigned to train.
 
     Args:
         d: Manifest DataFrame with 'split', 'station_key', and 'event_id'
@@ -100,6 +109,8 @@ def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
         seed: Seed for the station shuffle used by "station"/"both".
         ratios: Target (train, val, test) row-count fractions for the
             station partition.
+        detector_manifest: Path to the detector's manifest.csv. Required for
+            `how="detector"`, ignored otherwise.
 
     Returns:
         A copy of `d` with 'file_split' added (the original directory-based
@@ -111,6 +122,27 @@ def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15)):
         d["file_split"] = d["split"]
     if how == "event":
         return d
+
+    if how == "detector":
+        if detector_manifest is None:
+            raise ValueError("--split-by detector needs --detector-manifest.")
+        det = pd.read_csv(detector_manifest)
+        assign = dict(zip(det.station_key, det.split))
+        unseen = sorted(set(d.station_key) - set(assign))
+        # A station the detector never used sits in none of its splits, so it
+        # cannot carry information between the two stages. Train is the safe
+        # home for it.
+        for st in unseen:
+            assign[st] = "train"
+        if unseen:
+            print(f"[split] {len(unseen)} station(s) absent from the detector manifest "
+                  f"-> assigned to train")
+        d["split"] = d.station_key.map(assign)
+        train_events = set(d.loc[d.split == "train", "event_id"])
+        clash = (d.split != "train") & d.event_id.isin(train_events)
+        print(f"[split] detector-aligned: dropping {int(clash.sum())} val/test rows whose "
+              f"event also appears in train")
+        return d[~clash].copy()
 
     rng = random.Random(seed)
     stations = sorted(set(d.station_key))
@@ -272,12 +304,19 @@ def parse_args():
     p.add_argument("--huber-delta", type=float, default=0.0,
                   help="If > 0 use SmoothL1 with this beta instead of plain L1 (MAE), "
                        "matching cnn_regression.py's convention.")
-    p.add_argument("--split-by", default="event", choices=["event", "station", "both"],
+    p.add_argument("--split-by", default="event",
+                  choices=["event", "station", "both", "detector"],
                   help="event: the generator's own split, unchanged (default). station: "
                        "re-partition in memory so stations are disjoint (site response "
                        "cannot leak, but a shared event can). both: station-disjoint AND "
                        "event-disjoint -- drops val/test rows whose event also appears in "
-                       "train (report.md 13.8's doubly-disjoint check, applied here).")
+                       "train (report.md 13.8's doubly-disjoint check, applied here). "
+                       "detector: like 'both', but the station partition is copied from "
+                       "--detector-manifest, so this regressor can be stage 2 of a cascade "
+                       "without the detector's test stations leaking into its training set.")
+    p.add_argument("--detector-manifest", default=None,
+                  help="Path to the detector dataset's manifest.csv. Required for "
+                       "--split-by detector.")
     p.add_argument("--seed-split", type=int, default=42,
                   help="Seed for the station partition (--split-by station/both). "
                        "Independent of --seed (model init/shuffle).")
@@ -316,7 +355,8 @@ def main():
         raise ValueError(f"manifest.csv is missing {missing}. Regenerate with "
                          f"`seismic-cli generate-regression-dataset --dual`.")
 
-    manifest = resplit(manifest, args.split_by, seed=args.seed_split)
+    manifest = resplit(manifest, args.split_by, seed=args.seed_split,
+                       detector_manifest=args.detector_manifest)
     report_split(manifest, args.split_by)
 
     parts = {}
