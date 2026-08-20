@@ -390,7 +390,11 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     # they matched it was silent, and a seed scored 0.2480 -- an inverted model,
     # reported as if it were a training outcome. Config plus dataset identity plus
     # PID makes collision impossible even for two identical commands run at once.
-    run_tag = (f"{args.channels}_{args.fusion}_{args.branch_1d}"
+    # seq_transform belongs in the tag: an asinh checkpoint and a raw one are
+    # otherwise indistinguishable by filename, and cascade_eval.py ensembles
+    # every *.pth in a directory. Two sets of checkpoints have already had to
+    # be quarantined by hand for exactly this reason.
+    run_tag = (f"{args.channels}_{args.fusion}_{args.branch_1d}_{args.seq_transform}"
                f"_{os.path.basename(os.path.normpath(args.dataset_dir))}_pid{os.getpid()}")
     save_path = os.path.join(args.save_dir,
                              f"best_cnnlstm_classify_{run_tag}_seed{seed}.pth")
