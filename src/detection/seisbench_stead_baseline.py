@@ -57,8 +57,29 @@ def parse_args():
                         "-- only for a deliberately labelled in-corpus ceiling.")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--limit", type=int, default=None, help="Debug: score only N traces.")
+    p.add_argument("--window-only", action="store_true",
+                   help="Zero everything outside the 6 s window before the forward "
+                        "pass, so EQTransformer sees the same information this "
+                        "project's detector does. Out of distribution for it, so the "
+                        "result is a LOWER bound, not a fair score.")
     p.add_argument("--out-csv", default=None)
     return p.parse_args()
+
+
+def zero_outside(x, starts):
+    """Zeroes everything outside each trace's 6 s window.
+
+    Restricting where the output is *read* does not restrict what the model
+    *saw*: EQTransformer runs recurrence and attention over all 6000 samples,
+    so a probability inside the window is still computed having seen the S
+    arrival and coda outside it. Only masking the input equalises the
+    information the two models get. The mask is out of distribution for a model
+    trained on continuous traces, so this yields a lower bound.
+    """
+    m = np.zeros_like(x)
+    for i, s in enumerate(starts):
+        m[i, :, s:s + WINDOW] = x[i, :, s:s + WINDOW]
+    return m
 
 
 def preprocess(raw):
@@ -96,7 +117,10 @@ def score(model, args, device):
             for i in range(0, len(sub), args.batch_size):
                 blk = sub.iloc[i:i + args.batch_size]
                 raw = np.stack([g[tn][:] for tn in blk.trace_name])
-                x = torch.from_numpy(preprocess(raw)).to(device)
+                xp = preprocess(raw)
+                if args.window_only:
+                    xp = zero_outside(xp, [int(v) for v in blk.start_sample])
+                x = torch.from_numpy(xp).to(device)
                 det = model(x)[0].float().cpu().numpy()     # (n, 6000) Detection
                 for (_, r), d in zip(blk.iterrows(), det):
                     s = int(r.start_sample)
