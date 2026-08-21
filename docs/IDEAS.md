@@ -1,10 +1,13 @@
 # Maybe-later list
 
-Things worth trying that nothing currently depends on. Not a plan -- an
+Things worth trying that nothing currently depends on. Entries marked
+[DONE] are kept for the record with their outcome, not deleted. Not a plan -- an
 unordered backlog, newest first. `docs/TOMORROW.md` is the *forecasting*
 task family's carried-over plan and is separate from this.
 
-## Operating-envelope analysis (no training -- it is a join)
+## [DONE] Operating-envelope analysis (no training -- it is a join)
+
+**DONE 2026-08-19 (operating_envelope.py; recall is SNR-governed, not magnitude).**
 
 Turn "0.9896 AUC" into an operational claim: recall stratified by magnitude,
 by `log_snr`, and by `distance_km`.
@@ -25,7 +28,9 @@ something is wrong that a single AUC is hiding.
 Feeds directly into the cascade too -- a missed event can never receive a
 magnitude, so the detector's envelope IS the cascade's envelope.
 
-## Amplitude ablation: decompose loudness vs shape
+## [DONE] Amplitude ablation: decompose loudness vs shape
+
+**DONE 2026-08-20 (per-window normalised set; cnn-lstm 0,9309 vs seq floor 0,7088).**
 
 Retrain with per-window standardisation, which deletes absolute amplitude. The
 `seq` abs-max floor collapses toward 0.5, so whatever AUC survives is **pure
@@ -176,13 +181,17 @@ choices in `src/detection/cnn_lstm_classify.py:289` and the validation list in
 `--seq-transform asinh`, `--ensemble-seeds 42,43,44`, same dataset, fresh
 `--save-dir`.
 
-## Gated fusion
+## [DONE] Gated fusion
+
+**DONE 2026-08-19 (Ozgun: gated 0,9745 vs linear 0,9730; both below 2B's 0,9779).**
 
 `--fusion gate` against `--fusion linear`, once the linear fusion arms land.
 Deliberately excluded from the 2026-08-19 fusion run so the fusion mechanism
 stayed constant while branch architecture varied.
 
-## Put `seq_transform` into `run_tag`
+## [DONE] Put `seq_transform` into `run_tag`
+
+**DONE 2026-08-20 (commit 3baa2b8).**
 
 `cnn_lstm_classify.py`'s checkpoint name encodes channels, fusion, branch_1d,
 dataset, pid and seed -- but not `--seq-transform`. An asinh checkpoint and an
@@ -191,14 +200,18 @@ overflowed one are therefore indistinguishable by filename, and
 is the same class of defect as the checkpoint collision that produced the
 retracted 0.9108 result.
 
-## Re-check the ORIGINAL benchmark for fp16 overflow
+## [DONE] Re-check the ORIGINAL benchmark for fp16 overflow
+
+**DONE 2026-08-19 (scanned all three sets; both suspect rows reproduced -- no row affected).**
 
 The overflow fixed in `f627d9e` was latent for as long as only `--channels 2d`
 ran. Any `1d` or `all` number measured on the original benchmark before that
 commit may have been produced with `inf` in the waveform input. Re-check before
 citing those numbers anywhere.
 
-## STEAD cross-corpus evaluation
+## [DONE] STEAD cross-corpus evaluation
+
+**DONE 2026-08-21 (EQTransformer bracket 0,9565-0,9989 around this project's 0,9971).**
 
 Everything so far is single-corpus and station-disjoint. Section 5.5 (iv) of
 the Turkish report marks cross-corpus generalisation as unmeasured.
