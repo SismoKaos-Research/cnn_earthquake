@@ -14,9 +14,10 @@ import re
 import sys
 
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 
-INLINE = re.compile(r"(\*\*.+?\*\*|\*[^*]+?\*|`[^`]+?`)")
+INLINE = re.compile(r"(\*\*.+?\*\*|\*[^*]+?\*|`[^`]+?`)", re.S)
+IMAGE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
 
 
 def add_runs(par, text):
@@ -34,6 +35,25 @@ def add_runs(par, text):
             r.font.size = Pt(9)
         else:
             par.add_run(tok)
+
+
+def gather(lines, i, n):
+    """Consumes wrapped continuation lines following a list item.
+
+    A list item's text can wrap just like a paragraph's, and a bold span may
+    open on the item line and close on a continuation line. Returns the joined
+    text and the new index.
+    """
+    buf = []
+    while i < n:
+        cur = lines[i].strip()
+        if (not cur or cur.startswith(("```", "|", ">", "#", "!["))
+                or re.match(r"^[-*+]\s+|^\d+\.\s+", cur)
+                or (set(cur) <= {"-", "*", "_"} and len(cur) >= 3)):
+            break
+        buf.append(cur)
+        i += 1
+    return " ".join(buf), i
 
 
 def split_row(line):
@@ -67,6 +87,15 @@ def main(src, dst):
 
         if set(s) <= {"-", "*", "_"} and len(s) >= 3:
             doc.add_paragraph("_" * 40)
+            i += 1
+            continue
+
+        m = IMAGE.match(s)                                        # figure
+        if m:
+            try:
+                doc.add_picture(m.group(2), width=Inches(6.2))
+            except Exception as e:
+                doc.add_paragraph(f"[figure missing: {m.group(2)} -- {e}]")
             i += 1
             continue
 
@@ -104,17 +133,34 @@ def main(src, dst):
 
         m = re.match(r"^(\d+)\.\s+(.*)", s)
         if m:
-            add_runs(doc.add_paragraph(style="List Number"), m.group(2))
             i += 1
+            rest, i = gather(lines, i, n)
+            add_runs(doc.add_paragraph(style="List Number"),
+                     (m.group(2) + " " + rest).strip())
             continue
 
         if re.match(r"^[-*+]\s+", s):
-            add_runs(doc.add_paragraph(style="List Bullet"), re.sub(r"^[-*+]\s+", "", s))
+            head = re.sub(r"^[-*+]\s+", "", s)
             i += 1
+            rest, i = gather(lines, i, n)
+            add_runs(doc.add_paragraph(style="List Bullet"),
+                     (head + " " + rest).strip())
             continue
 
-        add_runs(doc.add_paragraph(), s)
-        i += 1
+        # Accumulate wrapped lines into ONE paragraph before inline parsing.
+        # Markdown wraps bold spans across lines (**foo\nbar**); parsing line by
+        # line leaves the opening ** unmatched and it renders as literal
+        # asterisks in the output.
+        buf = []
+        while i < n:
+            cur = lines[i].strip()
+            if (not cur or cur.startswith(("```", "|", ">", "#", "!["))
+                    or re.match(r"^[-*+]\s+|^\d+\.\s+", cur)
+                    or (set(cur) <= {"-", "*", "_"} and len(cur) >= 3)):
+                break
+            buf.append(cur)
+            i += 1
+        add_runs(doc.add_paragraph(), " ".join(buf))
 
     doc.save(dst)
     print(f"wrote {dst}")
