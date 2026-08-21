@@ -27,7 +27,7 @@ speed pass). Merging to `main` is an open decision.
 | KOERI catalogue | `Sismokaos/data_downloader/catalogs/deprem_katalog_utc.csv` | 42 MB, 482,898 events, 2010 → 2026 |
 | Pre-chaos features (5 Hz, full archive) | `sismokaos-cli/dataset_features_5hz/` | 819 MB, 1,237,218 windows |
 | Pre-chaos features (10 Hz, full archive) | `sismokaos-cli/dataset_features_10hz/` | 819 MB |
-| **Chaos features, quarter batch** | `sismokaos-cli/dataset_features_chaos_q1_5hz/` | in progress, see §2 |
+| **Chaos features, quarter batch** | `sismokaos-cli/dataset_features_chaos_q1_5hz/` | **does not exist yet** — run was killed for the move, see §2 |
 
 The 34 GB raw archive is the only thing worth thinking about moving. The
 feature parquets regenerate from it in hours; the raw data does not regenerate
@@ -37,10 +37,10 @@ BODT station coordinates: **37.0622 N, 27.3103 E**.
 
 ---
 
-## 2. What is running right now
+## 2. The extraction run — killed, needs redoing on the new machine
 
-A quarter batch — the first 181 of 723 days — through `sismokaos-cli run` at
-5 Hz with chaotic features on:
+A quarter batch (the first 181 of 723 days) was **stopped at 38% for the
+machine move**. It produced nothing — see the warning below. Re-run it there:
 
 ```bash
 cd ~/Projects/sismokaos-cli
@@ -48,17 +48,46 @@ cd ~/Projects/sismokaos-cli
     run --data-dir ./bodt_q1_chaos_5hz --out-dir ./dataset_features_chaos_q1_5hz
 ```
 
-~312,768 windows at ~85 windows/s ≈ **1.1 h**. Output is one parquet,
-`bodt_q1_chaos_5hz_features.parquet`, ~134 columns.
+~312,768 windows at ~85 windows/s on 12 threads ≈ **1.1 h**; faster in
+proportion to core count. Output is one parquet,
+`bodt_q1_chaos_5hz_features.parquet`, 134 columns.
 
-`bodt_q1_chaos_5hz/` is a symlink farm into the raw archive (gitignored). To
-rebuild it, or to extend to the full archive, symlink the days you want into a
-directory and point `--data-dir` at it. **The output filename comes from the
-data-dir basename**, so two runs over same-named directories silently
-overwrite each other.
+`bodt_q1_chaos_5hz/` is a symlink farm into the raw archive, gitignored, and
+its links point at *this* machine's paths — **rebuild it on the new box**:
 
-If the run did not finish before the machine move, just re-run it — it is not
-resumable, but it is only about an hour.
+```bash
+A=~/Projects/Sismokaos/feature-extract/raw/BODT/aegean_bodt_2024_2026
+mkdir -p ~/Projects/sismokaos-cli/bodt_q1_chaos_5hz
+ls $A | head -181 | while read f; do
+    ln -s $A/$f ~/Projects/sismokaos-cli/bodt_q1_chaos_5hz/$f
+done
+```
+
+**The output filename comes from the data-dir basename**, so two runs over
+same-named directories silently overwrite each other.
+
+### ⚠ The run is all-or-nothing, and it is a RAM hog
+
+`FeatureWriter` (`src/export.rs`) is documented as "accumulates feature rows in
+memory and writes to Parquet on finish". There are no incremental writes:
+
+- **An interrupted run produces zero output.** 24 minutes and 119,640 windows
+  of work left an empty directory. Do not assume a partial parquet is
+  recoverable — there isn't one.
+- **Peak RAM scales with row count.** Rows are held as `Option<f64>` (16 bytes
+  each) across 66 features plus 66 `_DEV` columns, and Polars then builds the
+  DataFrame from those buffers. The full 723-day archive is ~1.24 M rows ≈
+  **2.7 GB of buffers, ~5–6 GB peak**. Fine on the new machine, was tight here.
+- Its `Vec::with_capacity(100_000)` pre-allocation is sized by a comment
+  reading "100,000 hours ≈ 11.4 years", but rows are *windows* at a 50 s step,
+  not hours — so the real count is ~12× that and the buffers repeatedly
+  reallocate. Harmless, but the reservation is wrong by design intent.
+
+**Therefore: run the full archive in quarters, not in one go.** Four
+181-day directories cap peak RAM around 1.5 GB and mean an interruption costs
+at most a quarter of the work. Concatenating four parquets afterwards is
+trivial; losing 4.4 hours to a crash is not. Making the writer flush
+incrementally would be the real fix if full-archive runs become routine.
 
 ---
 
@@ -160,18 +189,29 @@ pessimistic aside.
 
 ## 5. Next steps, in order
 
-1. **Within-sequence variance check** — the gate on the whole idea. For each
-   chaos column compute within-sequence std as a fraction of overall std, at
-   **both** 50 s and hourly granularity. The ruled-out GRU/CNN degenerated
-   because its catalog inputs had within-24 h std of only 1.2–9.3% of overall
-   std, making a 24-step sequence ~24 identical vectors and the last hidden
-   state an MLP on the last step. If the chaos columns land in that range the
-   verdict transfers and the architecture will not save it. If they are at
-   40–80%, there is genuinely new signal to model.
+0. **Re-run the extraction** (§2). It was killed at 38% for the machine move
+   and left nothing behind.
 
-   Note the aggregation trap: `feature_lstm_forecast.py` eats **hourly**
-   vectors, but extraction emits 72 windows per hour. Collapsing to an hourly
-   mean may destroy exactly the variation the idea depends on.
+1. **Within-sequence variance check** — the gate on the whole idea. Run
+   `src/forecasting/sequence_variance_check.py` against the new parquet.
+
+   The ruled-out GRU/CNN degenerated because its catalog inputs had within-24 h
+   std of only **1.2–9.3%** of overall std, making a 24-step sequence ~24
+   identical vectors and the last hidden state an MLP on the last step. Land in
+   that band and the verdict transfers regardless of the features being new;
+   land at 40–80% and there is real structure for a sequence model.
+
+   **Preliminary, from a two-day smoke test only:** chaos columns sat at
+   **38–80% native, median 44.9%** — an order of magnitude clear of the
+   degenerate band, Wolf LyE highest at ~79%. Hourly means held at 91–95% over
+   24 h of context, but across two days that is only two sequences and means
+   little. **Confirm on the full quarter batch before treating it as a
+   result.**
+
+   Note the aggregation trap the script measures directly:
+   `feature_lstm_forecast.py` eats **hourly** vectors, but extraction emits 72
+   windows per hour. Collapsing to an hourly mean may destroy exactly the
+   variation the idea depends on.
 
 2. **Re-run the existing hand-feature LSTM** against the now-oriented floor, so
    there is a correct baseline to compare chaos features against.
