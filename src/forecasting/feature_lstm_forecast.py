@@ -215,9 +215,10 @@ def run_fold(fold_label, args, feature_cols, features, labels, dsp, hourly_index
     # below 0.5 ranks *inversely*, and an inverted rule is exactly as
     # exploitable as a correct one -- so the bar it sets is 1-a, not a.
     # Without this, any persistence AUC under 0.5 collapsed the floor to a
-    # vacuous 0.5: the run reported in FEATURE_LSTM_CHEATSHEET.md had
-    # persistence 0.343, so the floor should have been 0.657 and the
-    # ensemble's 0.558 was 0.099 *below* it, not 0.058 above.
+    # vacuous 0.5: an earlier run of this script scored persistence 0.343,
+    # so the floor should have been 0.657 and the ensemble's 0.558 was 0.099
+    # *below* it, not 0.058 above. That result was written up in a cheat
+    # sheet which has since been deleted rather than corrected.
     pers_auc = max(pers_raw, 1.0 - pers_raw) if pers_raw == pers_raw else pers_raw
     print(f"  persistence            AUC {pers_auc:.4f}   n={len(yt_ref)}"
           f"   (raw {pers_raw:.4f}, oriented)")

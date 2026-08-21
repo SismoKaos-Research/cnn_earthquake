@@ -137,12 +137,19 @@ failure — and never propagated. It was still live in:
 - `catalog_lgbm_forecast.py`
 - `waveform_lgbm_forecast.py` (two call sites)
 
-**Consequence for an existing result:** `FEATURE_LSTM_CHEATSHEET.md` reports a
+**Consequence for an existing result:** `FEATURE_LSTM_CHEATSHEET.md` reported a
 hand-feature LSTM at 0.558 against a persistence floor of 0.343, claiming
 +0.058. Oriented, that floor is **0.657**, so the ensemble was **0.099 below**
-it. That cheat-sheet headline is an artifact and the result is not evidence of
-forecasting skill. The cheat sheet has not been rewritten — do that, or delete
-the claim, before anyone cites it.
+it — the headline was an artifact, and the result was not evidence of
+forecasting skill. **That cheat sheet has been deleted** (2026-08-22) rather
+than rewritten, since the pipeline it documents — hourly hand features from
+KO.GEDZ — is not what this phase does.
+
+`LSTM_FEATURES_VS_RAW_CHEATSHEET.md` quotes the same un-oriented 0.343 floor
+and still needs that one row corrected to 0.657. Its headline survives the
+correction: the raw CNN-LSTM's 0.787 clears the oriented floor by +0.130,
+and the hand-feature model's 0.558 does not clear it at all — which sharpens
+its conclusion rather than undoing it.
 
 ### 4.2 Interpolated gaps are invisible and poison the chaos columns
 

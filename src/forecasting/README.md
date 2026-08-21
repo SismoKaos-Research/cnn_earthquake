@@ -7,7 +7,6 @@ Omori floors, not a majority-class bar.
 
 ## Reports
 
-- [`FEATURE_LSTM_CHEATSHEET.md`](FEATURE_LSTM_CHEATSHEET.md) — Hand-Feature LSTM Forecaster — Cheat Sheet
 - [`LSTM_FEATURES_VS_RAW_CHEATSHEET.md`](LSTM_FEATURES_VS_RAW_CHEATSHEET.md) — Hand Features + LSTM vs. Raw Waveform + CNN-LSTM — Head-to-Head
 - [`catalog_forecast_report.md`](catalog_forecast_report.md) — Catalog Forecasting, Retargeted onto a Neural Architecture
 
