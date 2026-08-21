@@ -288,7 +288,12 @@ def run_fold(fold_label, args, feature_cols, features, labels, dsp, hourly_index
     print(f"  base-rate (majority)   AUC {base_auc:.4f}   n={len(yt_ref)}")
     pers_dsp = dsp[test_idx]
     pers_pred = np.where(np.isnan(pers_dsp), 0, (pers_dsp <= horizon_days).astype(int)).astype(np.float64)
-    pers_auc = safe_auc(yt_ref, pers_pred)
+    pers_raw = safe_auc(yt_ref, pers_pred)
+    # Orientation-corrected: a persistence rule scoring below 0.5 ranks
+    # inversely, and an inverted rule is exactly as exploitable as a correct
+    # one, so the bar it sets is max(a, 1-a). Without this the floor silently
+    # collapsed to a vacuous 0.5 whenever persistence fell under chance.
+    pers_auc = max(pers_raw, 1.0 - pers_raw) if pers_raw == pers_raw else pers_raw
     print(f"  persistence            AUC {pers_auc:.4f}   n={len(yt_ref)}")
 
     floor = max(0.5, base_auc, pers_auc)

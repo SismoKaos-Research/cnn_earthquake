@@ -210,8 +210,17 @@ def run_fold(fold_label, args, feature_cols, features, labels, dsp, hourly_index
     print(f"  base-rate (majority)   AUC {base_auc:.4f}   n={len(yt_ref)}")
     pers_dsp = dsp[test_idx]
     pers_pred = np.where(np.isnan(pers_dsp), 0, (pers_dsp <= horizon_days).astype(int)).astype(np.float64)
-    pers_auc = safe_auc(yt_ref, pers_pred)
-    print(f"  persistence            AUC {pers_auc:.4f}   n={len(yt_ref)}")
+    pers_raw = safe_auc(yt_ref, pers_pred)
+    # Orientation-corrected, i.e. max(a, 1-a). A persistence rule that scores
+    # below 0.5 ranks *inversely*, and an inverted rule is exactly as
+    # exploitable as a correct one -- so the bar it sets is 1-a, not a.
+    # Without this, any persistence AUC under 0.5 collapsed the floor to a
+    # vacuous 0.5: the run reported in FEATURE_LSTM_CHEATSHEET.md had
+    # persistence 0.343, so the floor should have been 0.657 and the
+    # ensemble's 0.558 was 0.099 *below* it, not 0.058 above.
+    pers_auc = max(pers_raw, 1.0 - pers_raw) if pers_raw == pers_raw else pers_raw
+    print(f"  persistence            AUC {pers_auc:.4f}   n={len(yt_ref)}"
+          f"   (raw {pers_raw:.4f}, oriented)")
 
     print(f"\n--- Hand-feature LSTM ---")
     per_seed_aucs = [safe_auc(yt_ref, s) for s in per_seed_scores]
