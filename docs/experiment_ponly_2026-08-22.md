@@ -166,9 +166,12 @@ quartile is matched. Read it with the table above, not alone.
 | P-only band 2D | 0.9015 | 0.7461 | +0.1554 | 61.2% |
 | P-only matched 1D | **0.8712** | 0.6679 | +0.2033 | **61.2%** |
 | P-only matched 2D | **0.8602** | 0.6679 | +0.1923 | **57.9%** |
+| P-only matched fusion | **0.8762** | 0.6679 | +0.2083 | **62.7%** |
 
-Per-seed: matched 1D 0.8673/0.8709/0.8671, matched 2D 0.8605/0.8610/0.8544.
-Spreads 0.0038 and 0.0066 — stable, not noise.
+Per-seed: matched 1D 0.8673/0.8709/0.8671, 2D 0.8605/0.8610/0.8544, fusion
+0.8730/0.8746/0.8737. Spreads 0.0038 / 0.0066 / 0.0016 — stable, not noise.
+Fusion beats both arms, matching the 6 s hard-negative result: fusion helps
+once the negatives are properly selected.
 
 **Raw gain grows at every step (+0.085 → +0.183 → +0.203) purely because the
 floor falls.** Headroom captured moves the other way: **89% → 72% → 61%**.
@@ -183,6 +186,64 @@ datasets, floors and arms.)
 (0.9896 vs 0.9882). The spectrogram branch lost its amplitude cue *and* has
 only 22 time frames, reduced to ~6 by two stride-2 convolutions, against 38→10
 at 6 s. See "Open" below.
+
+## Negative-regime transfer
+
+Four negative regimes were built over the **same** P-only event windows —
+verified identical: same 35 test stations, same 7,908 event windows — so
+negative selection is the only variable. `src/detection/negative_regime_transfer.py`.
+
+| regime | monotone floor | non-monotone | gap |
+|---|---|---|---|
+| matched (amplitude-mirrored) | 0.6679 | 0.6658 | −0.0021 |
+| band 0.75–0.99 (loud only) | 0.6447 | 0.7461 | **+0.1015** ← artifact |
+| wideband 0.0–0.99 (uniform over quantile) | 0.7927 | 0.7845 | −0.0082 |
+| natural (no mining) | 0.7878 | 0.7795 | −0.0082 |
+
+**`natural` and `wideband` are the same regime in practice** — floors within
+0.005, AUCs within 0.0004. Spreading evenly across quantiles reproduces the
+pool's own density closely enough that the distinction does not matter.
+
+Models trained on **matched**, scored on all four:
+
+| arm | matched | band | wideband | natural |
+|---|---|---|---|---|
+| **AUC** | | | | |
+| 1D | 0.8709 | 0.9058 | 0.8169 | 0.8167 |
+| 2D | 0.8602 | 0.8818 | 0.8225 | 0.8221 |
+| fusion | **0.8763** | **0.9121** | 0.8225 | 0.8217 |
+| **headroom captured** | | | | |
+| 1D | 61.1% | 62.9% | **11.7%** | **13.6%** |
+| 2D | 57.9% | 53.4% | **14.4%** | **16.2%** |
+| fusion | 62.7% | 65.4% | **14.4%** | **16.0%** |
+
+**On the deployment-realistic regime the detector barely beats loudness.**
+Natural floor 0.7878, model 0.8167–0.8225: roughly +0.03 AUC over a single
+amplitude scalar, against +0.20 on matched.
+
+Two contributions to that, which should not be conflated:
+
+1. **Train/test mismatch.** These models saw only amplitude-matched negatives
+   and never the quiet noise that dominates natural. Part of the collapse is a
+   generalisation gap, not a capability ceiling. The complementary run — train
+   on natural, evaluate on all four — is what separates the two, and has not
+   been done.
+2. **Floor saturation.** Natural leaves 0.212 of headroom against matched's
+   0.332, so some of the drop is arithmetic. This is why captured is quoted
+   rather than raw gain.
+
+False alarms barely move across regimes (301–377) and precision stays
+0.93–0.96: changing the negatives changes their composition, not how often the
+model fires.
+
+**Recall cannot vary across these columns** and is deliberately absent from the
+table. The positives are the identical 7,908 windows in every build, so recall
+is fixed at ~0.638 by construction; only false alarms respond to the negative
+regime. An earlier version of this table reported per-regime recall, which was
+meaningless.
+
+Fusion is best on matched and band. On natural, 2D edges it by 0.0004, which is
+within seed noise.
 
 ## What this means
 
