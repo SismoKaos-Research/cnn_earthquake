@@ -251,6 +251,31 @@ T = 0.6008. Temperature scaling helps the 6 s configuration and hurts this one.
 **Report this configuration uncalibrated.** MCC-optimal threshold is 0.77
 (recall 0.6085, precision 0.9715, 141 false alarms).
 
+### Does it read shape or loudness?  (~5 min per run)
+
+The floor comparison alone cannot answer this — see §8 and the results doc.
+This holds amplitude nearly constant and checks whether discrimination
+survives.
+
+```bash
+.venv/bin/python src/detection/within_amplitude_auc.py \
+    --dataset-dir $DD/dataset_specdual_ponly_3p4s_matched \
+    --ckpt-dir trained_model_ponly_matched --channels all
+```
+
+**Expect** (matched test, matched-trained fusion): pooled AUC 0.8763, floor
+0.6679, and narrow-bin AUCs **0.6298 / 0.7090 / 0.7781 / 0.8013 / 0.8578 /
+0.9274 / 0.9689** for bins 2–8, median **0.8013** across 7 bins.
+
+Repeat with `--dataset-dir ..._natural --ckpt-dir trained_model_ponly_natural`
+for pooled 0.8410 and median narrow-bin **0.7167**.
+
+**Read the `evidence?` column, not just the AUCs.** Bins 1, 9 and 10 are
+flagged `no (too wide)` because amplitude varies 3×–530× inside them, so a high
+AUC there could still be loudness. Only bins ≤ 2.5× wide support the claim.
+This matters: bin 1 spans ~500× and its low AUC is often misread as evidence
+that the model fails at low SNR. It is not evidence of anything.
+
 ### S-dependence of the 6 s detector (separate experiment)
 
 ```bash

@@ -245,6 +245,96 @@ meaningless.
 Fusion is best on matched and band. On natural, 2D edges it by 0.0004, which is
 within seed noise.
 
+## Does it read waveform shape, or loudness with extra steps?
+
+### Why the floor comparison cannot answer this
+
+Clearing a conditional amplitude floor does **not** establish that a model uses
+anything but amplitude. The floor is the ROC-AUC of a single scalar, and
+ROC-AUC measures only how well that scalar *ranks*. A model that learned a
+better-shaped function of the same scalar — a threshold in the right place, or
+a non-monotone response — would clear the floor while remaining, in substance,
+an amplitude detector.
+
+That is not hypothetical. On the band-mined P-only set the gap between the
+monotone floor (0.6447) and a depth-4 tree on that *same single scalar*
+(0.7461) was 0.10 AUC. "A better-shaped function of the same number" is worth
+about that much here, and 0.10 is a large fraction of the model's apparent
+margin. So the question needs a different instrument.
+
+### The test
+
+Hold amplitude nearly constant and see whether discrimination survives. Inside
+a narrow amplitude bin the scalar carries almost no information by
+construction, so any AUC meaningfully above 0.5 must come from something else —
+and the only other thing in the window is the shape of the waveform.
+
+Two design points matter:
+
+1. **Bin width, not bin count.** Amplitude is heavy-tailed, so equal-count
+   deciles are wildly unequal in amplitude *range*. On this corpus the top
+   decile spans ~530× and the bottom decile ~500×, while the middle ones span
+   1.3–2.4×. A high AUC in a 530×-wide bin proves nothing — amplitude is still
+   free to vary enormously inside it. `within_amplitude_auc.py` prints the
+   width ratio beside every bin and only counts bins ≤ 2.5× as evidence.
+   *(An earlier ad-hoc version of this analysis did not, and its reading of the
+   bottom decile as "near chance, therefore SNR-gated" was not supportable —
+   that bin is too wide to license any conclusion.)*
+2. **Class balance varies across bins** (0.23–0.99 here). That is harmless:
+   AUC is invariant to class balance, which is exactly why it is the right
+   statistic and why accuracy would not be.
+
+### Result
+
+`src/detection/within_amplitude_auc.py`
+
+**matched test set, matched-trained fusion** — pooled 0.8763, floor 0.6679:
+
+| bin | n | P(event) | amplitude range | width | AUC within | evidence? |
+|---|---|---|---|---|---|---|
+| 1 | 1582 | 0.40 | 0.00 – 0.98 | 508.7× | 0.5664 | no — too wide |
+| 2 | 1581 | 0.38 | 0.98 – 1.51 | 1.5× | **0.6298** | yes |
+| 3 | 1582 | 0.39 | 1.51 – 2.15 | 1.4× | **0.7090** | yes |
+| 4 | 1581 | 0.35 | 2.15 – 3.01 | 1.4× | **0.7781** | yes |
+| 5 | 1582 | 0.41 | 3.01 – 4.34 | 1.4× | **0.8013** | yes |
+| 6 | 1581 | 0.42 | 4.34 – 6.43 | 1.5× | **0.8578** | yes |
+| 7 | 1582 | 0.45 | 6.43 – 10.72 | 1.7× | **0.9274** | yes |
+| 8 | 1581 | 0.53 | 10.72 – 21.85 | 2.0× | **0.9689** | yes |
+| 9 | 1582 | 0.70 | 21.85 – 65.78 | 3.0× | 0.9902 | no — too wide |
+| 10 | 1582 | 0.96 | 65.78 – 34794 | 528.9× | 0.9793 | no — too wide |
+
+**Median across the 7 narrow bins: 0.8013.**
+
+**natural test set, natural-trained fusion** — pooled 0.8410, floor 0.7878:
+narrow-bin AUCs 0.5604 / 0.6423 / 0.6792 / 0.7167 / 0.7492 / 0.7922 / 0.9128,
+**median 0.7167**.
+
+### What this licenses, and what it does not
+
+**Licensed.** In bins where amplitude varies by at most 1.4–2.4×, the model
+reaches AUC 0.63–0.97. No function of loudness can produce that. **The detector
+reads waveform morphology.** This is demonstrated rather than asserted, and it
+is the strongest positive result in the P-only work.
+
+**Also licensed: the ability scales with signal strength.** Within-bin AUC
+rises monotonically with amplitude across every narrow bin — 0.63 at bin 2 to
+0.97 at bin 8 on matched, 0.56 to 0.91 on natural. Morphology becomes readable
+as the P wave rises out of the noise. This is an independent confirmation of
+the operating envelope, which found recall rising 0.469 → 0.945 across SNR
+bands from an entirely separate calculation.
+
+**Not licensed.** Nothing about the quietest ~10% of windows: bin 1 is 400–500×
+wide, so neither its low AUC nor a high one would mean anything. The claim
+"near-chance at the lowest amplitudes, therefore SNR-gated" is *suggested* by
+the trend across bins 2–8 but is not established by bin 1.
+
+**Not licensed either:** that the natural-trained model reads shape better.
+Median narrow-bin AUC on natural is 0.7167 (natural-trained) against 0.7175 for
+the matched-trained model on the same test set — indistinguishable. The
+natural-trained model's real advantage is elsewhere: **157 false alarms against
+317 at equal recall (~0.633)**. It is not better at recognising P; it is better
+at not crying wolf.
+
 ## What this means
 
 Strip the amplitude cues and restrict the model to 1.4 s of P, and it captures
