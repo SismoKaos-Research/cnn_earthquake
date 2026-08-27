@@ -49,6 +49,21 @@ dataset, not just the model. It is a separate measurement against its own
 floor, and that floor must be printed alongside it. Expect a much lower AUC
 that means considerably more.
 
+## [DONE] Chaotic features as a forecaster
+
+**DONE 2026-08-27 (negative; `experiment_chaos_forecast_2026-08-27.md`).**
+312,626 windows extracted, sequence gate passed at 56.1%, univariate screen
+marginally above a permutation null -- and nothing survived walk-forward
+evaluation. +0.010 AUC against a 0.5423 persistence floor, sign flipping across
+folds, t = 0.37 on 3 df. A linear model matched boosted trees, so capacity is
+not the missing ingredient.
+
+**Do not finish the remaining 542 days on this account.** The detectable edge is
++/-0.064 here and ~+/-0.032 at 4x the data; the observed effect is +0.010.
+
+Still untried and more promising: **chaotic features on the DETECTION task**,
+where this project actually has signal.
+
 ## Network coincidence detection
 
 Require 2-of-N stations to fire within a short time window. This is the

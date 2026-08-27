@@ -194,7 +194,24 @@ pessimistic aside.
 
 ---
 
-## 5. Next steps, in order
+## 5. RESOLVED 2026-08-27 — see `experiment_chaos_forecast_2026-08-27.md`
+
+Steps 0-4 below were all run. The extraction completed (312,626 windows), the
+variance gate passed decisively (56.1% hourly, against the 1.2-9.3% band that
+degenerated the earlier GRU), the univariate screen found marginal association
+(best 0.5726 against a 0.5503 floor, just past a permutation null's 95th
+percentile) -- **and none of it survived walk-forward evaluation.** Mean gain
++0.010 AUC, sign flipping across folds, t = 0.37 on 3 df.
+
+**Step 5 is answered too: do not process the full 723 days.** The detectable
+edge on this cell is +/-0.064 at 181 days and roughly +/-0.032 at 723; the
+observed effect is +0.010. Four times the data would not make it detectable.
+
+The steps below are kept as the record of what was planned and executed.
+
+---
+
+## 5b. Next steps, in order (as written 2026-08-21)
 
 0. **Re-run the extraction** (§2). It was killed at 38% for the machine move
    and left nothing behind.
