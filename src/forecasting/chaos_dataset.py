@@ -43,9 +43,67 @@ HORIZON_HOURS = 6.0
 AGGS = ("mean", "std", "min", "max")
 ID_COLUMNS = ("Pencere_ID", "Zaman_Dk", "hour_start", "index")
 
+# Within-hour SHAPE, which mean/std/min/max discard entirely. A feature that
+# climbs steadily through the hour, one that spikes at minute 40, and one that
+# oscillates can share all four summary statistics.
+#
+# These are deliberately crude. They are the cheap test of the hypothesis a
+# CNN encoder over the 50 s stream would embody: if within-hour shape carries
+# association with the label, a slope term and a half-difference will show some
+# of it, and a CNN is then worth its parameter budget. If they show nothing, a
+# network learning a fancier function of the same 72 numbers is unlikely to.
+SHAPE_AGGS = ("slope", "halfdiff", "argmax", "ac1")
 
-def load_chaos_hourly(parquet_path, aggs=AGGS):
+# Cross-hour context: the recurrent half of a CNN+LSTM proposal. The shape
+# statistics above stand in for what a convolutional encoder would read INSIDE
+# an hour; these stand in for what a recurrent layer would read ACROSS hours.
+# Lags plus their deltas, because a level and a change are different claims:
+# "entropy is high" and "entropy has been rising for six hours" are not the
+# same hypothesis and a model given only the current hour can express neither.
+LAG_HOURS = (1, 3, 6, 12, 24)
+
+
+def _shape_block(m):
+    """Shape statistics for one hour's (n_windows, n_features) matrix.
+
+    Returns:
+        (4 * n_features,) array ordered slope, halfdiff, argmax, ac1.
+
+    Missing samples are filled with their own column's within-hour mean before
+    fitting, so one absent window tilts nothing; the feature stream is 0.04%
+    NaN, so this touches almost nothing but keeps a whole hour from going NaN.
+    """
+    n = len(m)
+    col_mean = np.nanmean(m, axis=0)
+    col_mean = np.where(np.isfinite(col_mean), col_mean, 0.0)
+    m = np.where(np.isfinite(m), m, col_mean)
+
+    if n < 4:
+        nan = np.full(m.shape[1], np.nan)
+        return np.concatenate([nan, nan, nan, nan])
+
+    # Least-squares slope in units of feature per hour: t is centred and scaled
+    # to [-0.5, 0.5] so the coefficient does not depend on how many windows the
+    # hour happened to contain.
+    t = (np.arange(n) - (n - 1) / 2.0) / max(1, n - 1)
+    slope = (t[:, None] * (m - m.mean(axis=0))).sum(axis=0) / (t ** 2).sum()
+
+    half = m[n // 2:].mean(axis=0) - m[:n // 2].mean(axis=0)
+    argmax = m.argmax(axis=0) / (n - 1)
+
+    a = m[:-1] - m[:-1].mean(axis=0)
+    b = m[1:] - m[1:].mean(axis=0)
+    ac1 = (a * b).sum(axis=0) / np.sqrt((a ** 2).sum(axis=0) * (b ** 2).sum(axis=0) + 1e-12)
+    return np.concatenate([slope, half, argmax, ac1])
+
+
+def load_chaos_hourly(parquet_path, aggs=AGGS, shape=False):
     """Aggregates the 50 s feature stream to one row per hour.
+
+    Args:
+        aggs: Summary statistics per feature per hour.
+        shape: Also compute `SHAPE_AGGS` -- the within-hour trajectory
+            statistics the summaries discard.
 
     Returns:
         DataFrame indexed by hour_start, columns `{feature}_{agg}`.
@@ -59,7 +117,18 @@ def load_chaos_hourly(parquet_path, aggs=AGGS):
     g = df.groupby("hour_start")[cols]
     out = pd.concat({a: g.agg(a) for a in aggs}, axis=1)
     out.columns = [f"{c}_{a}" for a, c in out.columns]
-    return out.sort_index()
+    out = out.sort_index()
+    if not shape:
+        return out
+
+    hours, blocks = [], []
+    for hour, grp in df.groupby("hour_start", sort=True):
+        hours.append(hour)
+        blocks.append(_shape_block(grp[cols].to_numpy(dtype=float)))
+    names = [f"{c}_{a}" for a in SHAPE_AGGS for c in cols]
+    shp = pd.DataFrame(blocks, index=pd.DatetimeIndex(hours, name="hour_start"),
+                       columns=names)
+    return out.join(shp, how="left")
 
 
 def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM):
@@ -76,7 +145,37 @@ def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM):
     return np.sort(sel.t.values.astype("datetime64[s]"))
 
 
-def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS):
+def add_lags(feats, lag_hours=LAG_HOURS, base=None):
+    """Appends lagged levels and deltas for a subset of columns.
+
+    Args:
+        feats: Hourly feature frame, sorted by hour.
+        base: Columns to lag. Lagging all ~1,000 would multiply the
+            multiple-comparison burden sixfold for no reason; the caller passes
+            the columns that carry association on their own.
+
+    Returns:
+        A new frame with `{col}_lag{h}` and `{col}_d{h}` added.
+
+    Rows in the first `max(lag_hours)` hours get NaN lags, and gaps in the
+    archive produce NaN rather than silently reaching across them, because the
+    index is reindexed to a continuous hourly range first -- a shift() on a
+    frame with missing hours would otherwise treat the row before a two-hour
+    gap as if it were one hour earlier.
+    """
+    base = list(feats.columns if base is None else base)
+    full = feats.reindex(pd.date_range(feats.index.min(), feats.index.max(), freq="h"))
+    out = {}
+    for h in lag_hours:
+        sh = full[base].shift(h)
+        for c in base:
+            out[f"{c}_lag{h}"] = sh[c]
+            out[f"{c}_d{h}"] = full[c] - sh[c]
+    return full.join(pd.DataFrame(out, index=full.index)).reindex(feats.index)
+
+
+def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
+          shape=False, lags=False, lag_top=40):
     """Features, labels and the persistence predictor, on one shared hour index.
 
     Returns:
@@ -84,7 +183,7 @@ def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS):
         array, hour index). Rows whose features are entirely absent are
         dropped; NaNs inside a kept row are left for the model to handle.
     """
-    feats = load_chaos_hourly(parquet_path, aggs)
+    feats = load_chaos_hourly(parquet_path, aggs, shape=shape)
     events = load_events(catalog_path)
     idx = pd.DatetimeIndex(feats.index)
 
@@ -93,6 +192,22 @@ def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS):
     horizon_days = horizon_hours / 24.0
     labels = (count_events_in_window(idx, events, horizon_days, forward=True) > 0).astype(int)
     dsp = days_since_prev_major(idx, events)
+
+    if lags:
+        # Rank columns by their own marginal association and lag only the top
+        # ones. Selecting on the full series does leak into the fold structure,
+        # so this is a screening convenience: it decides which columns to BUILD,
+        # never which to trust, and the walk-forward evaluation is what judges
+        # the result.
+        from seismolib.metrics import safe_auc
+        score = {}
+        for c in feats.columns:
+            v = feats[c].to_numpy(dtype=float)
+            ok = np.isfinite(v)
+            if ok.sum() > 100 and np.nanstd(v[ok]) > 0:
+                score[c] = safe_auc(labels[ok], v[ok], oriented=True)
+        top = sorted(score, key=score.get, reverse=True)[:lag_top]
+        feats = add_lags(feats, base=top)
     return feats, labels, dsp, idx
 
 

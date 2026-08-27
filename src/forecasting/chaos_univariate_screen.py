@@ -41,6 +41,10 @@ def parse_args():
     p.add_argument("--parquet", required=True)
     p.add_argument("--catalog", required=True)
     p.add_argument("--horizon-hours", type=float, default=HORIZON_HOURS)
+    p.add_argument("--shape", action="store_true",
+                   help="Add within-hour slope/half-difference/argmax/lag-1 autocorrelation. Tests whether the trajectory inside an hour carries anything the four summary statistics discard.")
+    p.add_argument("--lags", action="store_true",
+                   help="Add lagged levels and deltas (1/3/6/12/24 h) for the top-scoring columns. Stands in for the recurrent half of a CNN+LSTM: whether the trajectory ACROSS hours carries anything the current hour does not.")
     p.add_argument("--top", type=int, default=20)
     p.add_argument("--permutations", type=int, default=200,
                    help="Null draws for the best-of-N reference. 0 skips it.")
@@ -91,7 +95,7 @@ def main():
     args = parse_args()
     feats, y, dsp, idx = build(os.path.expanduser(args.parquet),
                                os.path.expanduser(args.catalog),
-                               horizon_hours=args.horizon_hours)
+                               horizon_hours=args.horizon_hours, shape=args.shape, lags=args.lags)
     floor = safe_auc(y, persistence_scores(dsp), oriented=True)
 
     print(f"cell        M>={MIN_MAGNITUDE}, {RADIUS_KM:g} km, {args.horizon_hours:g} h")

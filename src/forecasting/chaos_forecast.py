@@ -47,6 +47,10 @@ def parse_args():
     p.add_argument("--parquet", required=True)
     p.add_argument("--catalog", required=True)
     p.add_argument("--horizon-hours", type=float, default=HORIZON_HOURS)
+    p.add_argument("--shape", action="store_true",
+                   help="Add within-hour slope/half-difference/argmax/lag-1 autocorrelation. Tests whether the trajectory inside an hour carries anything the four summary statistics discard.")
+    p.add_argument("--lags", action="store_true",
+                   help="Add lagged levels and deltas (1/3/6/12/24 h) for the top-scoring columns. Stands in for the recurrent half of a CNN+LSTM: whether the trajectory ACROSS hours carries anything the current hour does not.")
     p.add_argument("--folds", type=int, default=4)
     p.add_argument("--embargo-hours", type=int, default=24,
                    help="Rows dropped after each split boundary. Must exceed the "
@@ -99,7 +103,7 @@ def main():
     args = parse_args()
     feats, y, dsp, idx = build(os.path.expanduser(args.parquet),
                                os.path.expanduser(args.catalog),
-                               horizon_hours=args.horizon_hours)
+                               horizon_hours=args.horizon_hours, shape=args.shape, lags=args.lags)
     pers = persistence_scores(dsp)
     log1p_dsp = np.log1p(np.nan_to_num(dsp, nan=np.nanmax(dsp)))
 

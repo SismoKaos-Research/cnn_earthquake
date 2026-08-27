@@ -162,3 +162,80 @@ positive**, and that is the argument against spending a day on it.
    floors. The 6 h cell was chosen for power, not because 6 h is the target.
 3. **Chaotic features on the detection task** is the untried direction, and the
    one where this project's signal actually lives.
+
+---
+
+# Follow-up: would a CNN + LSTM have helped?
+
+**Date:** 2026-08-27, same day
+**Added:** `--shape` and `--lags` in `chaos_dataset.py`, tested in
+`tests/test_chaos_shape.py`
+
+The proposal was to run a CNN over the raw feature stream and pass its output to
+an LSTM or GRU. It targets a real gap: the aggregation above collapses 72 windows
+an hour into four numbers per feature, so a feature that climbs steadily through
+the hour, one that spikes at minute 40, and one that oscillates can share all
+four. And the model above sees only the *current* hour, so a trajectory across
+hours is invisible to it too.
+
+Rather than build the network, both halves of the hypothesis were tested with
+cheap proxies. If within-hour shape and cross-hour context carry association, a
+slope term and a lag will show some of it; if they show nothing, a network
+learning a fancier function of the same numbers is unlikely to.
+
+- **CNN half → within-hour shape.** Per feature per hour: least-squares slope
+  (scaled so window count does not matter), second-half minus first-half mean,
+  position of the maximum, and lag-1 autocorrelation. 528 new columns.
+- **LSTM half → cross-hour context.** Lagged levels and deltas at 1, 3, 6, 12
+  and 24 h for the 40 strongest columns. 400 new columns.
+
+## Result: neither half adds anything, and both slightly hurt
+
+| configuration | columns | best AUC | headroom captured |
+|---|---|---|---|
+| persistence floor | — | 0.5423 | 0% |
+| **summaries only (baseline)** | 528 | **0.5523** | **2.2%** |
+| + within-hour shape | 1,056 | 0.5461 | 0.8% |
+| + cross-hour lags | 928 | 0.5510 | 1.9% |
+| + shape + lags | 1,456 | 0.5460 | 0.8% |
+
+**The baseline is the best of the four.** Every addition left it flat or worse.
+
+The univariate screen is blunter still. Splitting the 1,056 columns by kind:
+
+| column kind | n | beat the floor | best | median AUC |
+|---|---|---|---|---|
+| summary (mean/std/min/max) | 528 | 78 (**14.8%**) | 0.5726 | 0.5267 |
+| shape (slope/halfdiff/argmax/ac1) | 528 | 3 (**0.6%**) | 0.5565 | 0.5099 |
+
+**A median oriented AUC of 0.5099 is as close to "no association" as this
+measurement gets.** Not one shape column reached the top 20, and the best of
+them ranks 29th overall. Doubling the column count did not move the best
+feature (0.5726, a summary statistic) or the permutation null's 95th percentile
+(0.5647).
+
+**The logistic regression is the clearest signal that the additions are noise.**
+It fell from +0.6% captured on summaries alone to **−5.4%** with shape and
+**−7.0%** with both. An L2-penalised linear model degrades exactly like that when
+uninformative columns are added; a tree model, which can ignore them, barely
+moved. The two together say the new columns carry nothing rather than
+something the model failed to use.
+
+## What this does and does not settle
+
+**Settled.** Within-hour trajectory and 1–24 h cross-hour context carry no
+association with this label that the four summary statistics do not already
+have. Since those are the two things a CNN encoder and a recurrent layer
+respectively exist to extract, the architecture is not the missing piece here.
+
+**Not settled.** A convolutional encoder could learn shapes these four crude
+statistics do not span — a specific multi-modal profile, say. The evidence
+against that is indirect: with a median shape AUC of 0.5099, the trajectories
+would have to be informative in a way that is invisible to slope, half
+difference, peak position *and* lag-1 autocorrelation simultaneously.
+
+The honest correction to the earlier section stands: the ±0.064 detectable-edge
+argument bounds what can be **verified** at this sample size, not what could
+exist. A model producing a +0.15 effect would be detected easily. What these
+proxies test is whether the raw material for such a model is present, and it
+does not appear to be.

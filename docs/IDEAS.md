@@ -61,6 +61,15 @@ not the missing ingredient.
 **Do not finish the remaining 542 days on this account.** The detectable edge is
 +/-0.064 here and ~+/-0.032 at 4x the data; the observed effect is +0.010.
 
+**A CNN+LSTM was proposed and tested by proxy the same day, and does not help.**
+Within-hour shape (slope / half-difference / peak position / lag-1
+autocorrelation, 528 columns) and cross-hour context (lags and deltas at
+1/3/6/12/24 h, 400 columns) both left the result flat or worse: 2.2% captured on
+summaries alone, 0.8% with shape, 1.9% with lags, 0.8% with both. Only 3 of 528
+shape columns beat the floor against 78 of 528 summary columns, median oriented
+AUC 0.5099. Those are the two things a convolutional encoder and a recurrent
+layer respectively exist to extract, so architecture is not the missing piece.
+
 Still untried and more promising: **chaotic features on the DETECTION task**,
 where this project actually has signal.
 
