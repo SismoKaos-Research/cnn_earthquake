@@ -4,6 +4,7 @@ Everything downstream of a catalog CSV and upstream of a model: event
 selection by region and magnitude, per-hour labels over a forward horizon,
 and the time-since/time-until features those labels are scored against."""
 
+import re
 from datetime import datetime, timedelta
 
 import numpy as np

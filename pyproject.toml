@@ -37,3 +37,13 @@ dependencies = [
     "torch>=2.13.0",
     "torchvision>=0.28.0",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Every failure this suite is meant to catch is a quiet one -- a floor reported
+# below chance, a checkpoint from the wrong arm -- so warnings are not noise
+# here and a summary of them is printed on every run.
+addopts = "-ra --strict-markers"

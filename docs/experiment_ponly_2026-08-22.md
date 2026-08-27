@@ -355,16 +355,56 @@ so rather than presenting P-only as a refinement of the same one:
    onset transitions in tens of ms. This is the one hyperparameter chosen by
    analogy to the 3 s experiment rather than measured, and the 2D arm is the
    one underperforming. A finer hop, everything else fixed, is ~1 h.
-2. **Report §3.2 discrepancy.** It states `n_fft = 256, hop = 64`,
-   `img (3, 129, 10)` as the method, but the headline results come from
-   `dataset_specdual_catalog_6s_matched_hard`, which is `(3, 33, 38)` —
-   n_fft 64, hop 16. §4.5 acknowledges the change and quantifies it at 0.0010,
-   but only in the window-length section, so a reader of §3.2 would assume
-   otherwise. Two-line fix.
-3. **`cascade_eval.py:91`** still does `glob("*.pth")` with no filtering, while
-   `calibrate.py`, `operating_envelope.py` and `s_arrival_ablation.py` all use
-   an anchored regex. Point it at a multi-arm directory and it silently
-   ensembles `cnn` with `cnn-lstm`.
+2. **[DONE 2026-08-27] Report §3.2 discrepancy.** It stated `n_fft = 256,
+   hop = 64`, `img (3, 129, 10)` as the method, while the headline results came
+   from `dataset_specdual_catalog_6s_matched_hard`, which is `(3, 33, 38)` —
+   n_fft 64, hop 16. Fixed in the merged rewrite: the "İki STFT geometrisi"
+   paragraph now sits inside §3.2, where a reader meets it before the results,
+   instead of only in the window-length section. The superseded
+   `tubitak_rapor_bolum_2_5.md` still has it.
+3. **[DONE 2026-08-27] `cascade_eval.py`** did `glob("*.pth")` with no
+   filtering. Now `find_checkpoints` selects on `_{channels}_{fusion}_` (plus
+   an optional `--detector-branch-1d`), then groups the survivors by run
+   identity — the tag minus `_pid…_seed…` — and requires exactly one, raising
+   with the candidates listed otherwise.
+
+   The anchored regex the other scripts use could not simply be copied: the
+   run tag has grown over time, and the 6 s checkpoints this script's own usage
+   example points at predate both `--branch-1d` and `--seq-transform`, so they
+   are named `2d_linear_dataset_…` and a fully anchored pattern rejects them.
+   Matching loosely and then checking the result accepts the old names while
+   still turning ambiguity into an error. Verified: the 6 s dir resolves to its
+   3 checkpoints, `trained_model_ponly_natural/` narrows from 9 to the 3 `2d`
+   ones, and a directory seeded with `cnn` / `cnn-lstm` / `none` / `asinh`
+   variants refuses until narrowed.
 4. **Wideband diagnostic** (`dataset_specdual_ponly_3p4s_wideband`, band
    0.0–0.99) is built but untrained. The matched result has largely superseded
    the question it was meant to answer.
+
+### Regression tests added 2026-08-27
+
+`tests/` now pins the failure modes this experiment ran into, all of which
+produced a plausible number rather than an error. `pytest` runs in ~4 s on
+synthetic arrays — no GPU, no dataset, safe to run mid-experiment.
+
+- `test_checkpoints.py` — arm selection, including the `cnn` / `cnn-lstm`
+  prefix collision and the pre-`--branch-1d` tag layout.
+- `test_metrics.py` — `safe_auc(oriented=True)`, the correction five
+  forecasting scripts were missing.
+- `test_catalog.py` — the `(t, t+w]` / `(t-w, t]` boundary that keeps a forward
+  label from reading its own input.
+- `test_amplitude_bins.py` — the bin-width gate that stopped the bottom-decile
+  misreading recorded above.
+- `test_label_sweep.py`, `test_splits.py`, `test_imports.py`.
+
+Three latent defects surfaced while writing them, each fixed in the same pass:
+
+1. `seismolib/catalog.py` used `re.match` without importing `re`, so
+   `parse_hour_start` raised `NameError` on every call. Its last caller had
+   moved to `Zaman_Dk`, so nothing noticed.
+2. `label_sweep.sweep_cell` raised `IndexError` on a cell with zero qualifying
+   events. Invisible on the full 2010–2026 catalogue, where every cell has one;
+   a narrower `--start/--end` would have hit it.
+3. `label_sweep.py` was a flat top-to-bottom script, so importing it parsed
+   argv and ran the whole 140-cell sweep. It now has `main()` and a guard, and
+   `test_imports.py` keeps the next one from appearing.
