@@ -239,3 +239,78 @@ argument bounds what can be **verified** at this sample size, not what could
 exist. A model producing a +0.15 effect would be detected easily. What these
 proxies test is whether the raw material for such a model is present, and it
 does not appear to be.
+
+---
+
+# Follow-up 2: sweeping context length, so the question closes
+
+**Script:** `src/forecasting/chaos_config_sweep.py`
+**Tests:** `tests/test_chaos_context.py`
+**Output:** `logs/chaos_config_sweep.csv`
+
+Every architecture proposal so far has been, underneath, a claim about **how
+much history the model should see**. A CNN over the 50 s stream says sub-hour
+shape matters. A 7-day hierarchy of 24 h embeddings says a week matters. Neither
+needs to be built to be tested: make context length a parameter, aggregate the
+trailing window, hand it to a model whose capacity is already known not to be
+the constraint, and see whether anything clears its floor.
+
+Grid: **5 context lengths × 3 horizons**, four walk-forward folds each,
+LightGBM plus `log1p_dsp`, floor recomputed per horizon.
+
+## Result: nothing clears the floor, anywhere
+
+Headroom captured:
+
+| context ↓ / horizon → | 6 h | 24 h | 72 h |
+|---|---|---|---|
+| 1 h (current hour) | **−2.5%** | −11.6% | n/a |
+| 6 h | −5.9% | −8.5% | n/a |
+| 24 h | −10.0% | −4.0% | n/a |
+| 72 h | −10.8% | −23.2% | n/a |
+| **168 h (the 7-day proposal)** | −9.8% | −5.1% | n/a |
+
+**Zero of ten scoreable cells beat their floor.** The best is −2.5%. Longer
+context does not help and mostly hurts, which is the signature of adding
+columns that carry nothing: more to overfit, nothing to learn.
+
+The 72 h horizon is excluded rather than reported as a failure — its positive
+rate is **96.2%**, so almost every hour is within 72 h of a qualifying M ≥ 2.5
+within 400 km. That is an unusable label, not evidence about the features, and
+it is the same viability filter `label_sweep.py` applies.
+
+## Why these numbers are more negative than the section above
+
+The earlier run reached +2.2% captured at the 6 h horizon; the context-1 h cell
+here reaches −2.5% at the same horizon. The two are not contradictory, they use
+different feature bases: the earlier run summarised each hour with
+**mean/std/min/max** (528 columns), this sweep uses **hourly means only** (132)
+so that context length is the sole thing varying down a column.
+
+That the result moves by ~5 points of headroom when the feature basis changes,
+with the sign flipping, is itself the finding: **these effects are the size of
+the noise.** Nothing here is stable enough to build on.
+
+## What the whole investigation now supports
+
+Across everything run on 2026-08-27:
+
+| configuration tested | best captured |
+|---|---|
+| hourly summaries, current hour | +2.2% |
+| + within-hour shape (CNN proxy) | +0.8% |
+| + cross-hour lags 1–24 h (LSTM proxy) | +1.9% |
+| + both | +0.8% |
+| context sweep 1–168 h × horizon 6/24 h, 10 cells | **−2.5%** (best) |
+
+Every configuration sits within noise of a persistence baseline, and the
+detectable edge for this design is ±0.064. **No configuration of these features
+forecasts this label**, and the failure is not architectural: capacity was ruled
+out by a linear model matching boosted trees, within-window shape and cross-window
+context were ruled out by direct proxies, and context length was ruled out by
+sweeping it over two and a half orders of magnitude.
+
+The remaining honest caveat is unchanged: this bounds what can be **verified** at
+232 events on one station over 181 days. It is not a proof that no model could
+ever work. It is a well-supported negative for this station, these features, this
+label family, and this much data — which is what a reader is entitled to ask for.
