@@ -32,7 +32,6 @@ Usage:
 """
 
 import argparse
-import re
 from pathlib import Path
 
 import numpy as np
@@ -42,11 +41,50 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
+from seismolib.checkpoints import find_checkpoints
 from seismolib.metrics import safe_auc
 
 # Bins narrower than this in amplitude ratio are treated as evidence; wider ones
 # are reported but flagged, because amplitude is still free to vary inside them.
 NARROW_RATIO = 2.5
+
+
+def amplitude_bins(amp, y, n_bins=10, min_bin=30, narrow_ratio=NARROW_RATIO):
+    """Equal-count amplitude bins, each tagged with whether it is evidence.
+
+    Args:
+        amp: Per-window amplitude scalar.
+        y: Binary labels, aligned to `amp`.
+        n_bins: Number of equal-COUNT bins (deciles by default).
+        min_bin: Bins with fewer members than this are dropped, as are
+            single-class bins, where AUC is undefined.
+        narrow_ratio: Maximum hi/lo amplitude ratio for a bin to count as
+            evidence.
+
+    Returns:
+        List of dicts with `index`, `mask`, `lo`, `hi`, `ratio` and `narrow`,
+        in ascending amplitude order.
+
+    Equal COUNT is not equal WIDTH, and on this heavy-tailed corpus the gap is
+    the whole point: deciles 2-7 span 1.4-1.7x each while the top decile spans
+    ~530x. A high AUC in a 530x bin says nothing -- amplitude is still free to
+    vary by two and a half orders of magnitude inside it. Only the narrow bins
+    license the conclusion, so the width travels with every bin rather than
+    being recomputed by whoever reads the table.
+    """
+    amp, y = np.asarray(amp), np.asarray(y)
+    edges = np.percentile(amp, np.linspace(0, 100, n_bins + 1))
+    out = []
+    for k in range(n_bins):
+        lo, hi = edges[k], edges[k + 1]
+        last = (k == n_bins - 1)
+        mask = (amp >= lo) & ((amp <= hi) if last else (amp < hi))
+        if mask.sum() < min_bin or len(np.unique(y[mask])) < 2:
+            continue
+        ratio = hi / lo if lo > 0 else float("inf")
+        out.append(dict(index=k + 1, mask=mask, lo=lo, hi=hi, ratio=ratio,
+                        narrow=ratio <= narrow_ratio))
+    return out
 
 
 def parse_args():
@@ -79,11 +117,7 @@ def main():
     amp = np.asarray([float(torch.load(f, weights_only=True)["seq"].float().abs().max())
                       for f, _ in raw.samples])
 
-    pat = re.compile(rf"_{re.escape(args.channels)}_{re.escape(args.fusion)}"
-                     rf"_{re.escape(args.branch_1d)}_")
-    ckpts = sorted(p for p in Path(args.ckpt_dir).glob("*.pth") if pat.search(p.name))
-    if not ckpts:
-        raise SystemExit(f"no checkpoints for {args.channels}/{args.fusion}/{args.branch_1d}")
+    ckpts = find_checkpoints(args.ckpt_dir, args.channels, args.fusion, args.branch_1d)
 
     seq_shape, img_shape = ds.sample_shapes()
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=False)
@@ -110,24 +144,17 @@ def main():
 
     print(f"{'bin':>4}{'n':>7}{'P(event)':>10}{'amplitude range':>24}"
           f"{'width':>9}{'AUC within':>12}   evidence?")
-    edges = np.percentile(amp, np.linspace(0, 100, args.bins + 1))
     narrow = []
-    for k in range(args.bins):
-        hi_inclusive = (k == args.bins - 1)
-        msk = (amp >= edges[k]) & ((amp <= edges[k + 1]) if hi_inclusive
-                                   else (amp < edges[k + 1]))
-        if msk.sum() < args.min_bin or len(np.unique(y[msk])) < 2:
-            continue
+    for b in amplitude_bins(amp, y, n_bins=args.bins, min_bin=args.min_bin):
+        msk = b["mask"]
         a = safe_auc(y[msk], p[msk], oriented=False)
-        lo, hi = edges[k], edges[k + 1]
-        ratio = hi / lo if lo > 0 else float("inf")
-        ok = ratio <= NARROW_RATIO
-        if ok:
+        if b["narrow"]:
             narrow.append(a)
-        print(f"{k+1:>4}{int(msk.sum()):>7}{y[msk].mean():>10.2f}"
-              f"{f'{lo:.2f} - {hi:.2f}':>24}"
-              f"{('%.1fx' % ratio) if np.isfinite(ratio) else '  inf':>9}"
-              f"{a:>12.4f}   {'yes' if ok else 'no (too wide)'}")
+        lo, hi, ratio = b["lo"], b["hi"], b["ratio"]
+        width = f"{ratio:.1f}x" if np.isfinite(ratio) else "inf"
+        print(f"{b['index']:>4}{int(msk.sum()):>7}{y[msk].mean():>10.2f}"
+              f"{f'{lo:.2f} - {hi:.2f}':>24}{width:>9}{a:>12.4f}"
+              f"   {'yes' if b['narrow'] else 'no (too wide)'}")
 
     if narrow:
         print(f"\n  median AUC across NARROW bins (<= {NARROW_RATIO:g}x): "

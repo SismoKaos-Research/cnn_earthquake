@@ -43,7 +43,6 @@ Usage:
 """
 
 import argparse
-import glob
 import sys
 from pathlib import Path
 
@@ -56,6 +55,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 from magnitude import cnn_lstm_regression as reg
+from seismolib.checkpoints import find_checkpoints, run_identity
+
+# Stage 1 is the spectrogram branch by design (see the module docstring), so the
+# checkpoint filter and the model constructor must agree on it. Naming it once
+# keeps them from drifting apart.
+STAGE1_CHANNELS = "2d"
 
 
 def parse_args():
@@ -66,7 +71,15 @@ def parse_args():
     p.add_argument("--magnitude-dir", required=True,
                    help="Magnitude dataset root, built on the same source windows.")
     p.add_argument("--detector-ckpt-dir", required=True,
-                   help="Directory of stage-1 checkpoints; every .pth in it is ensembled.")
+                   help="Directory of stage-1 checkpoints. One arm's worth is "
+                        "ensembled; a directory holding more than one is an error, "
+                        "not an average.")
+    p.add_argument("--detector-fusion", default="linear",
+                   help="Stage-1 fusion arm to select from --detector-ckpt-dir.")
+    p.add_argument("--detector-branch-1d", default=None,
+                   help="Stage-1 1D arm, to disambiguate a directory holding "
+                        "several. Unset selects on channels and fusion alone, "
+                        "which is what pre-`--branch-1d` checkpoints need.")
     p.add_argument("--magnitude-ckpt", required=True,
                    help="Stage-2 checkpoint, trained with --split-by detector.")
     p.add_argument("--threshold", type=float, default=0.5,
@@ -82,23 +95,24 @@ def parse_args():
 
 @torch.no_grad()
 def stage1_scores(ckpt_dir, ds, args, device):
-    """Probability-averaged detector ensemble over every checkpoint in `ckpt_dir`.
+    """Probability-averaged detector ensemble over one arm's checkpoints.
 
     Returns:
         Tuple of (probs, labels, filenames), each aligned to `ds.samples`.
     """
     seq_shape, img_shape = ds.sample_shapes()
-    ckpts = sorted(glob.glob(str(Path(ckpt_dir) / "*.pth")))
-    if not ckpts:
-        raise FileNotFoundError(f"No .pth checkpoints under {ckpt_dir}")
-    print(f"[stage 1] ensembling {len(ckpts)} checkpoint(s)")
+    ckpts = find_checkpoints(ckpt_dir, STAGE1_CHANNELS, args.detector_fusion,
+                             args.detector_branch_1d)
+    print(f"[stage 1] ensembling {len(ckpts)} checkpoint(s) from "
+          f"{run_identity(ckpts[0].name)}")
 
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=False,
                                          num_workers=args.num_workers)
     per_ckpt = []
     for c in ckpts:
         model = DualChannelBinaryNet(seq_shape[-1], img_shape[0], hidden=args.hidden,
-                                     fusion_dim=args.fusion_dim, channels="2d").to(device)
+                                     fusion_dim=args.fusion_dim,
+                                     channels=STAGE1_CHANNELS).to(device)
         model.load_state_dict(torch.load(c, weights_only=True))
         model.eval()
         probs = []

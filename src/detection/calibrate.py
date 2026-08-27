@@ -25,7 +25,6 @@ Usage:
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -36,6 +35,7 @@ from sklearn.metrics import brier_score_loss, matthews_corrcoef, roc_auc_score
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
+from seismolib.checkpoints import find_checkpoints
 
 
 def parse_args():
@@ -128,10 +128,7 @@ def main():
     """Measures calibration before and after temperature scaling, then thresholds."""
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pat = re.compile(rf"_{args.channels}_{args.fusion}_{re.escape(args.branch_1d)}_")
-    ckpts = sorted(c for c in Path(args.ckpt_dir).glob("*.pth") if pat.search(c.name))
-    if not ckpts:
-        raise FileNotFoundError(f"no checkpoints for {args.channels}/{args.branch_1d}")
+    ckpts = find_checkpoints(args.ckpt_dir, args.channels, args.fusion, args.branch_1d)
     print(f"[ensemble] {len(ckpts)} checkpoints")
 
     val_lg, val_y = logits_for("val", ckpts, args, device)

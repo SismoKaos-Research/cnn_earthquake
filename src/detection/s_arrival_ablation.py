@@ -42,7 +42,6 @@ Usage:
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -53,6 +52,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
+from seismolib.checkpoints import find_checkpoints
 
 PRE_ARRIVAL_S = 2.0   # window starts this far before the predicted P
 WINDOW_S = 6.0
@@ -101,15 +101,6 @@ def s_minus_p(distances_km, depths_km):
                 cache[key] = np.nan
         out.append(cache[key])
     return np.asarray(out, dtype=float)
-
-
-def find_checkpoints(ckpt_dir, channels, fusion, branch):
-    """Anchored match, so `cnn` does not also sweep in `cnn-lstm` weights."""
-    pat = re.compile(rf"_{re.escape(channels)}_{re.escape(fusion)}_{re.escape(branch)}_")
-    found = sorted(p for p in Path(ckpt_dir).glob("*.pth") if pat.search(p.name))
-    if not found:
-        raise FileNotFoundError(f"no checkpoints for {channels}/{fusion}/{branch} in {ckpt_dir}")
-    return found
 
 
 @torch.no_grad()

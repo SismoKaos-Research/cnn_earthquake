@@ -23,7 +23,6 @@ Usage:
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -35,6 +34,7 @@ from sklearn.metrics import roc_auc_score
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
+from seismolib.checkpoints import find_checkpoints
 
 
 def parse_args():
@@ -55,22 +55,6 @@ def parse_args():
     p.add_argument("--out-csv", default=None,
                    help="Optional path to write the per-window scored table.")
     return p.parse_args()
-
-
-def find_checkpoints(ckpt_dir, channels, fusion, branch):
-    """Selects only the checkpoints for this exact arm.
-
-    The run tag is `{channels}_{fusion}_{branch_1d}_{dataset}_pid..._seed...`,
-    so anchoring on `_{fusion}_{branch}_` is what keeps `cnn` from also
-    matching `cnn-lstm`.
-    """
-    pat = re.compile(rf"_{re.escape(channels)}_{re.escape(fusion)}_{re.escape(branch)}_")
-    found = sorted(p for p in Path(ckpt_dir).glob("*.pth") if pat.search(p.name))
-    if not found:
-        raise FileNotFoundError(
-            f"No checkpoints matching channels={channels} fusion={fusion} "
-            f"branch-1d={branch} under {ckpt_dir}")
-    return found
 
 
 @torch.no_grad()

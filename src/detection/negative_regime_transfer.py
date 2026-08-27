@@ -36,7 +36,6 @@ Usage:
 """
 
 import argparse
-import re
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +46,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
+from seismolib.checkpoints import find_checkpoints
 from seismolib.metrics import safe_auc
 
 ARMS = [("1d", "1D only"), ("2d", "2D only"), ("all", "fusion")]
@@ -68,13 +68,16 @@ def parse_args():
 
 
 def find_ckpts(ckpt_dir, channels, fusion, branch):
-    """Anchored on `_{channels}_{fusion}_{branch}_`, never a bare glob.
+    """`find_checkpoints`, but an absent arm is empty rather than an error.
 
-    A directory holding several arms will happily hand a `*cnn*` glob the
-    `cnn-lstm` weights too, which silently averages two different models.
+    This script sweeps every arm of a matrix and prints `(none)` for the cells
+    a directory does not have, so "no such arm" is an expected outcome here
+    rather than a mistake.
     """
-    pat = re.compile(rf"_{re.escape(channels)}_{re.escape(fusion)}_{re.escape(branch)}_")
-    return sorted(p for p in Path(ckpt_dir).glob("*.pth") if pat.search(p.name))
+    try:
+        return find_checkpoints(ckpt_dir, channels, fusion, branch)
+    except FileNotFoundError:
+        return []
 
 
 @torch.no_grad()

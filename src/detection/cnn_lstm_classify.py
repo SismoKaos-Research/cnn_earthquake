@@ -391,9 +391,11 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     # reported as if it were a training outcome. Config plus dataset identity plus
     # PID makes collision impossible even for two identical commands run at once.
     # seq_transform belongs in the tag: an asinh checkpoint and a raw one are
-    # otherwise indistinguishable by filename, and cascade_eval.py ensembles
-    # every *.pth in a directory. Two sets of checkpoints have already had to
-    # be quarantined by hand for exactly this reason.
+    # otherwise indistinguishable by filename, and two sets have already had to
+    # be quarantined by hand because of it. Every consumer now selects on this
+    # tag rather than sweeping a directory -- `cascade_eval.find_checkpoints`
+    # groups by it and refuses a save dir holding more than one run -- so the
+    # tag is load-bearing, not decoration.
     run_tag = (f"{args.channels}_{args.fusion}_{args.branch_1d}_{args.seq_transform}"
                f"_{os.path.basename(os.path.normpath(args.dataset_dir))}_pid{os.getpid()}")
     save_path = os.path.join(args.save_dir,
