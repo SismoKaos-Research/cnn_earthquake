@@ -314,3 +314,114 @@ The remaining honest caveat is unchanged: this bounds what can be **verified** a
 232 events on one station over 181 days. It is not a proof that no model could
 ever work. It is a well-supported negative for this station, these features, this
 label family, and this much data — which is what a reader is entitled to ask for.
+
+---
+
+# Follow-up 3: a second station, and what replicates
+
+**Date:** 2026-08-28
+**Script:** `src/forecasting/chaos_station_replication.py`
+**Tests:** `tests/test_chaos_station.py`
+**Data:** `dat_q1_chaos_5hz_features.parquet` (266,641 windows, DAT,
+2024-05-02 → 2024-10-28, date-matched to BODT, identical config)
+
+"You only looked at one station" is the first objection to everything above.
+DAT sits 43.8 km from BODT with its own continuous archive already on disk, so
+answering it cost an extraction rather than a download.
+
+**This is not a sample-size increase.** At the 400 km label radius the two
+stations share 95.3% of their events; DAT adds 3 to BODT's 232. Each station is
+scored against its **own** local label, computed from its own coordinates —
+sharing BODT's label across both would compare two waveforms against one label
+and read the inevitable agreement as a result.
+
+## Site character differs more than the signal does
+
+| | BODT | DAT |
+|---|---|---|
+| `Z_WOLF_LYE` | 0.764 ± 0.072 | 0.812 ± 0.076 |
+| `Z_CORR_DIM` | 4.482 ± 0.212 | 4.571 ± 0.437 |
+| `Z_SAMP_ENT` | 1.249 ± 0.182 | **1.896** ± 0.228 |
+
+`Z_SAMP_ENT` differs by 0.65 — over three standard deviations of either
+station's own spread. Two sensors 44 km apart, in different ground, produce
+materially different chaos statistics. This is why the comparison has to be over
+**rankings**, not values.
+
+## The headline feature does not replicate; the horizontals do
+
+Overall Spearman rank correlation of the two 528-feature AUC vectors:
+**+0.464**. Split by component:
+
+| component | n | ρ | clears BODT's floor | clears DAT's floor |
+|---|---|---|---|---|
+| **Z** (vertical) | 168 | **−0.137** | 17.9% | **0.0%** |
+| N | 168 | +0.750 | 11.9% | 2.4% |
+| E | 168 | +0.798 | 16.7% | 3.0% |
+| cross-component | 24 | −0.108 | 0.0% | 0.0% |
+
+**BODT's best feature was `Z_SKEWNESS_DEV_std` at 0.5726. It ranks 325th of 528
+at DAT.** Every Z feature in BODT's top 15 lands in DAT's bottom half; every E
+feature lands in its top 35. Not one of the 168 vertical-component features
+clears DAT's floor.
+
+So the single-station result that looked marginally promising — one column past
+a permutation null — was **vertical-component site character at BODT**, and it
+does not exist 44 km away. That is a cleaner explanation of the out-of-sample
+failure above than "noise", and it could not have been found without a second
+station.
+
+## The horizontal agreement survives two artifact checks
+
+ρ = 0.75–0.80 on the horizontals is high enough to need explaining, and two
+mundane explanations would produce it:
+
+**Feature persistence.** A more autocorrelated column scores higher against an
+autocorrelated label by construction, at any station, which would correlate the
+rankings with no seismology involved. Measured: the partial rank correlation
+controlling for each feature's own lag-1 autocorrelation is **+0.423**, barely
+below the raw +0.464. And the relationship runs the *wrong way* for the
+artifact — more persistent features score **lower** (ρ = −0.383 at BODT,
+−0.274 at DAT).
+
+**Diurnal cycling.** The label has a real diurnal cycle: positive rate swings
+**1.65×** across the day (0.188 at 08h UTC, 0.309 at 23h), which is catalogue
+completeness — more small events are detected at night when cultural noise
+drops. Hour-of-day alone scores **0.5364**. But the agreeing features are not
+the diurnal ones: correlation between cross-station agreement and diurnal
+amplitude is **+0.113**, and the top-30 agreeing features have the same diurnal
+amplitude as the full set (0.43 vs 0.45 sd).
+
+**A prediction made here was wrong and is recorded as such.** On finding the
+diurnal cycle, the expectation was that the floor should rise to include
+hour-of-day, making everything above look weaker. It does not: a depth-4 tree on
+`(log1p_dsp, sin h, cos h)` scores **worse** than persistence alone — −0.0025 at
+BODT and −0.0236 at DAT — because it spends its split budget across three
+features and overfits. The diurnal signal is real but adds nothing to
+persistence out of sample.
+
+## What the second station changes, and what it does not
+
+**The forecasting negative is now a two-station negative, and stronger for it.**
+DAT's own walk-forward persistence floor is **0.5900** — higher than the best
+chaos model measured anywhere in this investigation (0.5523 at BODT). At DAT
+only 1.7% of all features clear the floor, against 14.8% at BODT, and that gap
+is almost entirely the vertical component.
+
+**One thing genuinely replicates and is not yet explained.** Horizontal-component
+feature *rankings* agree at ρ ≈ 0.78 across two stations, and neither
+autocorrelation nor diurnality accounts for it. That is not a forecast — the
+effect sizes at DAT are +0.0075 over floor at best — but it is structure, and
+it is the only positive finding in this file.
+
+## Open
+
+1. **What drives the horizontal-component agreement?** Both stations share
+   nearly the same label by construction (95% event overlap), so any weak
+   genuine association would rank consistently at both. Distinguishing "weak
+   real association" from a third shared artifact needs stations far enough
+   apart to have *different* labels — which is what the AFAD TU network would
+   provide.
+2. **The vertical channel should be excluded from single-station screening**, or
+   at minimum flagged. It produced this project's most promising-looking
+   forecasting feature and that feature was site character.
