@@ -30,7 +30,10 @@ import pandas as pd
 
 from seismolib.catalog import count_events_in_window, days_since_prev_major, haversine_km
 
-# BODT. The features are single-station, so the label's origin is too.
+# The features are single-station, so the label's origin is too. Default BODT,
+# overridable so a second station can be scored against its OWN local label --
+# which is what makes a cross-station comparison a replication rather than two
+# views of one arbitrary point.
 STATION_LAT, STATION_LON = 37.0622, 27.3103
 
 # Chosen 2026-08-21 by label_sweep.py on statistical power: 232 events, 25%
@@ -131,16 +134,28 @@ def load_chaos_hourly(parquet_path, aggs=AGGS, shape=False):
     return out.join(shp, how="left")
 
 
-def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM):
+def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM,
+                station=None):
     """Qualifying event times, sorted, as datetime64.
+
+    Args:
+        station: (lat, lon), or a key in `seismolib.catalog.STATION_COORDS`.
+            Defaults to BODT.
 
     Returns:
         np.ndarray of event times within `radius_km` of the station.
     """
+    if station is None:
+        lat, lon = STATION_LAT, STATION_LON
+    elif isinstance(station, str):
+        from seismolib.catalog import STATION_COORDS
+        lat, lon = STATION_COORDS[station]
+    else:
+        lat, lon = station
     cat = pd.read_csv(catalog_path, encoding="utf-8-sig")
     cat["t"] = pd.to_datetime(cat.Date, format="%d/%m/%Y %H:%M:%S", errors="coerce")
     cat = cat.dropna(subset=["t", "Magnitude", "Latitude", "Longitude"])
-    d = haversine_km(STATION_LAT, STATION_LON, cat.Latitude.values, cat.Longitude.values)
+    d = haversine_km(lat, lon, cat.Latitude.values, cat.Longitude.values)
     sel = cat[(cat.Magnitude >= min_magnitude) & (d <= radius_km)]
     return np.sort(sel.t.values.astype("datetime64[s]"))
 
@@ -175,7 +190,7 @@ def add_lags(feats, lag_hours=LAG_HOURS, base=None):
 
 
 def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
-          shape=False, lags=False, lag_top=40):
+          shape=False, lags=False, lag_top=40, station=None):
     """Features, labels and the persistence predictor, on one shared hour index.
 
     Returns:
@@ -184,7 +199,7 @@ def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
         dropped; NaNs inside a kept row are left for the model to handle.
     """
     feats = load_chaos_hourly(parquet_path, aggs, shape=shape)
-    events = load_events(catalog_path)
+    events = load_events(catalog_path, station=station)
     idx = pd.DatetimeIndex(feats.index)
 
     # (t, t + horizon] -- an event at exactly t is already observable, so
