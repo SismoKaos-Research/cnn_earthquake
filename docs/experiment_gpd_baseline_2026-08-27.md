@@ -201,8 +201,12 @@ event windows. Only the false-alarm and precision columns can move.
   accuracy out of distribution is the expected finding of the SeisBench
   benchmark, not a criticism of it.
 - **Nothing about how our model would do on their corpus.** The reciprocal
-  experiment — this detector on STEAD or SCSN, against a floor computed there —
-  is still open and is the honest other half of this claim.
+  experiment — this detector on STEAD, against a floor computed there — was run
+  the same day and **reverses the result**: on STEAD-natural GPD `geofon`
+  reaches 0.9796 against our 0.9207, capturing 91.0% of headroom to our 65.1%.
+  Each model wins at home, by a comparable margin. See
+  `experiment_stead_reciprocal_2026-08-27.md`; the table below should never be
+  quoted without it.
 - **No statement about picking accuracy.** GPD is being used as a detector
   here, scored by its P-class probability. Its actual job is onset timing, and
   this measures none of it. Our task cannot produce a pick residual at all.

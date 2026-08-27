@@ -155,8 +155,16 @@ Two findings that belong in this file rather than that one:
   `experiment_ponly_2026-08-22.md` — the effect is in the negative distribution,
   not the positives.
 
-The reciprocal run (this detector on STEAD, against a floor computed there) is
-still missing, and the claim is one-sided until it exists.
+**The reciprocal run reverses it.** On a STEAD subset built through the same
+generator (12,000 windows, M >= 2.0 within 56 km, 81 stations), GPD `geofon`
+reaches **0.9796** against our **0.9207** on identical rows — 91.0% of headroom
+against 65.1%. Each model wins on its own corpus by a comparable margin, and
+neither table means much alone. See `experiment_stead_reciprocal_2026-08-27.md`.
+
+The one asymmetry that does survive the corpus change is internal: the **1D
+branch captures 96.8% of headroom on STEAD against 46.2% at home**, while the
+**2D branch scores below a loudness scalar there**. Whatever the 1D branch
+learned is not station character.
 
 ---
 
