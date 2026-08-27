@@ -129,6 +129,37 @@ so is more defensible than picking a side.
 
 ---
 
+## 3b. A comparable number now exists (2026-08-27)
+
+`docs/experiment_gpd_baseline_2026-08-27.md` runs **GPD (Ross et al. 2018)** on
+this project's own P-only test windows, scored against the same conditional
+amplitude floor. Both models on identical rows, identical floor:
+
+| | AUC | headroom captured |
+|---|---|---|
+| amplitude floor | 0.5860 | 0% |
+| GPD `original` (Ross et al.'s weights) | 0.7710 | 44.7% |
+| GPD `geofon` (best of five weight sets) | 0.7987 | 51.4% |
+| **this work (fusion)** | **0.8796** | **70.9%** |
+
+Two findings that belong in this file rather than that one:
+
+- **Which pretrained weights you download moves GPD by 0.083 AUC on identical
+  data** (0.7154 `scedc` → 0.7987 `geofon`) — a larger spread than most of the
+  architecture differences this literature reports. A paper quoting one
+  pretrained model is quoting one draw from that spread.
+- **GPD scores 0.7710 on the matched negatives and 0.7748 on the natural ones**,
+  having seen neither. Our own model moves 0.8796 → 0.8414 across the same two
+  sets. A foreign model being nearly invariant where ours is not is independent
+  support for the negative-regime finding in
+  `experiment_ponly_2026-08-22.md` — the effect is in the negative distribution,
+  not the positives.
+
+The reciprocal run (this detector on STEAD, against a floor computed there) is
+still missing, and the claim is one-sided until it exists.
+
+---
+
 ## 4. What would make a real comparison possible
 
 The metrics this literature actually shares are **detection latency** and
