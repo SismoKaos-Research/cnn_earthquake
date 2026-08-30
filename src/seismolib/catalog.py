@@ -60,22 +60,38 @@ def parse_hour_start(pencere_id: str):
 
 def load_hourly_features(features_csv: str) -> pd.DataFrame:
     """Loads the combined features file and aggregates it to hourly means.
-    
-    Relies on Zaman_Dk representing absolute UTC minutes since the 1970 Unix Epoch
-    (exported by the updated Rust engine). This guarantees time alignment even 
-    if the sensor went offline for days at a time.
+
+    Two producers write this file with *different* `Zaman_Dk` conventions, and
+    picking the wrong one is silent rather than fatal:
+
+    - the Rust engine writes absolute UTC minutes since the Unix epoch;
+    - Sismokaos-featureExtract writes minutes **within the containing hour**
+      (observed range 3.3--62.5), with the date living in `Pencere_ID`.
+
+    Reading the second as the first maps every row into a single hour of
+    1970-01-01, so 1.2M windows collapse to ~2 hourly vectors and every split
+    comes out empty. `Pencere_ID` is therefore preferred whenever it parses,
+    and `Zaman_Dk` is the fallback.
     """
     if str(features_csv).endswith(".npy"):
         df = pd.DataFrame.from_records(np.load(features_csv, allow_pickle=False))
     else:
         df = pd.read_csv(features_csv)
 
-    # Vectorized absolute time assignment using Zaman_Dk minutes
-    exact_times = pd.to_datetime(df["Zaman_Dk"], unit="m")
-    
-    # .copy() prevents Pandas fragmentation warnings before assigning the new column
-    # "h" is lowercase to comply with Pandas 2.2+ frequency alias deprecations
-    df = df.copy().assign(hour_start=exact_times.dt.floor("h"))
+    hour_start = None
+    if "Pencere_ID" in df.columns:
+        # 'YYYY_MM_DD_HH_wNN' -- the first 13 characters are the hour. Sliced and
+        # parsed with an explicit format rather than row-wise, which matters:
+        # this file is ~1.2M rows and a per-row lambda takes minutes.
+        parsed = pd.to_datetime(df["Pencere_ID"].astype(str).str[:13],
+                                format="%Y_%m_%d_%H", errors="coerce")
+        if parsed.notna().mean() > 0.5:
+            hour_start = parsed
+
+    if hour_start is None:
+        hour_start = pd.to_datetime(df["Zaman_Dk"], unit="m").dt.floor("h")
+
+    df = df.copy().assign(hour_start=hour_start)
     
     feature_cols = [c for c in df.columns if c not in ("Pencere_ID", "Zaman_Dk", "hour_start", "index")]
     hourly = df.groupby("hour_start")[feature_cols].mean().sort_index()

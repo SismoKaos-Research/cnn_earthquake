@@ -28,30 +28,15 @@ from torch.utils.data import DataLoader
 
 from forecasting.feature_lstm_forecast import HourlySeqDataset
 from seismolib.catalog import (days_since_prev_major, label_hours,
-                               load_aegean_events)
+                               load_aegean_events, load_hourly_features)
 from seismolib.logging import DualLogger
 from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.training import seed_everything
 
 
-def load_hourly_features(features_csv: str) -> pd.DataFrame:
-    """Loads the combined features file and aggregates it to hourly means."""
-    if str(features_csv).endswith(".npy"):
-        df = pd.DataFrame.from_records(np.load(features_csv, allow_pickle=False))
-    else:
-        df = pd.read_csv(features_csv)
-
-    # Vectorized absolute time assignment using Zaman_Dk minutes
-    exact_times = pd.to_datetime(df["Zaman_Dk"], unit="m")
-    
-    # .copy() prevents Pandas fragmentation warnings before assigning the new column
-    # "h" is lowercase to comply with Pandas 2.2+ frequency alias deprecations
-    df = df.copy().assign(hour_start=exact_times.dt.floor("h"))
-    
-    feature_cols = [c for c in df.columns if c not in ("Pencere_ID", "Zaman_Dk", "hour_start", "index")]
-    hourly = df.groupby("hour_start")[feature_cols].mean().sort_index()
-    return hourly
+# load_hourly_features now comes from seismolib.catalog -- this file used to
+# carry a duplicate that shared the Zaman_Dk misreading fixed there.
 
 
 class ForecastGRU(nn.Module):
