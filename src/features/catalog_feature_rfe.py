@@ -19,7 +19,7 @@ read off and the peak picked by hand.
 Usage:
     python catalog_feature_rfe.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/data_large.csv \\
+        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
         --consolidated --horizon-days 14 --cv-folds 3
 
 Not imported by anything else -- standalone script.

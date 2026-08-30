@@ -37,7 +37,7 @@ Usage:
     python3 src/detection/s_arrival_ablation.py \\
         --detector-dir  .../dataset_specdual_catalog_6s_matched_hard \\
         --magnitude-dir .../dataset_magreg_catalog_6s \\
-        --catalog       .../catalogs/extracted_earthquakes.csv \\
+        --catalog       .../catalogs/catalog_current.csv \\
         --ckpt-dir trained_model_branch1d_asinh --branch-1d cnn-lstm
 """
 

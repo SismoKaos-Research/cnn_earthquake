@@ -13,7 +13,7 @@ Features:
 Usage:
     python feature_lstm_forecast.py \
         --features-csv ../../Sismokaos/feature-extract/results/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy \
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/data_large.csv \
+        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \
         --cv-folds 5
 """
 

@@ -45,7 +45,7 @@ skipped and only per-window numbers are printed.
 Usage:
     python cnn_lstm_forecast.py \\
         --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
-        --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv
+        --catalog-path ../../data_downloader/catalogs/catalog_current.csv
 
 Also imported (not just run standalone): catalog_forecast_predict.py imports
 `AUX_FEATURES`, `DenseWindowDataset`, and `DualChannelForecastNet` from this

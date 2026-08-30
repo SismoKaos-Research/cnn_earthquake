@@ -13,7 +13,7 @@ from forecasting.chaos_dataset import RADIUS_KM, load_events
 from seismolib.catalog import STATION_COORDS, haversine_km
 
 CATALOG = ("/home/hogib/Projects/Sismokaos/data_downloader/catalogs/"
-           "deprem_katalog_utc.csv")
+           "catalog_current.csv")
 
 
 @pytest.fixture(scope="module")

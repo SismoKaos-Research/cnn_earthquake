@@ -22,7 +22,7 @@ is printed beside the observed best so the two can be compared directly.
 Usage:
     python3 src/forecasting/chaos_univariate_screen.py \\
         --parquet ~/Projects/sismokaos-cli/.../bodt_q1_chaos_5hz_features.parquet \\
-        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/deprem_katalog_utc.csv
+        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv
 """
 
 import argparse

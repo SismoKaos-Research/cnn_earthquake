@@ -11,7 +11,7 @@ Features:
 Usage:
     python raw_cnn_lstm_forecast.py \
         --data-root path/to/massive_features.csv \
-        --catalog-path ../../data_downloader/catalogs/data_large.csv \
+        --catalog-path ../../data_downloader/catalogs/catalog_current.csv \
         --cv-folds 5
 """
 

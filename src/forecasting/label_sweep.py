@@ -36,7 +36,7 @@ from seismolib.catalog import haversine_km
 # Paths are arguments, not constants: this has to run on whichever machine the
 # work currently lives on.
 DEFAULT_CATALOG = ("~/Projects/Sismokaos/data_downloader/catalogs/"
-                   "deprem_katalog_utc.csv")
+                   "catalog_current.csv")
 
 MAGNITUDES = (2.5, 3.0, 3.5, 4.0, 4.5)
 RADII_KM = (50, 100, 200, 400)

@@ -26,7 +26,7 @@ unusable label, and saying so is part of the answer.
 Usage:
     python3 src/forecasting/chaos_config_sweep.py \\
         --parquet ~/Projects/sismokaos-cli/.../bodt_q1_chaos_5hz_features.parquet \\
-        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/deprem_katalog_utc.csv
+        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv
 """
 
 import argparse

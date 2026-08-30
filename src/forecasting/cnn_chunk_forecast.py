@@ -26,7 +26,7 @@ fits on a given GPU.
 Usage:
     python cnn_chunk_forecast.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/data_large.csv \\
+        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
         --consolidated --chunk-hours 168 --horizon-days 7 --batch-size 2 --cv-folds 2
 
 Not imported by anything else -- standalone script.
