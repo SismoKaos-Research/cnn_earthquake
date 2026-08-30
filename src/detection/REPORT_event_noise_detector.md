@@ -120,6 +120,25 @@ mining (§5.3) possible at no acquisition cost.
 > on an arrival, the classes are separated by amplitude by construction. This is
 > the single most important property of the benchmark and §4.1 quantifies it.
 
+> **Screening-catalogue defect, found 2026-08-30.** The screening catalogue
+> named above is missing ~29% of AFAD's events for this region, including almost
+> all of the February 2025 Aegean swarm — see
+> `docs/experiment_chaos_forecast_2026-08-27.md`. Re-screening every noise
+> candidate against the rebuilt catalogue
+> (`catalogs/catalog_afad_full_2026-08-30.csv`, 576,829 events, M>=0) rejects
+> **1,423 windows that the original screen accepted — 1.52% of candidates**.
+> Their triggering events run median M2.40, max M6.0, with 24.6% at M>=3.0.
+>
+> The direction matters: these are *positives mislabelled as negatives*, so the
+> model is penalised for correctly firing on them. **The reported detection
+> figures are therefore conservative, not inflated** — a re-derivation would be
+> expected to move them up slightly, not down. The 1.52% is also an upper bound
+> on what is audible: the screen is time-only, with no distance filter, so a
+> small distant event counts as contamination here even when nothing is visible
+> at the recording station. Quantified per-event on the download list rather
+> than per extracted window, so treat it as a rate estimate rather than an exact
+> count.
+
 ### 2.3 Cross-corpus evaluation set (STEAD)
 
 STEAD `[CITE: Mousavi et al. 2019]` provides analyst-reviewed P and S picks in
