@@ -425,3 +425,77 @@ it is the only positive finding in this file.
 2. **The vertical channel should be excluded from single-station screening**, or
    at minimum flagged. It produced this project's most promising-looking
    forecasting feature and that feature was site character.
+
+---
+
+# Re-run on the corrected catalogue (2026-08-30)
+
+Everything above was computed against `deprem_katalog_utc.csv`, which held 51 of
+1,256 February 2025 events in this region — almost none of the
+Santorini–Amorgos swarm, the largest seismic episode in the record window. The
+catalogue was rebuilt from AFAD's API (`scripts/fetch_afad_catalog.py`) and the
+whole suite re-run over the identical window, geometry and features. **Only the
+labels changed.** Original logs are kept as `logs/chaos_*.log`; the new ones are
+`logs/chaos_*_corrected.log`.
+
+## The labels moved a lot
+
+| | was | corrected |
+|---|---|---|
+| BODT positives (4,343 h, 6 h horizon) | 1,092 (25.1%) | **1,733 (39.9%)** |
+| DAT positives (3,711 h) | 1,053 (24.2%) | **1,692 (39.0%)** |
+
+## The answer did not change — it got firmer
+
+The headline is that **restoring the swarm improved the baseline, not the
+model.** A dense aftershock sequence is precisely what "days since the previous
+event" predicts well, so the persistence floor rose faster than anything built
+from waveform features:
+
+| walk-forward, 4 folds, 24 h embargo | was | corrected |
+|---|---|---|
+| persistence floor | 0.5423 | **0.5713** |
+| chaos + dsp / lgbm | 0.5483 (+1.3%) | 0.5687 (**−0.6%**) |
+| chaos only / lgbm | 0.5523 (+2.2%) | 0.5605 (**−2.5%**) |
+| chaos + dsp / logreg | 0.5490 (+1.5%) | 0.5593 (**−2.8%**) |
+| chaos only / logreg | 0.5452 (+0.6%) | 0.5485 (**−5.3%**) |
+
+Previously the best configuration cleared the floor by +2.2%. **Now every
+configuration is below it.** The context/horizon sweep agrees: 0 of 10 cells
+above +5% captured, best cell −0.1% (context 168 h, horizon 24 h).
+
+## Why the univariate screen still says "worth modelling"
+
+The screen passes more emphatically than before — best feature 0.5841 against a
+block-shuffled null whose 95th percentile is 0.5628 (500 draws), and 222 of 528
+features clear the floor where 78 did. That is not a contradiction. Individual
+features do carry marginal association with the label; it simply is not
+*complementary* to persistence. Both are reading the same underlying quantity —
+how seismically active the recent past was — so once persistence is the
+baseline, the features add nothing. A screen against a null and a model against
+a floor are different questions, and only the second one is the forecast.
+
+## What did replicate, and more cleanly
+
+The one durable positive from the original run survived and sharpened. Scoring
+all 528 features at both stations and correlating the two AUC vectors:
+
+| component | was | corrected |
+|---|---|---|
+| Z (vertical) | −0.137 | **−0.193** |
+| N (horizontal) | +0.750 | **+0.856** |
+| E (horizontal) | +0.846 | **+0.846** |
+| overall | +0.464 | +0.498 |
+
+The horizontals agree strongly across two stations 40 km apart; the vertical is
+mildly *anti*-correlated. It shows in the leaderboard directly — every E/N
+feature in BODT's top 15 lands inside DAT's top ~45, while every Z feature lands
+between 257 and 458 of 528. And 10 of BODT's 15 leaders beat DAT's own floor
+against ~3.9 expected by chance.
+
+So there is something real and station-transferable in the horizontal-component
+chaos features. It is not a 6-hour forecast of whether an M>=2.5 event occurs
+within 400 km — that remains below the persistence floor — but it is not noise
+either, and it is the thread worth pulling.
+
+**Reproduce:** `scripts/rerun_chaos_corrected.sh` (62 s, sequential).
