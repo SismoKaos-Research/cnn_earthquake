@@ -120,3 +120,59 @@ reported.
 wider waveform archive. That is precisely what the station campaign in
 `docs/PLAN_afad_queue.md` would buy, and it is a better-motivated reason to run
 it than anything in the forecasting results so far.
+
+
+---
+
+## 3. Follow-up: the feature models at an evaluable operating point
+
+Section 2 established that M>=4.5 / 30 d cannot be scored. `scripts/probe_forecast_horizons.py`
+was extended to sweep magnitude against horizon on label composition alone (no
+training), counting folds whose test positive rate lands in [0.05, 0.95]:
+
+| M>= | events in window | independent episodes (3 d decluster) | 3 d | 7 d | 14 d | 30 d |
+|---|---|---|---|---|---|---|
+| 4.5 | 93 | 31 | 3/5 | 3/5 | 3/5 | 2/5 |
+| **4.0** | **344** | **70** | **5/5** | **5/5** | **5/5** | 2/5 |
+| 3.5 | 868 | 133 | 5/5 | 4/5 | 2/5 | 0/5 |
+| 3.0 | 2,146 | 197 | 3/5 | 0/5 | 0/5 | 0/5 |
+| 2.5 | 4,855 | 234 | 1/5 | 0/5 | 0/5 | 0/5 |
+
+Lowering the threshold helps only to a point. **M>=4.0 more than doubles
+independent episodes (31 -> 70) and gives 5/5 evaluable folds at three
+horizons.** Below that the degeneracy inverts rather than clearing: M>=3.0 at
+7 d has an overall positive rate of 0.991, so nearly every hour is positive.
+
+Re-run at **M>=4.0, 14 d** (matching `catalog_mlp` so the families compare),
+corrected catalogue. The setup is now genuinely evaluable — **0 NaN validation
+epochs** against 111 of 264 before, all five folds scored, test positive rates
+spanning 0.173 to 0.862.
+
+| model | mean AUC | fold SD | floor | headroom captured |
+|---|---|---|---|---|
+| `feature_lstm` | 0.5244 | 0.1051 | 0.5823 | **-13.87%** |
+| `feature_gru_tcn` (GRU) | 0.5709 | 0.1621 | 0.5823 | **-2.73%** |
+| `feature_gru_tcn` (TCN) | 0.5204 | 0.0698 | 0.5823 | **-14.82%** |
+
+`feature_lstm` beats its own fold's floor in 2 of 5 folds. **All three lose to
+persistence on average**, and fold SD (0.07-0.16) dwarfs every gap.
+
+### What this settles
+
+This is the first trustworthy evaluation these two models have ever had: before
+today the loader gave them 2 rows, and at M>=4.5/30 d the folds were degenerate.
+The answer is a clean negative, and it agrees with the chaos work from the same
+day, which put waveform-derived features below the persistence floor on the
+corrected catalogue.
+
+Taken with §1, the project's forecasting picture is consistent:
+
+- **Catalogue-derived features beat persistence.** `catalog_mlp`, 16.84%
+  headroom captured, 2/2 folds.
+- **Waveform-derived features do not** — neither the chaotic features (below
+  floor across all four model variants and 0 of 10 sweep cells) nor the
+  hand-crafted continuous features (all three architectures below floor).
+
+The forecasting signal in this project comes from the earthquake catalogue, not
+from the seismogram. That is worth stating directly in the report, because it is
+a negative result with a clear boundary rather than an absence of one.

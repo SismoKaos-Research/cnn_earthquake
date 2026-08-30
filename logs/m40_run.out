@@ -1,0 +1,5 @@
+=== feature_lstm_forecast  M>=4.0 14d  23:08:11 ===
+    ok -> logs/feature_lstm_forecast_m40_h14.log
+=== feature_gru_tcn  M>=4.0 14d  23:17:40 ===
+    ok -> logs/feature_gru_tcn_m40_h14.log
+=== done 23:31:30 ===
