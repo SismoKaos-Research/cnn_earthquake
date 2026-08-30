@@ -120,24 +120,39 @@ mining (§5.3) possible at no acquisition cost.
 > on an arrival, the classes are separated by amplitude by construction. This is
 > the single most important property of the benchmark and §4.1 quantifies it.
 
-> **Screening-catalogue defect, found 2026-08-30.** The screening catalogue
-> named above is missing ~29% of AFAD's events for this region, including almost
-> all of the February 2025 Aegean swarm — see
-> `docs/experiment_chaos_forecast_2026-08-27.md`. Re-screening every noise
-> candidate against the rebuilt catalogue
-> (`catalogs/catalog_afad_full_2026-08-30.csv`, 576,829 events, M>=0) rejects
-> **1,423 windows that the original screen accepted — 1.52% of candidates**.
-> Their triggering events run median M2.40, max M6.0, with 24.6% at M>=3.0.
+> **Screening-catalogue defect, found 2026-08-30 — checked, and the impact is
+> negligible.** The screening catalogue named above is missing ~29% of AFAD's
+> events for this region, including almost all of the February 2025 Aegean
+> swarm (see `docs/experiment_chaos_forecast_2026-08-27.md`). Because §2.2
+> validates negatives against it, that is exactly the use where such a hole
+> fails silently, so the built datasets were re-checked window by window against
+> the rebuilt catalogue (`catalogs/catalog_afad_full_2026-08-30.csv`, 576,829
+> events, M>=0). Each noise window's absolute time is recoverable from its
+> filename: `noise_event_<id>_..._win<k>` sits at origin - 3 h 05 m + 1.7k s.
 >
-> The direction matters: these are *positives mislabelled as negatives*, so the
-> model is penalised for correctly firing on them. **The reported detection
-> figures are therefore conservative, not inflated** — a re-derivation would be
-> expected to move them up slightly, not down. The 1.52% is also an upper bound
-> on what is audible: the screen is time-only, with no distance filter, so a
-> small distant event counts as contamination here even when nothing is visible
-> at the recording station. Quantified per-event on the download list rather
-> than per extracted window, so treat it as a rate estimate rather than an exact
-> count.
+> | dataset | noise windows | event *inside* the window | screen-equivalent (+-300 s) |
+> |---|---|---|---|
+> | `ponly_3p4s_natural` (3.4 s) | 55,595 | **3 (0.005%)** | 2,260 (4.07%) |
+> | `catalog_6s_matched_hard` (6 s) | 55,568 | **32 (0.058%)** | 2,185 (3.93%) |
+>
+> Only the middle column is mislabelling. The +-300 s column is the screen's
+> safety buffer, not contamination: an event 300 s away is not present in a
+> 3.4 s window. The old catalogue flags **zero** in both columns, confirming the
+> screen worked correctly on the catalogue it was given — every miss is an event
+> it could not see.
+>
+> The three windows in the 3.4 s corpus are M1.8 at 79 km, M2.6 at 105 km, and
+> one M3.0 offshore — small and distant enough that most are likely inaudible at
+> the recording station. And the direction is favourable regardless: these are
+> positives mislabelled as negatives, so the model is penalised for firing
+> correctly. **No reported detection figure is affected at 3-in-55,595, and no
+> model needs retraining on this account.**
+>
+> One real limitation remains, on the positive side rather than the negative.
+> The download list holds 369 February 2025 events against AFAD's 1,256 for the
+> region, so the corpus *under-covers* the swarm. That is missing data, not
+> wrong labels — it narrows what the corpus represents without corrupting
+> anything in it.
 
 ### 2.3 Cross-corpus evaluation set (STEAD)
 
