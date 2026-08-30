@@ -1,0 +1,10 @@
+--- skipping catalog_mlp ---
+=== feature_lstm / old  21:28:32 ===
+    ok -> logs/neural_feature_lstm_old.log
+=== feature_lstm / new  21:37:12 ===
+    ok -> logs/neural_feature_lstm_new.log
+=== feature_gru_tcn / old  21:47:43 ===
+    ok -> logs/neural_feature_gru_tcn_old.log
+=== feature_gru_tcn / new  22:03:13 ===
+    ok -> logs/neural_feature_gru_tcn_new.log
+=== all done 22:22:23 ===
