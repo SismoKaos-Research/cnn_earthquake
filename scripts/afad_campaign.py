@@ -109,10 +109,21 @@ def cmd_next(args):
     # submission return 111 (busy) rather than silently duplicating.
     try:
         resp = requests.post(REQUEST_URL, json=payload, timeout=args.timeout)
-    except requests.exceptions.Timeout:
-        print(f"[TIMEOUT] no answer in {args.timeout}s. The request may still have been")
-        print("          accepted; re-run `next` and a 111 means it was.")
-        return 1
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        # AMBIGUOUS, not failed: TDVMS frequently accepts the request and then
+        # times out or drops the connection instead of answering. Leaving the
+        # chunk `pending` is the wrong call -- the next `next` then re-grabs the
+        # same window and burns the other address's queue slot on a duplicate,
+        # which is exactly what happened on 2026-08-31. Record it as submitted
+        # and flag the uncertainty instead.
+        todo["state"], todo["email"] = "submitted", args.email
+        todo["note"] = f"unconfirmed ({type(e).__name__}) — link may still arrive"
+        save_ledger(args.ledger, rows)
+        print(f"[AMBIGUOUS] {type(e).__name__} — no answer from TDVMS.")
+        print("            Recorded as submitted: these are usually accepted anyway,")
+        print("            and a duplicate wastes a slot. If no email arrives, reset")
+        print("            it with `reset --start <ISO>`.")
+        return 0
     if resp.status_code != 200:
         print(f"[HTTP {resp.status_code}] {resp.text[:200]}")
         return 1
@@ -169,6 +180,21 @@ def cmd_paste(args):
     return 0
 
 
+def cmd_reset(args):
+    """Puts a chunk back to pending — for an unconfirmed submission whose email
+    never arrived."""
+    rows = load_ledger(args.ledger)
+    hit = [r for r in rows if r["start"].startswith(args.start)]
+    if not hit:
+        print(f"no chunk starting {args.start}")
+        return 1
+    for r in hit:
+        print(f"  {r['station']} {r['start'][:10]}: {r['state']} -> pending")
+        r["state"], r["email"], r["note"] = "pending", None, None
+    save_ledger(args.ledger, rows)
+    return 0
+
+
 def cmd_status(args):
     rows = load_ledger(args.ledger)
     if not rows:
@@ -211,6 +237,9 @@ def main():
     pa = sub.add_parser("paste"); pa.set_defaults(fn=cmd_paste)
     pa.add_argument("--url", required=True)
     pa.add_argument("--out-dir", default="afad_raw")
+
+    rs = sub.add_parser("reset"); rs.set_defaults(fn=cmd_reset)
+    rs.add_argument("--start", required=True, help="ISO start of the chunk, e.g. 2024-05-01")
 
     st = sub.add_parser("status"); st.set_defaults(fn=cmd_status)
 
