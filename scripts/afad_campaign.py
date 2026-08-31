@@ -1,0 +1,211 @@
+"""TDVMS download campaign: a restartable ledger plus one-request-at-a-time submission.
+
+TDVMS emails a download link rather than returning data, and processes one
+request at a time **per email address**. A campaign is therefore hundreds of
+human-in-the-loop round trips, and the only way that survives interruption is a
+ledger that records exactly which (station, window) chunks are done.
+
+Deliberately NOT automated end-to-end: requests are submitted one at a time and
+links are pasted back in. That keeps the same human-in-the-loop shape as
+`sismokaos/download/afad.py`, which documents why.
+
+    python3 scripts/afad_campaign.py plan   --station MANT --chunk-days 21
+    python3 scripts/afad_campaign.py next   --email you@example.com
+    python3 scripts/afad_campaign.py paste  --url https://tdvms.afad.gov.tr/files/....zip
+    python3 scripts/afad_campaign.py status
+
+`plan` is idempotent; re-running it never duplicates or re-requests a chunk.
+"""
+import argparse
+import json
+import pathlib
+import sys
+import zipfile
+from datetime import datetime, timedelta
+
+import requests
+
+STATIONS_URL = "https://tdvms.afad.gov.tr/api/Data/GetStations"
+REQUEST_URL = "https://tdvmservis.afad.gov.tr/GetData"
+LEDGER = pathlib.Path("afad_campaign_ledger.jsonl")
+
+# TDVMS result codes, from the portal's own client.
+RESULT_OK, RESULT_QUEUED, RESULT_ERROR, RESULT_BUSY = 0, 109, 110, 111
+
+
+def load_ledger(path):
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def save_ledger(path, rows):
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+
+def cmd_plan(args):
+    """Enumerates chunks. Never re-adds one already in the ledger."""
+    rows = load_ledger(args.ledger)
+    have = {(r["station"], r["start"]) for r in rows}
+    t, added = datetime.fromisoformat(args.start), 0
+    end = datetime.fromisoformat(args.end)
+    while t < end:
+        nxt = min(t + timedelta(days=args.chunk_days), end)
+        key = (args.station, t.isoformat())
+        if key not in have:
+            rows.append({"station": args.station, "start": t.isoformat(),
+                         "end": nxt.isoformat(), "state": "pending",
+                         "email": None, "url": None, "bytes": None, "note": None})
+            added += 1
+        t = nxt
+    save_ledger(args.ledger, rows)
+    pend = sum(1 for r in rows if r["state"] == "pending")
+    print(f"planned {added} new chunk(s) for {args.station} at {args.chunk_days} d")
+    print(f"ledger now holds {len(rows)} chunk(s), {pend} pending")
+
+
+def _device_code(station_code):
+    r = requests.post(STATIONS_URL, json={"netcodes": ["TU"], "deviceCode": "",
+                                          "component": ""}, timeout=30)
+    r.raise_for_status()
+    for s in r.json():
+        if s["code"] == station_code:
+            for flag, code in (("deviceH", "H"), ("deviceL", "L"), ("deviceN", "N")):
+                if s.get(flag):
+                    return code
+            raise SystemExit(f"{station_code}: no H/L/N device")
+    raise SystemExit(f"{station_code}: not in the TDVMS station list")
+
+
+def cmd_next(args):
+    """Submits the oldest pending chunk. One at a time -- the queue slot is per email."""
+    rows = load_ledger(args.ledger)
+    inflight = [r for r in rows if r["state"] == "submitted" and r["email"] == args.email]
+    if inflight and not args.force:
+        r = inflight[0]
+        print(f"[BUSY] {args.email} already has a chunk in flight: "
+              f"{r['station']} {r['start'][:10]}..{r['end'][:10]}")
+        print("       Paste its link first:  afad_campaign.py paste --url ...")
+        return 1
+    todo = next((r for r in rows if r["state"] == "pending"), None)
+    if todo is None:
+        print("nothing pending — campaign complete")
+        return 0
+
+    dev = _device_code(todo["station"])
+    payload = {
+        "start_time": datetime.fromisoformat(todo["start"]).strftime("%Y-%m-%d %H:%M:%S"),
+        "end_time": datetime.fromisoformat(todo["end"]).strftime("%Y-%m-%d %H:%M:%S"),
+        "data_type": "mseed", "instrument": False,
+        "networks": ["TU"], "stations": [todo["station"]], "location": [None],
+        "device_codes": [dev], "components": [["Z", "N", "E"]],
+        "e_mail": args.email,
+    }
+    print(f"submitting  TU.{todo['station']} ({dev})  "
+          f"{todo['start'][:10]} -> {todo['end'][:10]}  -> {args.email}")
+    resp = requests.post(REQUEST_URL, json=payload, timeout=30)
+    if resp.status_code != 200:
+        print(f"[HTTP {resp.status_code}] {resp.text[:200]}")
+        return 1
+    result = resp.json().get("Result")
+    if result == RESULT_BUSY:
+        print("[111] the previous request for this address is still processing")
+        return 1
+    if result == RESULT_ERROR:
+        print(f"[110] TDVMS returned a general error: {resp.json()}")
+        return 1
+    todo["state"], todo["email"] = "submitted", args.email
+    save_ledger(args.ledger, rows)
+    print(f"[{result}] accepted — the link will arrive by email at {args.email}")
+    return 0
+
+
+def cmd_paste(args):
+    """Attaches a link to the oldest submitted chunk, downloads and verifies it."""
+    rows = load_ledger(args.ledger)
+    tgt = next((r for r in rows if r["state"] == "submitted"), None)
+    if tgt is None:
+        print("no chunk is awaiting a link")
+        return 1
+    out = pathlib.Path(args.out_dir) / tgt["station"]
+    out.mkdir(parents=True, exist_ok=True)
+    zpath = out / f"{tgt['station']}_{tgt['start'][:10]}.zip"
+    print(f"fetching -> {zpath}")
+    with requests.get(args.url, stream=True, timeout=120) as resp:
+        resp.raise_for_status()
+        with open(zpath, "wb") as f:
+            for chunk in resp.iter_content(1 << 16):
+                f.write(chunk)
+    size = zpath.stat().st_size
+    tgt["bytes"] = size
+
+    # A 181-day request once returned a 4 KB empty zip. Verify, do not assume.
+    try:
+        with zipfile.ZipFile(zpath) as zf:
+            names = [n for n in zf.namelist() if not n.endswith("/")]
+    except zipfile.BadZipFile:
+        tgt["state"], tgt["note"] = "failed", "not a zip"
+        save_ledger(args.ledger, rows)
+        print(f"[FAIL] {size} bytes and not a valid zip")
+        return 1
+    if not names:
+        tgt["state"], tgt["note"] = "failed", f"empty zip ({size} B)"
+        save_ledger(args.ledger, rows)
+        print(f"[FAIL] zip is empty ({size} B) — the window is probably too long")
+        return 1
+    tgt["state"], tgt["url"], tgt["note"] = "fetched", args.url, f"{len(names)} file(s)"
+    save_ledger(args.ledger, rows)
+    print(f"[OK] {size/1e6:.1f} MB, {len(names)} file(s) — {zpath}")
+    print(f"     {sum(1 for r in rows if r['state']=='pending')} chunk(s) still pending")
+    return 0
+
+
+def cmd_status(args):
+    rows = load_ledger(args.ledger)
+    if not rows:
+        print("ledger is empty — run `plan` first")
+        return 0
+    by = {}
+    for r in rows:
+        by.setdefault(r["state"], []).append(r)
+    print(f"{len(rows)} chunk(s) in {args.ledger}")
+    for st in ("pending", "submitted", "fetched", "failed"):
+        if st in by:
+            mb = sum(r["bytes"] or 0 for r in by[st]) / 1e6
+            print(f"  {st:10s} {len(by[st]):4d}" + (f"   {mb:.1f} MB" if mb else ""))
+    for r in by.get("submitted", []):
+        print(f"  awaiting link: {r['station']} {r['start'][:10]}..{r['end'][:10]} ({r['email']})")
+    for r in by.get("failed", []):
+        print(f"  FAILED: {r['station']} {r['start'][:10]} — {r['note']}")
+    return 0
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--ledger", type=pathlib.Path, default=LEDGER)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pl = sub.add_parser("plan"); pl.set_defaults(fn=cmd_plan)
+    pl.add_argument("--station", required=True)
+    pl.add_argument("--start", default="2024-05-01")
+    pl.add_argument("--end", default="2026-08-10")
+    pl.add_argument("--chunk-days", type=int, default=21)
+
+    nx = sub.add_parser("next"); nx.set_defaults(fn=cmd_next)
+    nx.add_argument("--email", required=True)
+    nx.add_argument("--force", action="store_true",
+                    help="submit even if this address already has one in flight")
+
+    pa = sub.add_parser("paste"); pa.set_defaults(fn=cmd_paste)
+    pa.add_argument("--url", required=True)
+    pa.add_argument("--out-dir", default="afad_raw")
+
+    st = sub.add_parser("status"); st.set_defaults(fn=cmd_status)
+
+    args = p.parse_args()
+    sys.exit(args.fn(args) or 0)
+
+
+if __name__ == "__main__":
+    main()
