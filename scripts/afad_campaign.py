@@ -216,6 +216,15 @@ def cmd_paste(args):
     encoded in the archive -- not by ledger order, which is wrong when two
     addresses have requests in flight simultaneously."""
     rows = load_ledger(args.ledger)
+    # A link already banked usually means an older email resurfacing while
+    # working through an inbox. Say so instead of spending 800 MB re-fetching
+    # bytes we already verified.
+    dup = next((r for r in rows if r.get("url") == args.url
+                and r["state"] == "fetched"), None)
+    if dup and not args.force:
+        print(f"[SKIP] already fetched as {dup['station']} "
+              f"{dup['start'][:10]}..{dup['end'][:10]} ({(dup['bytes'] or 0)/1e6:.1f} MB)")
+        return 0
     if not any(r["state"] == "submitted" for r in rows):
         print("no chunk is awaiting a link")
         return 1
