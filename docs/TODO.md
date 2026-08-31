@@ -14,32 +14,7 @@ forward — several items the old files listed as open had already been finished
 These change stated conclusions or need judgement I don't have. Nothing below
 proceeds without a call from you.
 
-### 1.1 The §4.2 finding (i) overturn — TÜBİTAK report
-
-**Still open.** The report claims the 1D branch "only re-learns the scalar it
-was denied." On the per-window-normalised `dataset_specdual_6s` that scalar does
-not exist — the `seq` std floor is exactly 0.5000 — and the branch still works:
-
-| arm | ensemble | vs seq floor 0.7088 | vs strongest floor 0.9205 |
-|---|---|---|---|
-| `cnn-lstm` | **0.9309** | +0.2221 | **+0.0104** |
-| `cnn` | 0.9146 | +0.2058 | −0.0059 |
-| `lstm` (the report's row) | ~0.9144 | +0.2056 | −0.0061 |
-
-Reproduction confirmed: seed 42 of the control run scored 0.9139 against the
-report's 0.9144, so the row reproduces and this is not a measurement artefact.
-The original result measured the branch's *reach*, not the data's information
-content.
-
-Separable second point: Çizelge 7 judges a waveform-only model against `img`
-mean dB (0.9205), a **spectrogram** scalar the model never sees. Finding (i)
-asks "does it learn more than amplitude?" but scores against "is it deployable
-alone?". Suggested fix — print both floors in that row and split the claim.
-
-**Why it is yours:** it changes a stated conclusion in a document going to
-reviewers.
-
-### 1.2 Whether to run the AFAD station campaign
+### 1.1 Whether to run the AFAD station campaign
 
 Fully planned in [`PLAN_afad_queue.md`](PLAN_afad_queue.md) — station set,
 request arithmetic, the 185 GB-vs-166 GB disk constraint, and what the runner
@@ -58,11 +33,14 @@ size — and therefore 240 vs 714 requests — turns on them.
 
 ### 2.1 Regenerate the report deliverables
 
-`docs/report.docx` is stale against `report.md`; `scripts/md2docx.py` regenerates
-it. The Turkish drafts on the Desktop (`tubitak_rapor_v2.md`,
-`tubitak_rapor_v2_taslak.md`, `tubitak_rapor_bolum_2_5.md`) have **not** been
-touched and I don't know which is current — tell me which and I'll fold in the
-catalogue corrections.
+**`tubitak_rapor_v2.md` is done** — freshened 2026-08-31 (attribution corrected,
+GPD/STEAD results folded in, §6 forecasting added) and now version-controlled in
+`docs/tubitak/` with symlinks left on the Desktop.
+
+Remaining: the `.docx` renders are stale against their sources.
+`scripts/md2docx.py` regenerates them — `docs/report.docx` and
+`docs/tubitak/*.docx`. Not done automatically because the renders are the thing
+that actually goes to reviewers and should be regenerated deliberately.
 
 ### 2.2 Network coincidence detection
 
@@ -155,3 +133,4 @@ chance). Detection essentially unaffected: 3 contaminated noise windows in
 | Gated fusion | Done. |
 | fp16 overflow re-check on the original benchmark | Done. |
 | `catalog_forecast_report.md` pre-correction tables | Done 2026-08-31 — supersede note added in place, including that CENTRAL is no longer at chance so its near-Poisson diagnosis does not survive for that zone. |
+| §4.2 finding (i) overturn | **Already resolved in the report itself.** `tubitak_rapor_v2.md` §4.8.6 carries the normalised-dataset measurement (Çizelge 27–31) and §5.4 states outright that the stronger claim "did not survive" — including the both-floors fix. Was listed as an open decision only because a 2026-08-20 note was carried forward without checking it against the current draft. |
