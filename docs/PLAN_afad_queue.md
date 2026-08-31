@@ -51,6 +51,42 @@ Re-run the selection when the replacement catalogue lands:
 
 ---
 
+## 0b. Data quality: the early claim was too generous — corrected 2026-08-31
+
+An earlier draft said AFAD data is ~290x cleaner than the KOERI archive, based
+on a single TU.ANDN day pulled via ORFEUS (0.008% gaps). **Seven real TDVMS
+chunks do not support that.** Measured with `scripts/afad_audit.py`:
+
+| chunk (21 d) | gap E | gap N | gap Z |
+|---|---|---|---|
+| 2024-05-01 | 0.542% | 0.522% | 0.505% |
+| **2024-05-22** | **26.793%** | **26.784%** | **26.767%** |
+| 2024-06-12 | 0.379% | 0.380% | 0.370% |
+| 2024-07-03 | 0.517% | 0.523% | 0.524% |
+| 2024-07-24 | 1.874% | 1.864% | 1.866% |
+| 2024-08-14 | 1.030% | 0.901% | 1.040% |
+| 2024-09-04 | 3.266% | 2.827% | 2.899% |
+
+**Mean 4.87%, median ~0.99%**, against KOERI's 2.316% (BODT) and 2.428% (DAT).
+
+The mean is worse than KOERI; the median is better. Both statements are true and
+neither alone is honest. What actually distinguishes the two archives:
+
+- **When MANT is recording, it records more completely** — four of seven chunks
+  sit at or below 0.54%, well under anything KOERI shows.
+- **But MANT has multi-day outages that the KOERI stations do not.** The 26.8%
+  chunk is one contiguous **113-hour** outage (2024-05-26 15:42 → 05-31 08:40)
+  plus two ~10 h ones. That is station downtime, not a delivery fault:
+  re-requesting cannot recover it because the data was never recorded.
+
+**Consequence for planning.** Usable coverage is meaningfully below nominal span,
+and it is not uniform, so a station's chunk count is not a good proxy for how
+much data it contributes. Audit each station's gap profile before committing the
+remaining request budget to it — a station with a month of downtime inside the
+window costs the same 40 links as one without.
+
+---
+
 ## 1. The binding constraint is disk, not the queue
 
 Measured, not estimated: one 100 Hz 3-component station-day of miniSEED is
