@@ -19,6 +19,7 @@ links are pasted back in. That keeps the same human-in-the-loop shape as
 import argparse
 import json
 import pathlib
+import re
 import sys
 import zipfile
 from datetime import datetime, timedelta
@@ -140,16 +141,35 @@ def cmd_next(args):
     return 0
 
 
+def _window_from_name(name):
+    """TDVMS names members TU_<STA>_<DDMMYYYY>_<HHMMSS>_<DDMMYYYY>_<HHMMSS>_<CH>.mseed.
+
+    Matching on this rather than on ledger order matters: with two addresses in
+    flight the links arrive interleaved, and 'the oldest submitted chunk' is then
+    simply the wrong answer -- it would file a window's data under a different
+    window's name.
+    """
+    m = re.match(r"TU_([A-Z0-9]+)_(\d{8})_(\d{6})_(\d{8})_(\d{6})_", pathlib.Path(name).name)
+    if not m:
+        return None, None, None
+    sta, d1, t1, d2, _ = m.groups()
+    start = datetime.strptime(d1 + t1, "%d%m%Y%H%M%S")
+    end = datetime.strptime(d2 + "000000", "%d%m%Y%H%M%S")
+    return sta, start, end
+
+
 def cmd_paste(args):
-    """Attaches a link to the oldest submitted chunk, downloads and verifies it."""
+    """Downloads a link, then matches it to its ledger chunk by the window
+    encoded in the archive -- not by ledger order, which is wrong when two
+    addresses have requests in flight simultaneously."""
     rows = load_ledger(args.ledger)
-    tgt = next((r for r in rows if r["state"] == "submitted"), None)
-    if tgt is None:
+    if not any(r["state"] == "submitted" for r in rows):
         print("no chunk is awaiting a link")
         return 1
-    out = pathlib.Path(args.out_dir) / tgt["station"]
+    out = pathlib.Path(args.out_dir) / rows[0]["station"]
     out.mkdir(parents=True, exist_ok=True)
-    zpath = out / f"{tgt['station']}_{tgt['start'][:10]}.zip"
+    zpath = out / "incoming.zip.part"
+    tgt = None
     print(f"fetching -> {zpath}")
     with requests.get(args.url, stream=True, timeout=120) as resp:
         resp.raise_for_status()
@@ -157,25 +177,37 @@ def cmd_paste(args):
             for chunk in resp.iter_content(1 << 16):
                 f.write(chunk)
     size = zpath.stat().st_size
-    tgt["bytes"] = size
 
     # A 181-day request once returned a 4 KB empty zip. Verify, do not assume.
     try:
         with zipfile.ZipFile(zpath) as zf:
             names = [n for n in zf.namelist() if not n.endswith("/")]
     except zipfile.BadZipFile:
-        tgt["state"], tgt["note"] = "failed", "not a zip"
-        save_ledger(args.ledger, rows)
-        print(f"[FAIL] {size} bytes and not a valid zip")
+        print(f"[FAIL] {size} bytes and not a valid zip — nothing recorded")
+        zpath.unlink(missing_ok=True)
         return 1
     if not names:
-        tgt["state"], tgt["note"] = "failed", f"empty zip ({size} B)"
-        save_ledger(args.ledger, rows)
         print(f"[FAIL] zip is empty ({size} B) — the window is probably too long")
+        zpath.unlink(missing_ok=True)
         return 1
-    tgt["state"], tgt["url"], tgt["note"] = "fetched", args.url, f"{len(names)} file(s)"
+
+    sta, start, end = _window_from_name(names[0])
+    if start is not None:
+        tgt = next((r for r in rows if r["station"] == sta
+                    and r["start"][:10] == start.strftime("%Y-%m-%d")), None)
+    if tgt is None:
+        print(f"[WARN] could not match '{names[0]}' to a ledger chunk; "
+              f"falling back to the oldest submitted one")
+        tgt = next(r for r in rows if r["state"] == "submitted")
+    else:
+        print(f"       matched to {tgt['station']} {tgt['start'][:10]}..{tgt['end'][:10]}"
+              f" ({tgt['email'] or 'unknown address'})")
+
+    final = out / f"{tgt['station']}_{tgt['start'][:10]}.zip"
+    zpath.replace(final)
+    tgt.update(state="fetched", url=args.url, bytes=size, note=f"{len(names)} file(s)")
     save_ledger(args.ledger, rows)
-    print(f"[OK] {size/1e6:.1f} MB, {len(names)} file(s) — {zpath}")
+    print(f"[OK] {size/1e6:.1f} MB, {len(names)} file(s) — {final}")
     print(f"     {sum(1 for r in rows if r['state']=='pending')} chunk(s) still pending")
     return 0
 
