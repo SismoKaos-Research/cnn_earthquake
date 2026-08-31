@@ -59,3 +59,26 @@ def test_a_stale_writer_cannot_clobber_a_concurrent_claim(led):
 def test_update_chunk_rejects_an_unknown_window(led):
     with pytest.raises(KeyError):
         m.update_chunk(led, "MANT", "1999-01-01T00:00:00", state="fetched")
+
+
+def test_window_parser_round_trips_a_real_tdvms_name():
+    """Regression: this helper was deleted by a careless refactor of cmd_next,
+    and every paste then crashed with NameError *after* downloading 800 MB."""
+    sta, start, end = m._window_from_name(
+        "TU_MANT_03072024_000000_24072024_000000_HH.mseed")
+    assert sta == "MANT"
+    assert (start.year, start.month, start.day) == (2024, 7, 3)
+    assert (end.year, end.month, end.day) == (2024, 7, 24)
+
+
+def test_window_parser_returns_none_for_an_unexpected_name():
+    assert m._window_from_name("something_else.mseed") == (None, None, None)
+
+
+def test_paste_helpers_are_all_defined():
+    """The refactor that removed _window_from_name passed every test at the time,
+    because nothing imported the module. Assert the public surface exists."""
+    for name in ("cmd_plan", "cmd_next", "cmd_paste", "cmd_status", "cmd_reset",
+                 "_window_from_name", "update_chunk", "claim_next_pending",
+                 "ledger_lock", "load_ledger", "save_ledger"):
+        assert hasattr(m, name), f"{name} is missing from afad_campaign"

@@ -194,6 +194,23 @@ def cmd_next(args):
     return 0
 
 
+def _window_from_name(name):
+    """TDVMS names members TU_<STA>_<DDMMYYYY>_<HHMMSS>_<DDMMYYYY>_<HHMMSS>_<CH>.mseed.
+
+    Matching on this rather than on ledger order matters: with two addresses in
+    flight the links arrive interleaved, and "the oldest submitted chunk" is then
+    simply the wrong answer -- it would file one window's data under another
+    window's name.
+    """
+    m = re.match(r"TU_([A-Z0-9]+)_(\d{8})_(\d{6})_(\d{8})_(\d{6})_",
+                 pathlib.Path(name).name)
+    if not m:
+        return None, None, None
+    sta, d1, t1, d2, _ = m.groups()
+    return sta, datetime.strptime(d1 + t1, "%d%m%Y%H%M%S"), \
+        datetime.strptime(d2 + "000000", "%d%m%Y%H%M%S")
+
+
 def cmd_paste(args):
     """Downloads a link, then matches it to its ledger chunk by the window
     encoded in the archive -- not by ledger order, which is wrong when two
@@ -206,14 +223,24 @@ def cmd_paste(args):
     out.mkdir(parents=True, exist_ok=True)
     # Unique per invocation: two links can be in flight at once (one per email
     # address), and a shared scratch name would have them overwrite each other.
-    zpath = out / f"incoming.{os.getpid()}.zip.part"
     tgt = None
-    print(f"fetching -> {zpath}")
-    with requests.get(args.url, stream=True, timeout=120) as resp:
-        resp.raise_for_status()
-        with open(zpath, "wb") as f:
-            for chunk in resp.iter_content(1 << 16):
-                f.write(chunk)
+    if args.from_file:
+        # Recovery path: the transfer succeeded but verification crashed, so the
+        # bytes are already on disk. Re-downloading 800 MB to re-run a regex is
+        # pure waste.
+        zpath = pathlib.Path(args.from_file)
+        if not zpath.exists():
+            print(f"[FAIL] {zpath} does not exist")
+            return 1
+        print(f"ingesting existing {zpath} ({zpath.stat().st_size/1e6:.1f} MB)")
+    else:
+        zpath = out / f"incoming.{os.getpid()}.zip.part"
+        print(f"fetching -> {zpath}")
+        with requests.get(args.url, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            with open(zpath, "wb") as f:
+                for chunk in resp.iter_content(1 << 16):
+                    f.write(chunk)
     size = zpath.stat().st_size
 
     # A 181-day request once returned a 4 KB empty zip. Verify, do not assume.
@@ -325,6 +352,8 @@ def main():
 
     pa = sub.add_parser("paste"); pa.set_defaults(fn=cmd_paste)
     pa.add_argument("--url", required=True)
+    pa.add_argument("--from-file", default=None,
+                    help="ingest an already-downloaded archive instead of fetching")
     pa.add_argument("--out-dir", default="afad_raw")
     pa.add_argument("--force", action="store_true",
                     help="overwrite an existing archive for this window")
