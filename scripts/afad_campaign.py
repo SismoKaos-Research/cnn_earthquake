@@ -207,6 +207,17 @@ def cmd_paste(args):
               f" ({tgt['email'] or 'unknown address'})")
 
     final = out / f"{tgt['station']}_{tgt['start'][:10]}.zip"
+    # Never replace an existing archive silently. A mislabelled earlier download
+    # once left the wrong window under this name, and the corrected download then
+    # overwrote 825 MB of good data that had to be re-fetched. If something is
+    # already here, keep both and let the operator decide.
+    if final.exists() and not args.force:
+        keep = out / f"{tgt['station']}_{tgt['start'][:10]}.dup{os.getpid()}.zip"
+        zpath.replace(keep)
+        print(f"[WARN] {final.name} already exists — saved this one as {keep.name}")
+        print("       Inspect both, delete the wrong one, then rename. "
+              "Re-run with --force to overwrite instead.")
+        return 1
     zpath.replace(final)
     tgt.update(state="fetched", url=args.url, bytes=size, note=f"{len(names)} file(s)")
     save_ledger(args.ledger, rows)
@@ -272,6 +283,8 @@ def main():
     pa = sub.add_parser("paste"); pa.set_defaults(fn=cmd_paste)
     pa.add_argument("--url", required=True)
     pa.add_argument("--out-dir", default="afad_raw")
+    pa.add_argument("--force", action="store_true",
+                    help="overwrite an existing archive for this window")
 
     rs = sub.add_parser("reset"); rs.set_defaults(fn=cmd_reset)
     rs.add_argument("--start", required=True, help="ISO start of the chunk, e.g. 2024-05-01")
