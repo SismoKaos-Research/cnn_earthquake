@@ -18,6 +18,7 @@ links are pasted back in. That keeps the same human-in-the-loop shape as
 """
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
@@ -168,7 +169,9 @@ def cmd_paste(args):
         return 1
     out = pathlib.Path(args.out_dir) / rows[0]["station"]
     out.mkdir(parents=True, exist_ok=True)
-    zpath = out / "incoming.zip.part"
+    # Unique per invocation: two links can be in flight at once (one per email
+    # address), and a shared scratch name would have them overwrite each other.
+    zpath = out / f"incoming.{os.getpid()}.zip.part"
     tgt = None
     print(f"fetching -> {zpath}")
     with requests.get(args.url, stream=True, timeout=120) as resp:
