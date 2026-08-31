@@ -104,13 +104,13 @@ possibly discarding information via mean-pooling) or a small trained CNN
 # Hand-feature LSTM
 python feature_lstm_forecast.py \
     --features-csv ../../Sismokaos-featureExtract/results/GEDZ/GEDZ_2024_05_01-2025_02_22_ENZ_features.csv \
-    --catalog-path ../../data_downloader/catalogs/data_large.csv \
+    --catalog-path ../../data_downloader/catalogs/catalog_current.csv \
     --seq-hours 24 --hidden 16 --weight-decay 0.1 --dropout 0.5
 
 # Raw-waveform CNN-LSTM
 python raw_cnn_lstm_forecast.py \
     --data-root ../../Sismokaos-featureExtract/data/aegean_2024_2025 \
-    --catalog-path ../../data_downloader/catalogs/data_large.csv
+    --catalog-path ../../data_downloader/catalogs/catalog_current.csv
 ```
 
 Both scripts share the same labeling/splitting/ensembling code

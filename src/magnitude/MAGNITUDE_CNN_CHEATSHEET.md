@@ -71,7 +71,7 @@ of the same seconds (§7.8's controlled comparison — same time-frame count,
 seismic-cli generate-regression-dataset \
     --eq-dir data/batched_waveforms/window_post_6s_anchored \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/catalog_current.csv \
     --station-catalog catalogs/istasyon_katalog.csv \
     --output-dir data/dataset_magclass_dual_6s \
     --window-seconds 6 --encoding spectrogram --split-by event --dual

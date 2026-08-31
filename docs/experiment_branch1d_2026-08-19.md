@@ -190,7 +190,7 @@ transfers to continuous data, precision does not.
   cross-corpus (STEAD) check.
 - All numbers are balanced-benchmark AUC. Under continuous-data base rates the
   1.78% false-positive rate implies ~1,540 false alarms/station/day. See
-  `docs/IDEAS.md`.
+  `docs/TODO.md`.
 - n=3 seeds. Adequate to separate `cnn` from the rest; thin for the two
   recurrent arms.
 

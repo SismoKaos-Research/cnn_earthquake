@@ -1062,7 +1062,7 @@ a swapped loss, and swapped metrics.
 `data/batched_waveforms/window_post_3s_anchored` holds 23,918
 P-wave-anchored 3 s events, already downloaded for the detection work
 (confirmed: each mseed file is exactly 300 samples at 100 Hz = 2.99 s). Of
-the catalogs on disk, only `catalogs/deprem_katalog_utc.csv` (482,898 rows)
+the catalogs on disk, only `catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv` (482,898 rows)
 matches 100% of these events by EventID (the smaller, curated
 `catalogs/data.csv` matches only 6.6%).
 
@@ -2184,6 +2184,14 @@ what the log-space model claims.
 
 ## Appendix. Reproduction Instructions
 
+> **Catalogue paths below point into `catalogs/archive_superseded_2026-08-30/`
+> deliberately.** These commands reproduce the figures *as published*, and those
+> were measured against the pre-2026-08-30 catalogue. Running them against
+> `catalogs/catalog_current.csv` will give different — and for the forecasting
+> tasks, better — numbers, because the current catalogue restores ~29% of
+> regional events the old one was missing. New work should use
+> `catalog_current.csv`; only reproduction should use the archive.
+
 **Original RAM + CNN-only pipeline (Section 6.2, pre-amplitude-fix figures):**
 
 ```bash
@@ -2304,7 +2312,7 @@ python cnn_lstm_classify.py --dataset-dir ../../data_downloader/dataset_specdual
 seismic-cli generate-regression-dataset \
     --eq-dir data/batched_waveforms/window_post_3s_anchored \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv \
     --station-catalog catalogs/istasyon_katalog.csv \
     --output-dir data/dataset_magclass_3s \
     --window-seconds 3 --encoding spectrogram --split-by event
@@ -2325,7 +2333,7 @@ python cnn_magclass.py --dataset-dir ../../data_downloader/data/dataset_magclass
 seismic-cli generate-regression-dataset \
     --eq-dir data/batched_waveforms/window_post_3s_anchored \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv \
     --station-catalog catalogs/istasyon_katalog.csv \
     --output-dir data/dataset_magclass_dual_3s_hop32 \
     --window-seconds 3 --encoding spectrogram --split-by event \
@@ -2348,7 +2356,7 @@ python cnn_lstm_regression.py \
 seismic-cli generate-regression-dataset \
     --eq-dir data/batched_waveforms/window_post_6s_anchored \
     --noise-dir data/batched_noise_waveforms/noise_pre_3h \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv \
     --station-catalog catalogs/istasyon_katalog.csv \
     --output-dir data/dataset_magclass_dual_6s \
     --window-seconds 6 --encoding spectrogram --split-by event --dual
@@ -2379,7 +2387,7 @@ python cnn_lstm_regression.py \
 seismic-cli generate-riskclass-dataset \
     --eq-dir data/batched_waveforms/window_post_3s_anchored \
     --noise-dir data/batched_noise_waveforms \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv \
     --station-catalog catalogs/istasyon_katalog.csv \
     --output-dir data/dataset_riskclass_3s_v2 \
     --window-seconds 3 --mag-threshold 4.0 --balance-ratio 4.0 --min-log-snr -3.0

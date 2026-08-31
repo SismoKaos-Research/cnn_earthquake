@@ -1,5 +1,19 @@
 # Catalog Forecasting, Retargeted onto a Neural Architecture
 
+> **Superseded in part, 2026-08-31.** Every per-zone number below was measured
+> against a catalogue missing ~29% of AFAD's regional events, including nearly
+> all of the February 2025 Santorini–Amorgos swarm. Re-derived at block level on
+> the rebuilt catalogue: AEGEAN 0.519 → **0.692**, CENTRAL 0.396 → **0.618**,
+> EAFZ 0.662 → 0.667, NAFZ 0.464 → 0.410 (3 seeds/arm, both catalogues spanning
+> 2000–2026). **CENTRAL is no longer at chance**, so this document's diagnosis
+> that it is near-Poisson and therefore unforecastable does not survive; that
+> diagnosis still holds for NAFZ. See
+> `docs/experiment_neural_forecasters_2026-08-30.md` §4.
+>
+> Report **block-level** figures only: consecutive windows overlap 11–46×, so
+> the pooled window-level AUCs here inflate by +0.25 to +0.35.
+
+
 **Companion to the retired `catalog_report.md`. Same data, same validated
 target, different model.**
 
@@ -255,13 +269,13 @@ same test windows): `src/catalog_forecast_predict.py`.
 ```bash
 # Dataset (data_downloader/)
 seismic-cli generate-catalog-forecast-dataset \
-    --catalog-path catalogs/deprem_katalog_utc.csv \
+    --catalog-path catalogs/catalog_current.csv \
     --output-dir data/dataset_catalog_forecast
 
 # Training (cnn_earthquake/src/), one per seed
 python cnn_lstm_forecast.py \
     --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \
-    --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv \
+    --catalog-path ../../data_downloader/catalogs/catalog_current.csv \
     --seed 42   # 43, 44
 ```
 
@@ -273,7 +287,7 @@ the denser variant:**
 ```bash
 python cnn_lstm_forecast.py \
     --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \
-    --catalog-path ../../data_downloader/catalogs/deprem_katalog_utc.csv \
+    --catalog-path ../../data_downloader/catalogs/catalog_current.csv \
     --seed 42 --mag-loss-weight 1.0   # 3.0 for the higher-weight variant;
                                        # --patience 30 --epochs 100 for the
                                        # longer-training variant

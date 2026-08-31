@@ -1,5 +1,13 @@
 # Handoff — chaotic features → forecasting
 
+> **Historical, superseded 2026-08-31.** Written for a machine move that has
+> since happened, and the work it hands off is finished: the chaotic-feature
+> forecasting question was answered (negatively) in
+> [`experiment_chaos_forecast_2026-08-27.md`](experiment_chaos_forecast_2026-08-27.md),
+> and re-run on the corrected catalogue. Kept because its data-location and
+> file-format tables are still accurate and still useful. For what is actually
+> open, see [`TODO.md`](TODO.md).
+
 Written 2026-08-21, for moving this work to the main PC (more VRAM, ~2× RAM,
 faster CPU). Everything below is committed; nothing needed lives only in a
 scratch directory.

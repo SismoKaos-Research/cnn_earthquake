@@ -40,7 +40,7 @@ training. Inference stages are minutes either way.
 |---|---|---|
 | 60 s event waveforms | `data_downloader/raw/data/batched_waveforms/window_post_60s` | 3.0 GB, 33,795 files |
 | noise pool | `data_downloader/raw/data/batched_noise_waveforms/noise_pre_3h` | 3.0 GB |
-| event catalogue | `data_downloader/catalogs/extracted_earthquakes.csv` | 93,690 events |
+| event catalogue | `data_downloader/catalogs/archive_superseded_2026-08-30/extracted_earthquakes.csv` | 93,690 events. **Archived 2026-08-30** — retained because it is the download list these datasets were built from, so reproducing them needs this file rather than the current catalogue. New work should use `catalogs/catalog_current.csv`. |
 | station coordinates | `data_downloader/catalogs/station_coords.csv` | — |
 
 The two waveform archives are the only things that do not regenerate without
@@ -282,7 +282,7 @@ that the model fails at low SNR. It is not evidence of anything.
 .venv/bin/python src/detection/s_arrival_ablation.py \
     --detector-dir $DD/dataset_specdual_catalog_6s_matched_hard \
     --magnitude-dir $DD/dataset_magreg_catalog_6s \
-    --catalog $DD/catalogs/extracted_earthquakes.csv \
+    --catalog $DD/catalogs/archive_superseded_2026-08-30/extracted_earthquakes.csv \
     --ckpt-dir trained_model_branch1d_asinh --branch-1d cnn-lstm
 ```
 
