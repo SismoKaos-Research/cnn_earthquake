@@ -64,13 +64,7 @@ it. The Turkish drafts on the Desktop (`tubitak_rapor_v2.md`,
 touched and I don't know which is current — tell me which and I'll fold in the
 catalogue corrections.
 
-### 2.2 `catalog_forecast_report.md` still holds pre-correction tables
-
-`report.md` §11 and `accuracy_summary.md` Task 4 are updated and marked
-superseded where appropriate. The source document they point at is not. Its
-per-zone numbers predate the catalogue rebuild (see §3.2).
-
-### 2.3 Network coincidence detection
+### 2.2 Network coincidence detection
 
 Require 2-of-N stations within a short window; independent FPs at 1.78% become
 ~0.03% at 2-of-2 — the order of magnitude continuous deployment actually needs.
@@ -78,7 +72,7 @@ Require 2-of-N stations within a short window; independent FPs at 1.78% become
 events have a second station available, so this is measurable on a subset and
 not on the corpus as a whole.
 
-### 2.4 Continuous-data / P-wave picking
+### 2.3 Continuous-data / P-wave picking
 
 The right framing is "does this detector survive continuous data, and what does
 it cost in false alarms?" — not "slide the 6 s classifier over a continuous
@@ -87,21 +81,21 @@ IDEAS entry. Partially addressed by the GPD baseline work
 ([`experiment_gpd_baseline_2026-08-27.md`](experiment_gpd_baseline_2026-08-27.md)),
 which put this detector against four published pickers on our own windows.
 
-### 2.5 CNN-GRU waveform branch
+### 2.4 CNN-GRU waveform branch
 
 Swap the BiLSTM in `ConvSeqBranch` for a BiGRU, re-run the branch-1d grid as a
 fourth arm (`--branch-1d cnn-gru`). Motivated: the 2026-08-19 grid put
 `cnn-lstm` (0.9896) above `cnn` (0.9843) with non-overlapping per-seed ranges,
 so recurrence is load-bearing here rather than decorative. Cheap.
 
-### 2.6 Cascade false-positive handling
+### 2.5 Cascade false-positive handling
 
 Stage 2 consumes `aux = (log_snr, log_distance)`, and `log_distance` needs a
 catalogued hypocentre a false positive does not have. Options: a `--channels 2d`
 stage 2, a waveform-derived distance estimate, or propagated uncertainty. See
 `src/detection/cascade_eval.py`'s module docstring.
 
-### 2.7 Housekeeping
+### 2.6 Housekeeping
 
 - The 3 s dataset overflows fp16 (max 1.21e6). Published results there are
   2B-only and unaffected, but any future `1d`/`all` run on it needs `asinh`.
@@ -160,3 +154,4 @@ chance). Detection essentially unaffected: 3 contaminated noise windows in
 | Chaotic features as a forecaster | Done — negative, see §3.1. |
 | Gated fusion | Done. |
 | fp16 overflow re-check on the original benchmark | Done. |
+| `catalog_forecast_report.md` pre-correction tables | Done 2026-08-31 — supersede note added in place, including that CENTRAL is no longer at chance so its near-Poisson diagnosis does not survive for that zone. |
