@@ -103,7 +103,16 @@ def cmd_next(args):
     }
     print(f"submitting  TU.{todo['station']} ({dev})  "
           f"{todo['start'][:10]} -> {todo['end'][:10]}  -> {args.email}")
-    resp = requests.post(REQUEST_URL, json=payload, timeout=30)
+    # 30 s is not enough: TDVMS does real queueing work before answering, and a
+    # client-side timeout here is ambiguous -- the request may well have been
+    # accepted. Retrying after one is safe, because a live request makes the next
+    # submission return 111 (busy) rather than silently duplicating.
+    try:
+        resp = requests.post(REQUEST_URL, json=payload, timeout=args.timeout)
+    except requests.exceptions.Timeout:
+        print(f"[TIMEOUT] no answer in {args.timeout}s. The request may still have been")
+        print("          accepted; re-run `next` and a 111 means it was.")
+        return 1
     if resp.status_code != 200:
         print(f"[HTTP {resp.status_code}] {resp.text[:200]}")
         return 1
@@ -194,6 +203,8 @@ def main():
 
     nx = sub.add_parser("next"); nx.set_defaults(fn=cmd_next)
     nx.add_argument("--email", required=True)
+    nx.add_argument("--timeout", type=int, default=180,
+                    help="seconds to wait for TDVMS to answer a submission")
     nx.add_argument("--force", action="store_true",
                     help="submit even if this address already has one in flight")
 
