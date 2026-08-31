@@ -6,14 +6,42 @@ two waveforms against one label and call agreement a result -- which is the
 failure mode this whole cross-station exercise exists to rule out.
 """
 
+import os
+import pathlib
+
 import numpy as np
 import pytest
 
 from forecasting.chaos_dataset import RADIUS_KM, load_events
 from seismolib.catalog import STATION_COORDS, haversine_km
 
-CATALOG = ("/home/hogib/Projects/Sismokaos/data_downloader/catalogs/"
-           "catalog_current.csv")
+# The sibling data repo is checked out under a different path on different
+# machines (Sismokaos/ here, sismokaos/ on the desktop, and the account name
+# differs), so an absolute path pins this suite to one box. Resolve instead, and
+# skip cleanly when the catalogue is simply not present -- these tests need real
+# catalogue data and there is nothing to assert without it.
+_CANDIDATES = [
+    pathlib.Path.home() / "Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv",
+    pathlib.Path.home() / "Projects/sismokaos/data_downloader/catalogs/catalog_current.csv",
+    pathlib.Path(__file__).resolve().parents[2] / "Sismokaos/data_downloader/catalogs/catalog_current.csv",
+    pathlib.Path(__file__).resolve().parents[2] / "sismokaos/data_downloader/catalogs/catalog_current.csv",
+]
+
+
+def _find_catalog():
+    env = os.environ.get("SEISMO_CATALOG")
+    if env:
+        return pathlib.Path(env)
+    return next((p for p in _CANDIDATES if p.exists()), None)
+
+
+_FOUND = _find_catalog()
+CATALOG = str(_FOUND) if _FOUND else None
+
+pytestmark = pytest.mark.skipif(
+    CATALOG is None,
+    reason="no catalogue found; set SEISMO_CATALOG to point at catalog_current.csv",
+)
 
 
 @pytest.fixture(scope="module")
