@@ -24,7 +24,7 @@ speed pass). Merging to `main` is an open decision.
 | What | Where | Size |
 |---|---|---|
 | Raw BODT miniSEED | `Sismokaos/feature-extract/raw/BODT/aegean_bodt_2024_2026` | 34 GB, 723 daily files, 2024-05-01 → 2026-08-10 |
-| KOERI catalogue | `Sismokaos/data_downloader/catalogs/deprem_katalog_utc.csv` | 42 MB, 482,898 events, 2010 → 2026 |
+| ~~KOERI catalogue~~ **AFAD catalogue** (superseded) | `catalogs/archive_superseded_2026-08-30/deprem_katalog_utc.csv` | 42 MB, 482,898 events, 2010 → 2026. **Archived 2026-08-30** — missing ~29% of AFAD's events for this region, incl. almost all of the Feb-2025 Aegean swarm. Use `catalogs/catalog_current.csv`. |
 | Pre-chaos features (5 Hz, full archive) | `sismokaos-cli/dataset_features_5hz/` | 819 MB, 1,237,218 windows |
 | Pre-chaos features (10 Hz, full archive) | `sismokaos-cli/dataset_features_10hz/` | 819 MB |
 | **Chaos features, quarter batch** | `sismokaos-cli/dataset_features_chaos_q1_5hz/` | **does not exist yet** — run was killed for the move, see §2 |

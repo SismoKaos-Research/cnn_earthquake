@@ -70,9 +70,13 @@ We make four contributions:
 
 ### 2.1 Event catalogue and waveform acquisition
 
-Events are taken from the Kandilli Observatory (KOERI) regional catalogue
-`[CITE: KOERI/B.U. catalogue]`. Two catalogue files are used for different
-purposes:
+Events are taken from **AFAD's national catalogue**
+`[CITE: AFAD/TDVMS catalogue]`. This corrects an earlier attribution to the
+Kandilli Observatory (KOERI): verified 2026-08-30, every EventID in the local
+catalogue files is an AFAD eventID, with magnitudes and coordinates identical to
+AFAD's API to the printed digit. The *waveforms* are KOERI (KO network, via the
+KOERI FDSN service, §2.1 below) — it is only the event catalogue that is AFAD's.
+Two catalogue files are used for different purposes:
 
 | File | Events | Use |
 |---|---|---|

@@ -146,17 +146,31 @@ CNN+LSTM+attention architecture (`cnn_lstm_forecast.py`), 3 seeds.
 | *floor:* persistence | *0.5945* | — |
 | *floor:* base rate | *0.5000* | — |
 
-Ties the retired scalar model at the pooled level. Per-zone, the network
-matches AEGEAN (0.794) and EAFZ (0.565) to within seed noise, and nudges
-NAFZ/CENTRAL upward at the window level — but both zones' 3-seed spreads
-(0.061 and 0.173) are too wide to call that an improvement. At the honest
-(block-level, single test era) sample size, only AEGEAN is directionally
-above chance in all 3 seeds; NAFZ and CENTRAL sit below chance in every
-seed, matching the retired report's physical diagnosis that these two
-near-Poisson zones (CV ≈ 1) aren't forecastable by a model of this kind,
-architecture included. See `catalog_forecast_report.md` for the full
-per-zone tables and caveats (this is not the retired report's rolling-origin
-backtest — that remains future work).
+> **Superseded 2026-08-31.** Everything above this line was measured against a
+> catalogue missing ~29% of AFAD's events for the region, including nearly all
+> of the February 2025 Santorini–Amorgos swarm. Re-derived below. Also note the
+> pooled window-level figures are **not** the honest sample size: consecutive
+> windows overlap 11–46×, inflating AUC by +0.25 to +0.35. Report block level.
+
+**Block level (30-day disjoint blocks), corrected catalogue, 3 seeds per arm.**
+Both catalogues span 2000–2026, so only completeness differs:
+
+| zone | n blocks | base rate | old catalogue | **corrected** | Δ |
+|---|---|---|---|---|---|
+| **AEGEAN** | 43 | 0.581 | 0.5190 ±0.0150 | **0.6918 ±0.0165** | **+0.173** |
+| **CENTRAL** | 43 | 0.395 | 0.3960 ±0.0335 | **0.6176 ±0.0346** | **+0.222** |
+| EAFZ | 47 | 0.596 | 0.6615 ±0.0173 | 0.6667 ±0.0323 | +0.005 |
+| NAFZ | 42 | 0.381 | 0.4643 ±0.0346 | 0.4103 ±0.0011 | −0.054 |
+
+**CENTRAL is no longer at chance.** The retired report's physical diagnosis —
+that CENTRAL is near-Poisson (CV ≈ 1) and therefore unforecastable — does not
+survive the corrected catalogue: it reaches 0.618, six times the seed spread
+above its old 0.396. NAFZ remains at chance and that diagnosis stands for it.
+
+The gains fall exactly where the catalogue defect was: the missing events were
+overwhelmingly offshore Aegean, and AEGEAN plus adjacent CENTRAL move while EAFZ
+far to the east does not. Full audit in
+`experiment_neural_forecasters_2026-08-30.md` §4.
 
 **Magnitude, alongside "when" (catalog_forecast_report.md §5).** The full
 deliverable needs both when *and* how big. A magnitude head was added to the
@@ -168,6 +182,15 @@ found. **Recommended system: the network above for "when," `ridge(max_mag,
 mean_mag, b_value, log_rate)` for "how big"** — two tools for two
 sub-questions, not a compromise. Combined prediction:
 `src/catalog_forecast_predict.py`.
+
+**Waveform features do not help (2026-08-30).** `catalog_forecast_report.md`
+listed folding in `Sismokaos-featureExtract`'s continuous features as future
+work. Done, and negative: at an operating point where the evaluation is valid
+(M≥4.0, 14 d — at M≥4.5/30 d the folds are degenerate and two AUCs undefined),
+all three sequence architectures lose to a 0.5823 persistence floor (LSTM
+0.5244, GRU 0.5709, TCN 0.5204). The chaotic-feature suite agrees: below floor
+on all four model variants, 0 of 10 context/horizon cells. **The forecasting
+signal in this project is in the catalogue, not the seismogram.**
 
 **Where this is actually good: AEGEAN.** Per-zone, the recommended system
 gets AUC 0.79 for "when" and magnitude MAE 0.215 (beats the 0.247 pooled

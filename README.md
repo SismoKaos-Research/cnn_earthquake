@@ -70,12 +70,18 @@ that these scripts train on; see its own README for that side.
 - On peak ground motion, a Conv1D-BiLSTM-attention model beats the strongest
   scalar floor by 0.075 MAE_log, and the margin survives a doubly
   station-and-event-disjoint split.
-- Catalog-based forecasting ("will a M≥4.5 event occur in this zone within
-  30 days?") ties a scalar gradient-boosting model at the pooled level
-  (mean AUC ~0.73); folding in hand-crafted continuous waveform features
-  (`feature_lstm_forecast.py`) and raw continuous waveform (`raw_cnn_lstm_forecast.py`,
-  `raw100hz_cnn_lstm_forecast.py`) is the current, still-open line of work —
-  see the two `*_CHEATSHEET.md` files comparing them head-to-head.
+- **Forecasting signal comes from the catalogue, not the seismogram** — the
+  project's original question, now bounded from both sides. Catalogue-derived
+  features beat a persistence floor: per-zone block-level AUC 0.692 (Aegean) and
+  0.618 (Central), the latter a zone previously diagnosed as unforecastable.
+  Waveform-derived features do not, across chaotic features and three sequence
+  architectures (LSTM 0.524, GRU 0.571, TCN 0.520 against a 0.582 floor).
+- The event catalogue is **AFAD's, not KOERI's** (the waveforms are KOERI), and
+  the copy used until 2026-08-30 was missing ~29% of events for the region —
+  nearly all of the February 2025 Santorini–Amorgos swarm. Rebuilding it moved
+  forecasting results in *both* directions: chaotic-feature results got worse as
+  the persistence floor rose, catalogue-feature results got better. Detection is
+  essentially unaffected (3 contaminated noise windows in 55,595).
 
 ---
 

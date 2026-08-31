@@ -1807,9 +1807,47 @@ Retargeted (`cnn_lstm_forecast.py`) and evaluated at 3 seeds, it ties the
 retired scalar model at the pooled level (mean AUC 0.733 vs. 0.723) and
 matches it zone-by-zone to within seed noise, with AEGEAN remaining the one
 zone where both architectures agree real signal exists. Full results in
-`catalog_forecast_report.md`; `catalog_report.md` no longer exists. Folding
-in `Sismokaos-featureExtract`'s auto-extracted waveform features remains a
-further step, not yet done.
+`catalog_forecast_report.md`; `catalog_report.md` no longer exists.
+
+**Superseded 2026-08-31 — the figures in the preceding paragraph predate a
+catalogue defect that has since been corrected.** The catalogue those runs used
+was missing ~29% of AFAD's events for the region, including almost all of the
+February 2025 Santorini–Amorgos swarm; see
+`docs/experiment_neural_forecasters_2026-08-30.md` §4 for the audit. Re-derived
+on the rebuilt catalogue (3 seeds per arm, both catalogues spanning 2000–2026 so
+only completeness differs), at the **block level** — 30-day disjoint blocks, the
+honest sample size, because consecutive windows overlap 11–46× and pooling at
+window level inflates AUC by +0.25 to +0.35:
+
+| zone | n blocks | old catalogue | corrected catalogue | Δ |
+|---|---|---|---|---|
+| AEGEAN | 43 | 0.5190 ±0.0150 | **0.6918 ±0.0165** | **+0.173** |
+| CENTRAL | 43 | 0.3960 ±0.0335 | **0.6176 ±0.0346** | **+0.222** |
+| EAFZ | 47 | 0.6615 ±0.0173 | 0.6667 ±0.0323 | +0.005 |
+| NAFZ | 42 | 0.4643 ±0.0346 | 0.4103 ±0.0011 | −0.054 |
+
+The gains are five to ten times the seed spread and fall **exactly where the
+catalogue defect was** — the missing events were overwhelmingly offshore Aegean,
+and it is AEGEAN and the adjacent CENTRAL zone that move, while EAFZ far to the
+east does not and NAFZ stays at chance. A variance artefact would not respect
+that geography. **CENTRAL moving from "indistinguishable from chance" to 0.618
+is the largest single change in this project's forecasting results.**
+
+**Folding in `Sismokaos-featureExtract`'s auto-extracted waveform features —
+listed here as "not yet done" — was carried out on 2026-08-30, and the answer is
+negative.** At an operating point where the evaluation is actually valid (M≥4.0,
+14-day horizon; at the original M≥4.5/30 d the walk-forward folds are degenerate
+and two AUCs undefined), all three sequence architectures lose to a persistence
+floor of 0.5823: LSTM 0.5244, GRU 0.5709, TCN 0.5204. This agrees with the
+chaotic-feature suite, which is below floor across all four model variants and 0
+of 10 context/horizon cells.
+
+Taken together these two results bound the question the project set out to
+answer: **the forecasting signal here comes from the earthquake catalogue, not
+from the seismogram**, and completing the catalogue improves the catalogue-based
+model measurably. Full detail in
+`docs/experiment_neural_forecasters_2026-08-30.md` and
+`docs/experiment_chaos_forecast_2026-08-27.md`.
 
 Section 13 then returns to waveforms for a bounded, specific question — peak
 ground motion from a 3-second window — chosen because it tests the same "does
