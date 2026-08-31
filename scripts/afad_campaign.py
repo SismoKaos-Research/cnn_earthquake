@@ -17,6 +17,8 @@ links are pasted back in. That keeps the same human-in-the-loop shape as
 `plan` is idempotent; re-running it never duplicates or re-requests a chunk.
 """
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import pathlib
@@ -45,8 +47,69 @@ def save_ledger(path, rows):
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
 
 
+@contextlib.contextmanager
+def ledger_lock(path):
+    """Serialises read-modify-write on the ledger.
+
+    `paste` holds its in-memory copy for the several minutes a download takes,
+    so writing that whole copy back silently discards anything `next` recorded
+    meanwhile. That really happened: a submission to one address was erased, its
+    window went back to pending, and the other address was then handed the same
+    window -- a duplicate that costs a queue slot.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.with_suffix(path.suffix + ".lock")
+    with open(lock, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def update_chunk(path, station, start, **changes):
+    """Applies changes to one chunk against the CURRENT on-disk ledger.
+
+    Never writes back a copy loaded earlier -- that is the race above.
+    """
+    with ledger_lock(path):
+        rows = load_ledger(path)
+        for r in rows:
+            if r["station"] == station and r["start"] == start:
+                r.update(changes)
+                save_ledger(path, rows)
+                return r
+    raise KeyError(f"{station} {start} not in ledger")
+
+
+def claim_next_pending(path, email):
+    """Atomically takes the oldest pending chunk and marks it submitted, so two
+    concurrent `next` calls cannot claim the same window."""
+    with ledger_lock(path):
+        rows = load_ledger(path)
+        # "claimed" counts as in-flight too: a submission that is mid-POST holds
+        # the address's queue slot just as much as a confirmed one. Checking only
+        # for "submitted" lets a second call claim another window while the first
+        # is still talking to TDVMS.
+        held = [r for r in rows
+                if r["state"] in ("claimed", "submitted") and r["email"] == email]
+        if held:
+            return None, held[0]
+        todo = next((r for r in rows if r["state"] == "pending"), None)
+        if todo is None:
+            return None, None
+        todo["state"], todo["email"] = "claimed", email
+        save_ledger(path, rows)
+        return todo, None
+
+
 def cmd_plan(args):
     """Enumerates chunks. Never re-adds one already in the ledger."""
+    with ledger_lock(args.ledger):
+        return _plan_locked(args)
+
+
+def _plan_locked(args):
     rows = load_ledger(args.ledger)
     have = {(r["station"], r["start"]) for r in rows}
     t, added = datetime.fromisoformat(args.start), 0
@@ -81,15 +144,12 @@ def _device_code(station_code):
 
 def cmd_next(args):
     """Submits the oldest pending chunk. One at a time -- the queue slot is per email."""
-    rows = load_ledger(args.ledger)
-    inflight = [r for r in rows if r["state"] == "submitted" and r["email"] == args.email]
-    if inflight and not args.force:
-        r = inflight[0]
+    todo, busy = claim_next_pending(args.ledger, args.email)
+    if todo is None and busy is not None:
         print(f"[BUSY] {args.email} already has a chunk in flight: "
-              f"{r['station']} {r['start'][:10]}..{r['end'][:10]}")
+              f"{busy['station']} {busy['start'][:10]}..{busy['end'][:10]}")
         print("       Paste its link first:  afad_campaign.py paste --url ...")
         return 1
-    todo = next((r for r in rows if r["state"] == "pending"), None)
     if todo is None:
         print("nothing pending — campaign complete")
         return 0
@@ -105,58 +165,33 @@ def cmd_next(args):
     }
     print(f"submitting  TU.{todo['station']} ({dev})  "
           f"{todo['start'][:10]} -> {todo['end'][:10]}  -> {args.email}")
-    # 30 s is not enough: TDVMS does real queueing work before answering, and a
-    # client-side timeout here is ambiguous -- the request may well have been
-    # accepted. Retrying after one is safe, because a live request makes the next
-    # submission return 111 (busy) rather than silently duplicating.
     try:
         resp = requests.post(REQUEST_URL, json=payload, timeout=args.timeout)
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        # AMBIGUOUS, not failed: TDVMS frequently accepts the request and then
-        # times out or drops the connection instead of answering. Leaving the
-        # chunk `pending` is the wrong call -- the next `next` then re-grabs the
-        # same window and burns the other address's queue slot on a duplicate,
-        # which is exactly what happened on 2026-08-31. Record it as submitted
-        # and flag the uncertainty instead.
-        todo["state"], todo["email"] = "submitted", args.email
-        todo["note"] = f"unconfirmed ({type(e).__name__}) — link may still arrive"
-        save_ledger(args.ledger, rows)
+        # AMBIGUOUS, not failed: TDVMS often accepts and then goes quiet. Keep the
+        # claim -- releasing it would hand the same window to the other address.
+        update_chunk(args.ledger, todo["station"], todo["start"], state="submitted",
+                     note=f"unconfirmed ({type(e).__name__}) — link may still arrive")
         print(f"[AMBIGUOUS] {type(e).__name__} — no answer from TDVMS.")
-        print("            Recorded as submitted: these are usually accepted anyway,")
-        print("            and a duplicate wastes a slot. If no email arrives, reset")
-        print("            it with `reset --start <ISO>`.")
+        print("            Kept as submitted; these are usually accepted anyway.")
+        print("            If no email arrives, reset it with `reset --start <ISO>`.")
         return 0
     if resp.status_code != 200:
+        update_chunk(args.ledger, todo["station"], todo["start"], state="pending", email=None)
         print(f"[HTTP {resp.status_code}] {resp.text[:200]}")
         return 1
     result = resp.json().get("Result")
     if result == RESULT_BUSY:
+        update_chunk(args.ledger, todo["station"], todo["start"], state="pending", email=None)
         print("[111] the previous request for this address is still processing")
         return 1
     if result == RESULT_ERROR:
+        update_chunk(args.ledger, todo["station"], todo["start"], state="pending", email=None)
         print(f"[110] TDVMS returned a general error: {resp.json()}")
         return 1
-    todo["state"], todo["email"] = "submitted", args.email
-    save_ledger(args.ledger, rows)
+    update_chunk(args.ledger, todo["station"], todo["start"], state="submitted")
     print(f"[{result}] accepted — the link will arrive by email at {args.email}")
     return 0
-
-
-def _window_from_name(name):
-    """TDVMS names members TU_<STA>_<DDMMYYYY>_<HHMMSS>_<DDMMYYYY>_<HHMMSS>_<CH>.mseed.
-
-    Matching on this rather than on ledger order matters: with two addresses in
-    flight the links arrive interleaved, and 'the oldest submitted chunk' is then
-    simply the wrong answer -- it would file a window's data under a different
-    window's name.
-    """
-    m = re.match(r"TU_([A-Z0-9]+)_(\d{8})_(\d{6})_(\d{8})_(\d{6})_", pathlib.Path(name).name)
-    if not m:
-        return None, None, None
-    sta, d1, t1, d2, _ = m.groups()
-    start = datetime.strptime(d1 + t1, "%d%m%Y%H%M%S")
-    end = datetime.strptime(d2 + "000000", "%d%m%Y%H%M%S")
-    return sta, start, end
 
 
 def cmd_paste(args):
@@ -219,8 +254,8 @@ def cmd_paste(args):
               "Re-run with --force to overwrite instead.")
         return 1
     zpath.replace(final)
-    tgt.update(state="fetched", url=args.url, bytes=size, note=f"{len(names)} file(s)")
-    save_ledger(args.ledger, rows)
+    update_chunk(args.ledger, tgt["station"], tgt["start"], state="fetched",
+                 url=args.url, bytes=size, note=f"{len(names)} file(s)")
     print(f"[OK] {size/1e6:.1f} MB, {len(names)} file(s) — {final}")
     print(f"     {sum(1 for r in rows if r['state']=='pending')} chunk(s) still pending")
     return 0
@@ -229,6 +264,11 @@ def cmd_paste(args):
 def cmd_reset(args):
     """Puts a chunk back to pending — for an unconfirmed submission whose email
     never arrived."""
+    with ledger_lock(args.ledger):
+        return _reset_locked(args)
+
+
+def _reset_locked(args):
     rows = load_ledger(args.ledger)
     hit = [r for r in rows if r["start"].startswith(args.start)]
     if not hit:
@@ -250,12 +290,15 @@ def cmd_status(args):
     for r in rows:
         by.setdefault(r["state"], []).append(r)
     print(f"{len(rows)} chunk(s) in {args.ledger}")
-    for st in ("pending", "submitted", "fetched", "failed"):
+    for st in ("pending", "claimed", "submitted", "fetched", "failed"):
         if st in by:
             mb = sum(r["bytes"] or 0 for r in by[st]) / 1e6
             print(f"  {st:10s} {len(by[st]):4d}" + (f"   {mb:.1f} MB" if mb else ""))
     for r in by.get("submitted", []):
         print(f"  awaiting link: {r['station']} {r['start'][:10]}..{r['end'][:10]} ({r['email']})")
+    for r in by.get("claimed", []):
+        print(f"  STUCK in claimed: {r['station']} {r['start'][:10]} ({r['email']}) — "
+              f"a submission died mid-POST; `reset --start {r['start'][:10]}` to requeue")
     for r in by.get("failed", []):
         print(f"  FAILED: {r['station']} {r['start'][:10]} — {r['note']}")
     return 0
