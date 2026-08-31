@@ -238,6 +238,17 @@ def cmd_paste(args):
         print(f"fetching -> {zpath}")
         with requests.get(args.url, stream=True, timeout=120) as resp:
             resp.raise_for_status()
+            # An expired or invalid link returns AFAD's homepage as text/html with
+            # HTTP 200 -- not a 404. Checking the type first avoids streaming a
+            # few KB of HTML into a .zip, and would avoid streaming 800 MB of
+            # anything else that is not an archive.
+            ctype = resp.headers.get("Content-Type", "")
+            if "html" in ctype.lower():
+                print(f"[FAIL] link returned {ctype} ({resp.headers.get('Content-Length','?')} B), "
+                      "not an archive — it has expired or the request errored.")
+                print("       Reset the window and request it again:")
+                print("         afad_campaign.py reset --start <YYYY-MM-DD>")
+                return 1
             with open(zpath, "wb") as f:
                 for chunk in resp.iter_content(1 << 16):
                     f.write(chunk)
