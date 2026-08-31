@@ -1,0 +1,17 @@
+=== build old  14:30:35 ===
+    built
+=== train old seed 42  14:31:13 ===
+    ok -> logs/zone_forecast_old_seed42.log
+=== train old seed 43  14:33:09 ===
+    ok -> logs/zone_forecast_old_seed43.log
+=== train old seed 44  14:35:33 ===
+    ok -> logs/zone_forecast_old_seed44.log
+=== build new  14:37:38 ===
+    built
+=== train new seed 42  14:38:15 ===
+    ok -> logs/zone_forecast_new_seed42.log
+=== train new seed 43  14:40:42 ===
+    ok -> logs/zone_forecast_new_seed43.log
+=== train new seed 44  14:42:43 ===
+    ok -> logs/zone_forecast_new_seed44.log
+=== done 14:44:56 ===

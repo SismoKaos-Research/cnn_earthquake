@@ -1,0 +1,17 @@
+=== build old  14:46:09 ===
+    exists, skipping build
+=== train old seed 42  14:46:09 ===
+    ok -> logs/zone_forecast_old_seed42.log
+=== train old seed 43  14:48:11 ===
+    ok -> logs/zone_forecast_old_seed43.log
+=== train old seed 44  14:50:02 ===
+    ok -> logs/zone_forecast_old_seed44.log
+=== build new  14:51:57 ===
+    exists, skipping build
+=== train new seed 42  14:51:57 ===
+    ok -> logs/zone_forecast_new_seed42.log
+=== train new seed 43  14:54:05 ===
+    ok -> logs/zone_forecast_new_seed43.log
+=== train new seed 44  14:56:34 ===
+    ok -> logs/zone_forecast_new_seed44.log
+=== done 14:58:32 ===

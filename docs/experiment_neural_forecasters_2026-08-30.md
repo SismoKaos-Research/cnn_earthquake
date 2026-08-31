@@ -176,3 +176,73 @@ Taken with §1, the project's forecasting picture is consistent:
 The forecasting signal in this project comes from the earthquake catalogue, not
 from the seismogram. That is worth stating directly in the report, because it is
 a negative result with a clear boundary rather than an absence of one.
+
+---
+
+## 4. The per-zone forecaster, re-derived (2026-08-31)
+
+`report.md` §11 reports this model at pooled AUC 0.733 and block-level 0.62
+(EAFZ) / 0.60 (AEGEAN). Those predate the catalogue rebuild, so they were
+re-derived — not as new forecasting work, but so the figures already in the
+report are correct.
+
+The dataset bakes catalogue-derived features into its manifest (`log_rate`,
+`b_value`, `mean_mag`, `days_since_prev_major`), so retraining alone would have
+refreshed the labels and left the features stale. Each arm gets a full rebuild.
+3 seeds per arm, both catalogues spanning 2000–2026 so only completeness differs.
+
+### Read the block-level numbers, not the pooled ones
+
+Consecutive windows overlap **11–46×** (64 events, stride 8). Pooling at window
+level therefore counts the same episode many times:
+
+| arm | pooled window-level | block-level (mean of 4 zones) | inflation |
+|---|---|---|---|
+| old | 0.8558 | 0.5102 | **+0.3456** |
+| new | 0.8470 | 0.5966 | **+0.2504** |
+
+That is the difference between "strong model" and "chance". Block-level
+evaluation is **silently skipped** unless `--data-downloader-root` is passed —
+the first run of this re-derivation printed only the inflated figure, with no
+error.
+
+### Block-level results, 30-day disjoint blocks
+
+| zone | n blocks | base rate | old catalogue | new catalogue | Δ |
+|---|---|---|---|---|---|
+| **AEGEAN** | 43 | 0.581 | 0.5190 ±0.0150 | **0.6918 ±0.0165** | **+0.173** |
+| **CENTRAL** | 43 | 0.395 | 0.3960 ±0.0335 | **0.6176 ±0.0346** | **+0.222** |
+| EAFZ | 47 | 0.596 | 0.6615 ±0.0173 | 0.6667 ±0.0323 | +0.005 |
+| NAFZ | 42 | 0.381 | 0.4643 ±0.0346 | 0.4103 ±0.0011 | −0.054 |
+
+**The improvement is spatially where the catalogue defect was.** The missing
+events were overwhelmingly offshore Aegean (February 2025, Santorini–Amorgos).
+AEGEAN and the adjacent CENTRAL zone gain 0.17 and 0.22 — five to ten times the
+seed spread — while EAFZ, far to the east, is unchanged at +0.005, and NAFZ
+remains at or below chance in both arms. A variance artefact would not respect
+that geography.
+
+### Against the published figures
+
+| | published (2010–2026) | corrected (2000–2026) |
+|---|---|---|
+| AEGEAN, block level | 0.60 | **0.692 ±0.017** |
+| EAFZ, block level | 0.62 | **0.667 ±0.032** |
+| CENTRAL | *"indistinguishable from chance"* | **0.618 ±0.035** |
+| NAFZ | *"indistinguishable from chance"* | 0.410 — still chance |
+
+Two caveats on this comparison. The published run used
+`deprem_katalog_utc.csv`, which starts in 2010, so it is not span-matched to
+either arm here; the controlled comparison is old-vs-new above, both 2000–2026.
+And **CENTRAL moving from chance to 0.618 is the single largest change in the
+project's forecasting results** — a zone previously written off is now
+measurably forecastable, which should be stated as a finding rather than folded
+into a table.
+
+### What this does and does not change
+
+It does **not** reopen the §2/§3 conclusion. Those concern *waveform-derived*
+features, which remain below the persistence floor across chaos features and
+three sequence architectures. This model is catalogue-derived throughout, and it
+strengthens the same boundary: **the forecasting signal in this project comes
+from the catalogue, and completing the catalogue improves it measurably.**
