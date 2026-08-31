@@ -32,6 +32,12 @@ dependencies = [
     "pandas>=3.0.3",
     "pyarrow>=25.0.1",
     "pywavelets>=1.9.0",
+    # Imported at module scope by src/detection/stead_to_ponly_mseed.py and
+    # seisbench_stead_baseline.py, so tests/test_stead_conversion.py cannot even
+    # be collected without it. Was undeclared until 2026-08-31 and only worked
+    # where h5py happened to be installed already -- a fresh checkout could not
+    # run the suite at all.
+    "h5py>=3.11.0",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
     "torch>=2.13.0",
