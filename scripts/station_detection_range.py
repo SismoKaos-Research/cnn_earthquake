@@ -93,7 +93,12 @@ def main():
         stream = stream.select(channel="HHZ")
         if not len(stream):
             continue
+        # merge(fill_value=None) leaves masked arrays, which detrend and filter
+        # refuse. split() turns those back into contiguous unmasked segments --
+        # and keeping the segmentation is what makes the gap test below exact,
+        # because a window spanning a gap then simply fails to return one piece.
         stream.merge(method=1, fill_value=None)
+        stream = stream.split()
         stream.detrend("demean")
         stream.filter("bandpass", freqmin=args.freqmin, freqmax=args.freqmax,
                       corners=4, zerophase=True)
@@ -112,12 +117,17 @@ def main():
                 sig = stream.slice(p_time + SIGNAL_WIN[0], p_time + SIGNAL_WIN[1])
             except Exception:
                 continue
-            if not len(noise) or not len(sig):
+            # exactly one segment each, at full length: anything else means the
+            # window straddles a gap or an edge, and says nothing about the
+            # station's reach
+            if len(noise) != 1 or len(sig) != 1:
                 continue
-            nd = np.ma.getdata(noise[0].data); nm = np.ma.getmaskarray(noise[0].data)
-            sd = np.ma.getdata(sig[0].data);   sm = np.ma.getmaskarray(sig[0].data)
-            # a window that is partly gap tells us nothing about the station
-            if nm.any() or sm.any() or nd.size < 100 or sd.size < 100:
+            sr = sig[0].stats.sampling_rate
+            want_n = (NOISE_WIN[1] - NOISE_WIN[0]) * sr
+            want_s = (SIGNAL_WIN[1] - SIGNAL_WIN[0]) * sr
+            nd = np.asarray(noise[0].data, dtype=float)
+            sd = np.asarray(sig[0].data, dtype=float)
+            if nd.size < 0.98 * want_n or sd.size < 0.98 * want_s:
                 continue
             n_rms = float(np.sqrt(np.mean(nd.astype(float) ** 2)))
             s_rms = float(np.sqrt(np.mean(sd.astype(float) ** 2)))
