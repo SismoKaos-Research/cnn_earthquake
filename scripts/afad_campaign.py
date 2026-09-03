@@ -25,7 +25,7 @@ import pathlib
 import re
 import sys
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -35,6 +35,10 @@ LEDGER = pathlib.Path("afad_campaign_ledger.jsonl")
 
 # TDVMS result codes, from the portal's own client.
 RESULT_OK, RESULT_QUEUED, RESULT_ERROR, RESULT_BUSY = 0, 109, 110, 111
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def load_ledger(path):
@@ -171,6 +175,7 @@ def cmd_next(args):
         # AMBIGUOUS, not failed: TDVMS often accepts and then goes quiet. Keep the
         # claim -- releasing it would hand the same window to the other address.
         update_chunk(args.ledger, todo["station"], todo["start"], state="submitted",
+                     submitted_at=_now(),
                      note=f"unconfirmed ({type(e).__name__}) — link may still arrive")
         print(f"[AMBIGUOUS] {type(e).__name__} — no answer from TDVMS.")
         print("            Kept as submitted; these are usually accepted anyway.")
@@ -189,7 +194,8 @@ def cmd_next(args):
         update_chunk(args.ledger, todo["station"], todo["start"], state="pending", email=None)
         print(f"[110] TDVMS returned a general error: {resp.json()}")
         return 1
-    update_chunk(args.ledger, todo["station"], todo["start"], state="submitted")
+    update_chunk(args.ledger, todo["station"], todo["start"], state="submitted",
+                 submitted_at=_now())
     print(f"[{result}] accepted — the link will arrive by email at {args.email}")
     return 0
 
@@ -302,7 +308,8 @@ def cmd_paste(args):
         return 1
     zpath.replace(final)
     update_chunk(args.ledger, tgt["station"], tgt["start"], state="fetched",
-                 url=args.url, bytes=size, note=f"{len(names)} file(s)")
+                 fetched_at=_now(), url=args.url, bytes=size,
+                 note=f"{len(names)} file(s)")
     print(f"[OK] {size/1e6:.1f} MB, {len(names)} file(s) — {final}")
     print(f"     {sum(1 for r in rows if r['state']=='pending')} chunk(s) still pending")
     return 0
@@ -348,7 +355,27 @@ def cmd_status(args):
               f"a submission died mid-POST; `reset --start {r['start'][:10]}` to requeue")
     for r in by.get("failed", []):
         print(f"  FAILED: {r['station']} {r['start'][:10]} — {r['note']}")
+    _print_turnaround(rows)
     return 0
+
+
+def _print_turnaround(rows):
+    """Turnaround was guessed at for the first eleven chunks because nothing
+    recorded when a request went out. Rows written before the stamps exist are
+    simply skipped rather than estimated."""
+    laps = []
+    for r in rows:
+        if r.get("submitted_at") and r.get("fetched_at"):
+            laps.append((datetime.fromisoformat(r["fetched_at"])
+                         - datetime.fromisoformat(r["submitted_at"])).total_seconds() / 60)
+    if not laps:
+        return
+    laps.sort()
+    mid = laps[len(laps) // 2]
+    print(f"  turnaround  n={len(laps)}  median {mid:.0f} min  "
+          f"range {laps[0]:.0f}-{laps[-1]:.0f} min")
+    if len(laps) < len(rows):
+        print(f"              ({len(rows) - len(laps)} chunk(s) predate the stamps)")
 
 
 def main():
