@@ -1,0 +1,40 @@
+{"station": "MANT", "start": "2024-05-01T00:00:00", "end": "2024-05-22T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656732_MObNQDkvVWXpPKRtiNBJmP.zip", "bytes": 746325062, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-05-22T00:00:00", "end": "2024-06-12T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656739_IOvwUgBFjsI.zip", "bytes": 582818820, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-06-12T00:00:00", "end": "2024-07-03T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656740_atjxeyrVIDmy.zip", "bytes": 825816605, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-07-03T00:00:00", "end": "2024-07-24T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656746_nXDzLzMeAjQMRPNrmCO.zip", "bytes": 826158378, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-07-24T00:00:00", "end": "2024-08-14T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656773_HMyxHzreYmeEwNBXXNeECFgvJCuOMKN.zip", "bytes": 793798183, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-08-14T00:00:00", "end": "2024-09-04T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656764_zmNOoiORLAUWt.zip", "bytes": 804355924, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-09-04T00:00:00", "end": "2024-09-25T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656774_ZuKfixLkqcowmoHLCPfBvAeUfyCmAl.zip", "bytes": 817289431, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-09-25T00:00:00", "end": "2024-10-16T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656776_XZtcTskLElBhvDrhxNpkUEiSzqL.zip", "bytes": 777808549, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-10-16T00:00:00", "end": "2024-11-06T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656777_ZQxuyqtqjlpCNuN.zip", "bytes": 827341733, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-11-06T00:00:00", "end": "2024-11-27T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656778_rTWrAhEFj.zip", "bytes": 689499897, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-11-27T00:00:00", "end": "2024-12-18T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_656779_pgYCzNwPnyj.zip", "bytes": 833717704, "note": "1 file(s)"}
+{"station": "MANT", "start": "2024-12-18T00:00:00", "end": "2025-01-08T00:00:00", "state": "submitted", "email": "oguz.bolat@std.yildiz.edu.tr", "url": null, "bytes": null, "note": "unconfirmed (ConnectionError) \u2014 link may still arrive"}
+{"station": "MANT", "start": "2025-01-08T00:00:00", "end": "2025-01-29T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-01-29T00:00:00", "end": "2025-02-19T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-02-19T00:00:00", "end": "2025-03-12T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-03-12T00:00:00", "end": "2025-04-02T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-04-02T00:00:00", "end": "2025-04-23T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-04-23T00:00:00", "end": "2025-05-14T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-05-14T00:00:00", "end": "2025-06-04T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-06-04T00:00:00", "end": "2025-06-25T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-06-25T00:00:00", "end": "2025-07-16T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-07-16T00:00:00", "end": "2025-08-06T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-08-06T00:00:00", "end": "2025-08-27T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-08-27T00:00:00", "end": "2025-09-17T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-09-17T00:00:00", "end": "2025-10-08T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-10-08T00:00:00", "end": "2025-10-29T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-10-29T00:00:00", "end": "2025-11-19T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-11-19T00:00:00", "end": "2025-12-10T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-12-10T00:00:00", "end": "2025-12-31T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-12-31T00:00:00", "end": "2026-01-21T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-01-21T00:00:00", "end": "2026-02-11T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-02-11T00:00:00", "end": "2026-03-04T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-03-04T00:00:00", "end": "2026-03-25T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-03-25T00:00:00", "end": "2026-04-15T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-04-15T00:00:00", "end": "2026-05-06T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-05-06T00:00:00", "end": "2026-05-27T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-05-27T00:00:00", "end": "2026-06-17T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-06-17T00:00:00", "end": "2026-07-08T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-07-08T00:00:00", "end": "2026-07-29T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2026-07-29T00:00:00", "end": "2026-08-10T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}

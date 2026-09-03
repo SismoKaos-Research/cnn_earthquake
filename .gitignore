@@ -19,6 +19,8 @@ raw/
 trained_model*/
 dataset*/
 *.log
+afad_raw/
 
 # TUBITAK report renders (generated from the .md sources via scripts/md2docx.py)
 docs/tubitak/*.docx
+
