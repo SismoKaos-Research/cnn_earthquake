@@ -18,7 +18,7 @@
 {"station": "MANT", "start": "2025-04-23T00:00:00", "end": "2025-05-14T00:00:00", "state": "fetched", "email": "oguz.bolat@std.yildiz.edu.tr", "url": "https://tdvms.afad.gov.tr/files/TDVMS_657341_YVyBRmb.zip", "bytes": 772531441, "note": "1 file(s)"}
 {"station": "MANT", "start": "2025-05-14T00:00:00", "end": "2025-06-04T00:00:00", "state": "fetched", "email": "hoguzbolat@gmail.com", "url": "https://tdvms.afad.gov.tr/files/TDVMS_657342_tJPgQWFWdEIrTKnjVLXzrEXeSHozvScO.zip", "bytes": 805468540, "note": "1 file(s)"}
 {"station": "MANT", "start": "2025-06-04T00:00:00", "end": "2025-06-25T00:00:00", "state": "submitted", "email": "oguz.bolat+a1@std.yildiz.edu.tr", "url": null, "bytes": null, "note": "unconfirmed (ConnectionError) \u2014 link may still arrive"}
-{"station": "MANT", "start": "2025-06-25T00:00:00", "end": "2025-07-16T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
+{"station": "MANT", "start": "2025-06-25T00:00:00", "end": "2025-07-16T00:00:00", "state": "claimed", "email": "oguz.bolat+a2@std.yildiz.edu.tr", "url": null, "bytes": null, "note": null}
 {"station": "MANT", "start": "2025-07-16T00:00:00", "end": "2025-08-06T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
 {"station": "MANT", "start": "2025-08-06T00:00:00", "end": "2025-08-27T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
 {"station": "MANT", "start": "2025-08-27T00:00:00", "end": "2025-09-17T00:00:00", "state": "pending", "email": null, "url": null, "bytes": null, "note": null}
