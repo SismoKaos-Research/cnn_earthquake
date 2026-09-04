@@ -45,6 +45,7 @@ a time instead of one at a time. `verify` checks that claim against real dataset
 tensors rather than asserting it.
 """
 import argparse
+import concurrent.futures
 import glob
 import json
 import math
@@ -110,6 +111,10 @@ def parse_args():
     s.add_argument("--batch-size", type=int, default=1024)
     s.add_argument("--block-windows", type=int, default=20000,
                    help="windows preprocessed per vectorized block")
+    s.add_argument("--workers", type=int, default=6,
+                   help="threads for the filtering, which dominates the scan. "
+                        "scipy's detrend and filtfilt drop the GIL, so threads "
+                        "give real parallelism without pickling the blocks")
     s.add_argument("--out-dir", required=True)
     s.add_argument("--limit-chunks", type=int, default=None,
                    help="stop after N chunks (for a timing probe)")
@@ -358,7 +363,9 @@ def cmd_scan(args):
     if args.limit_chunks:
         zips = zips[:args.limit_chunks]
     print(f"[scan] {len(zips)} chunk(s), {args.window_seconds:g}s windows "
-          f"every {args.step_seconds:g}s, device={device}")
+          f"every {args.step_seconds:g}s, device={device}, "
+          f"{args.workers} filter thread(s)")
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
 
     grand_n = 0
     grand_t = time.time()
@@ -392,11 +399,19 @@ def cmd_scan(args):
             for lo in range(0, n_win, args.block_windows):
                 hi = min(lo + args.block_windows, n_win)
                 blk = np.empty((hi - lo, win, 3), dtype=np.float32)
-                for k, comp in enumerate(comps):
-                    c = clean_block(np.array(views[k][lo:hi]), args.fs,
+
+                def fill(task):
+                    k, a, b = task
+                    comp = comps[k]
+                    c = clean_block(np.array(views[k][a:b]), args.fs,
                                     args.freqmin, args.freqmax, taper)
                     mu, sigma = base[comp]["mu"], base[comp]["sigma"]
-                    blk[:, :, k] = ((c - mu) / max(sigma, 1e-12)).astype(np.float32)
+                    blk[a - lo:b - lo, :, k] = ((c - mu) / max(sigma, 1e-12))
+
+                rows = max(1, math.ceil((hi - lo) / max(args.workers // 3, 1)))
+                tasks = [(k, a, min(a + rows, hi))
+                         for k in range(3) for a in range(lo, hi, rows)]
+                list(pool.map(fill, tasks))
                 for bl in range(0, len(blk), args.batch_size):
                     bh = min(bl + args.batch_size, len(blk))
                     probs.append(score_block(models, blk[bl:bh], device))
