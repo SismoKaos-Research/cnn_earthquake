@@ -58,10 +58,24 @@ coincidence on — no longer a subset of cut event windows. That is the setup
 
 ### 2.3 Continuous-data / P-wave picking
 
-The right framing is "does this detector survive continuous data, and what does
-it cost in false alarms?" — not "slide the 6 s classifier over a continuous
-stream", which is the wrong shape for three separate reasons set out in the old
-IDEAS entry. Partially addressed by the GPD baseline work
+**In progress 2026-09-04**, `scripts/continuous_false_alarms.py` on 747 days of
+MANT, three arms (6 s, P-only mined, P-only natural). First 195 days:
+
+| arm | event AUC, SNR>=3 | recall @ 10 alarms/day | background median |
+|---|---|---|---|
+| 6s | 0.872 | 0.653 | **0.797** |
+| ponly | 0.938 | 0.597 | 0.429 |
+| pnat | 0.937 | 0.585 | 0.301 |
+
+Three things that only continuous data could show. The benchmark's 0.5 threshold
+is meaningless here (12,891 alarms/day for the 6 s arm) and thresholds must come
+from measured background. Scored against *every* catalogued event the AUC is
+0.53–0.62, because only 10.7% of them reach SNR 3 at MANT and the median is 1.09
+— that number measures the catalogue's reach, not the model. And the 6 s arm's
+whole background spans 0.797–0.839, so a 0.016 seasonal drift would move its
+alarm rate by an order of magnitude; §2.6 is the response to why.
+
+Partially addressed earlier by the GPD baseline work
 ([`experiment_gpd_baseline_2026-08-27.md`](experiment_gpd_baseline_2026-08-27.md)),
 which put this detector against four published pickers on our own windows.
 
@@ -79,7 +93,48 @@ catalogued hypocentre a false positive does not have. Options: a `--channels 2d`
 stage 2, a waveform-derived distance estimate, or propagated uncertainty. See
 `src/detection/cascade_eval.py`'s module docstring.
 
-### 2.6 Housekeeping
+### 2.6 Retrain with continuous-background negatives
+
+**Motivated by a measured failure, not a hunch.** On continuous MANT the 6 s
+detector scores a *median of 0.83 on noise* — 92% of a quiet station-day clears
+the benchmark's 0.5. Feeding it real training noise windows scaled down and
+nothing else changed, its alarm rate goes 1.9% at the training median amplitude,
+86% at a tenth of it, 100% at a hundredth. `P(event | amplitude)` is U-shaped:
+amplitude mining put a floor under the negatives and physics puts one under the
+positives, so below ~0.1 sigma the model has training data of **neither** class
+and extrapolates to "earthquake". Continuous background sits at 0.11 sigma.
+
+Both P-only models are monotone and do not do this, so it is not a property of
+mining as such — `ponly` (mined) and `pnat` (natural) are indistinguishable on
+continuous data (AUC 0.9376 vs 0.9370 at SNR>=3). Something about the 6 s build
+specifically; the S-inclusive positives reaching 581 sigma are the suspect.
+
+Zhu & Beroza said this in 2019 and it went untested here: *"In order to apply
+PhaseNet for detection on continuous data, a new data set that includes more
+non-seismic signals should be used for training."*
+
+The fix is where negatives come from, not how many:
+
+- **Sample negatives from the continuous archive at natural amplitude.** 747
+  days of MANT now exist; the training pool never contained a window as quiet as
+  a typical station-minute. This is the part that fills the hole.
+- **Add self-mined hard negatives.** The scan produces ~800 unexplained alarm
+  clusters per 98 days — real waveforms that already fool this detector. Same
+  instinct as TransQuake's FilterPicker-derived negatives, from our own record.
+  They are an upper bound on false alarms (some are uncatalogued events), so
+  screen them before training on them as noise.
+- **Evaluate at natural imbalance.** TransQuake trains balanced and *tests* at
+  its natural 11:1, which is why its precision (0.712) means something; every
+  benchmark here is balanced at test time, so no precision figure in this repo
+  is comparable to a deployed one.
+
+**Do the free control first.** Class ratio changes calibration, and calibration
+is already obtainable without retraining — either a prior correction on the
+logit, or `continuous_false_alarms.py report`, which sets the threshold from
+measured background. If a ratio change is all that is tried, expect it to move
+the operating point and nothing else. The amplitude coverage is the experiment.
+
+### 2.7 Housekeeping
 
 - The 3 s dataset overflows fp16 (max 1.21e6). Published results there are
   2B-only and unaffected, but any future `1d`/`all` run on it needs `asinh`.
