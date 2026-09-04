@@ -45,6 +45,11 @@ def parse_args():
     p.add_argument("--ledger", default="afad_campaign_ledger.jsonl")
     p.add_argument("--out-dir", default="afad_raw")
     p.add_argument("--folder", default=os.environ.get("AFAD_IMAP_FOLDER", "INBOX"))
+    p.add_argument("--search", default="(UNSEEN)",
+                   help="raw IMAP search criteria selecting candidate mail. The "
+                        "default scans everything unread, which is right for a "
+                        "dedicated mailbox and wrong for one with other mail in "
+                        'it -- narrow it, e.g. \'(UNSEEN SUBJECT "TDVMS")\'.')
     p.add_argument("--fail-log", default=DEFAULT_FAIL_LOG,
                    help="where dead links are recorded; give each station its own "
                         "when several pollers run side by side")
@@ -153,7 +158,10 @@ def handle(m, uid, args):
     subj = str(email.header.make_header(email.header.decode_header(msg.get("Subject", ""))))
     urls = links_in(msg)
     if not urls:
-        return True  # not a TDVMS mail; nothing to do with it, stop re-reading it
+        # Not TDVMS mail. Leave it untouched -- marking it read to avoid
+        # re-scanning would consume someone's actual inbox. Narrow --search
+        # instead if the mailbox carries unrelated mail.
+        return None
     to = recipient_of(msg)
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
@@ -190,7 +198,7 @@ def handle(m, uid, args):
 
 
 def poll(m, args):
-    typ, data = m.uid("search", None, "(UNSEEN)")
+    typ, data = m.uid("search", None, args.search)
     if typ != "OK":
         log("search failed")
         return
@@ -200,7 +208,7 @@ def poll(m, args):
     log(f"{len(uids)} unread message(s)")
     for uid in uids:
         ok = handle(m, uid, args)
-        if args.dry_run:
+        if args.dry_run or ok is None:
             continue
         # Mark it read either way. Leaving a failure unread meant a dead link was
         # re-fetched every single tick, forever -- three of them ran 21 times in
