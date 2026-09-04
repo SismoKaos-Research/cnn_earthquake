@@ -14,18 +14,18 @@ forward — several items the old files listed as open had already been finished
 These change stated conclusions or need judgement I don't have. Nothing below
 proceeds without a call from you.
 
-### 1.1 Whether to run the AFAD station campaign
+### 1.1 Whether to keep spending requests on more stations
 
-Fully planned in [`PLAN_afad_queue.md`](PLAN_afad_queue.md) — station set,
-request arithmetic, the 185 GB-vs-166 GB disk constraint, and what the runner
-needs to do. **My recommendation is not to**, for now: it buys more independent
-episodes, which would mainly serve forecasting questions that §3.1 has closed.
-Its one live justification is that the feature-model evaluation is
-episode-starved (~15–20 independent episodes in a 2-year archive).
+The MANT and GCAM campaigns are **done** (see §3.5). The open question is no
+longer whether to run one, but whether a third station is worth 40 more
+requests — and GCAM is the reason to hesitate. It returned 189 usable days
+against MANT's 747 for the same 40 links, because the station stops recording
+at 2024-12-18 and nothing but the requests themselves revealed that.
 
-Blocked on one cheap fact either way: the 14-day and 21-day TDVMS bracket
-probes were queued on 2026-08-29 and their results were never recorded. Chunk
-size — and therefore 240 vs 714 requests — turns on them.
+**My recommendation: probe uptime before committing.** A handful of
+single-day requests spread across a candidate's span costs ~6 links and
+answers in one afternoon what GCAM took a full campaign to tell us. The
+stations worth probing are CGC and MTOP, the coincidence pair from §2.2.
 
 ---
 
@@ -49,6 +49,12 @@ Require 2-of-N stations within a short window; independent FPs at 1.78% become
 **Lead with the limitation:** verified 2026-08-19, only 1,184 of 6,459 test
 events have a second station available, so this is measurable on a subset and
 not on the corpus as a whole.
+
+The campaign changed what is available here. All 189 GCAM days sit inside
+MANT's unbroken 2024-05-01..2025-08-06 run, and the two stations are ~130 km
+apart, so there is now a genuine two-station **continuous** window to test
+coincidence on — no longer a subset of cut event windows. That is the setup
+§2.3's scan was built for, and it reuses the same scores.
 
 ### 2.3 Continuous-data / P-wave picking
 
@@ -134,3 +140,25 @@ chance). Detection essentially unaffected: 3 contaminated noise windows in
 | fp16 overflow re-check on the original benchmark | Done. |
 | `catalog_forecast_report.md` pre-correction tables | Done 2026-08-31 — supersede note added in place, including that CENTRAL is no longer at chance so its near-Poisson diagnosis does not survive for that zone. |
 | §4.2 finding (i) overturn | **Already resolved in the report itself.** `tubitak_rapor_v2.md` §4.8.6 carries the normalised-dataset measurement (Çizelge 27–31) and §5.4 states outright that the stronger claim "did not survive" — including the both-floors fix. Was listed as an open decision only because a 2026-08-20 note was carried forward without checking it against the current draft. |
+
+### 3.5 AFAD waveform campaign (finished 2026-09-04)
+
+Two stations pulled through the TDVMS email queue, ledgered in
+`afad_campaign_ledger.jsonl` and `gcam_ledger.jsonl` on vegs.
+
+| | chunks | days | size | span |
+|---|---|---|---|---|
+| MANT | 36/40 | 747 | 27.3 GB | 2024-05-01 .. 2026-08-10, longest unbroken run 462 d |
+| GCAM |  9/40 | 189 |  6.5 GB | 2024-05-01 .. 2024-12-18 |
+
+The misses are station outages, not failed requests: TDVMS answers a window it
+has nothing for with a 269-byte archive holding a Turkish notice, and
+re-requesting cannot recover it. MANT lost 4 windows that way; GCAM lost 31 and
+stops dead at 2024-12-18.
+
+Two things worth carrying forward. **Plus-addressing multiplies queue slots** —
+TDVMS enforces one request at a time per literal address string, so `+a1..a6`
+on one Gmail account turns a serial queue into six parallel ones. And
+**multi-station requests silently truncate**: the portal accepts a station list,
+returns 109, emails a link, and the archive holds only the first station.
+
