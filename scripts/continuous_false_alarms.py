@@ -518,6 +518,12 @@ def cmd_scan(args):
             print(f"[{zi}/{len(zips)}] {stem}: already scored, skipped", flush=True)
             continue
         t_chunk = time.time()
+        # Announced BEFORE the read, because the read is a single opaque obspy
+        # call that can take 17 minutes on a fragmented chunk (MANT_2025-02-19
+        # decodes ~700 traces). Without this line a slow chunk is indistinguish-
+        # able from a hang, which has already cost two false alarms of its own.
+        print(f"[{zi}/{len(zips)}] {stem}: reading "
+              f"({pathlib.Path(z).stat().st_size / 1e6:.0f} MB)...", flush=True)
         st = read_chunk(z)
         comps = pick_components(st)
         if comps is None:
@@ -533,6 +539,7 @@ def cmd_scan(args):
 
         for arm in todo:
             t_arm = time.time()
+            done_w, last_beat = 0, time.time()
             spans = clip_spans(common_spans(seg_lists, args.fs, arm.win),
                                near, args.fs, arm.win, arm.step)
             win, step, taper = arm.win, arm.step, arm.taper
@@ -564,6 +571,11 @@ def cmd_scan(args):
                         bh = min(bl + args.batch_size, len(blk))
                         probs.append(score_block(arm.models, blk[bl:bh], device))
                     times.append(t0 + (np.arange(lo, hi) * step) / args.fs)
+                    done_w += hi - lo
+                    if time.time() - last_beat > 60:
+                        print(f"    ... {stem} {arm.name}: {done_w:,} windows "
+                              f"scored, {time.time() - t_arm:.0f}s", flush=True)
+                        last_beat = time.time()
 
             if not times:
                 print(f"[{zi}/{len(zips)}] {stem} {arm.name}: no unbroken "
