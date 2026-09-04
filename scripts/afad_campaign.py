@@ -217,6 +217,18 @@ def _window_from_name(name):
         datetime.strptime(d2 + "000000", "%d%m%Y%H%M%S")
 
 
+def _discard(zpath, from_file):
+    """Removes the failed download -- unless it is the operator's own file.
+
+    `--from-file` exists to re-ingest an archive already on disk. Deleting that
+    on a failed parse destroys the very thing the flag was there to salvage.
+    """
+    if from_file:
+        print(f"       kept {zpath} (yours, supplied with --from-file)")
+        return
+    zpath.unlink(missing_ok=True)
+
+
 def cmd_paste(args):
     """Downloads a link, then matches it to its ledger chunk by the window
     encoded in the archive -- not by ledger order, which is wrong when two
@@ -275,11 +287,36 @@ def cmd_paste(args):
             names = [n for n in zf.namelist() if not n.endswith("/")]
     except zipfile.BadZipFile:
         print(f"[FAIL] {size} bytes and not a valid zip — nothing recorded")
-        zpath.unlink(missing_ok=True)
+        _discard(zpath, args.from_file)
         return 1
     if not names:
         print(f"[FAIL] zip is empty ({size} B) — the window is probably too long")
-        zpath.unlink(missing_ok=True)
+        _discard(zpath, args.from_file)
+        return 1
+
+    # "No data" does NOT arrive as an empty zip. TDVMS returns a well-formed
+    # archive holding one 82-byte notice --
+    #   "Seçilen istasyon içerisinde geçerli zaman aralığında veri bulunamamıştır."
+    # -- which passes the emptiness check above and was banked as a successful
+    # fetch for three windows before anyone looked at the byte counts. Require
+    # actual waveform members, not merely members.
+    if not any(n.lower().endswith(".mseed") for n in names):
+        with zipfile.ZipFile(zpath) as zf:
+            notice = zf.read(names[0])[:200].decode("utf-8", errors="replace").strip()
+        sta, start, _ = _window_from_name(names[0])
+        tgt = next((r for r in rows if r["station"] == sta
+                    and r["start"][:10] == start.strftime("%Y-%m-%d")), None) \
+            if start is not None else None
+        print(f"[NO DATA] TDVMS holds no waveform for this window:")
+        print(f"          {notice}")
+        if tgt is not None:
+            update_chunk(args.ledger, tgt["station"], tgt["start"],
+                         state="nodata", fetched_at=_now(), url=args.url,
+                         bytes=size, note=notice)
+            print(f"          recorded as nodata: {tgt['start'][:10]}..{tgt['end'][:10]}")
+        else:
+            print("          could not match it to a ledger chunk — nothing recorded")
+        _discard(zpath, args.from_file)
         return 1
 
     sta, start, end = _window_from_name(names[0])
@@ -344,7 +381,7 @@ def cmd_status(args):
     for r in rows:
         by.setdefault(r["state"], []).append(r)
     print(f"{len(rows)} chunk(s) in {args.ledger}")
-    for st in ("pending", "claimed", "submitted", "fetched", "failed"):
+    for st in ("pending", "claimed", "submitted", "fetched", "nodata", "failed"):
         if st in by:
             mb = sum(r["bytes"] or 0 for r in by[st]) / 1e6
             print(f"  {st:10s} {len(by[st]):4d}" + (f"   {mb:.1f} MB" if mb else ""))
@@ -353,6 +390,9 @@ def cmd_status(args):
     for r in by.get("claimed", []):
         print(f"  STUCK in claimed: {r['station']} {r['start'][:10]} ({r['email']}) — "
               f"a submission died mid-POST; `reset --start {r['start'][:10]}` to requeue")
+    for r in by.get("nodata", []):
+        print(f"  no waveform at source: {r['station']} {r['start'][:10]}..{r['end'][:10]}"
+              " — re-requesting cannot recover it")
     for r in by.get("failed", []):
         print(f"  FAILED: {r['station']} {r['start'][:10]} — {r['note']}")
     _print_turnaround(rows)
