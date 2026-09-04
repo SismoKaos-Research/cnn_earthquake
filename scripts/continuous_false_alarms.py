@@ -19,23 +19,38 @@ listed, and this script cannot tell them apart. Every "false alarm" figure it
 prints is therefore an UPPER bound. That cuts the way you would hope -- a
 detector worth deploying is one whose upper bound is already small.
 
+Two detectors are scored, because they answer different questions of the same
+record and the expensive part -- reading and filtering -- is shared:
+
+    6s      the headline detector, window [P-2.0, P+4.0], 0.9896 AUC against a
+            0.9049 amplitude floor. The 1.78% FPR above is its own, so this is
+            the arm that actually tests the 257-per-day extrapolation.
+    ponly   window [P-2.0, P+1.4], 0.8712 against a 0.6679 floor. Read this as
+            **P-phase detection, not early warning**: the 1.4 s tail excludes S
+            only where S-P exceeds 1.4 s, so calling it early warning would
+            smuggle in a distance condition the window itself imposes. Its
+            recall is reported against distance for that reason.
+
 Three phases, because the second is the expensive one and should not be redone
 to change a guard window:
 
     baseline  sample the archive, build the per-component (mu, sigma) the
               training windows were standardized against
-    scan      window the whole record, score every window, write (t, p) per chunk
-    report    associate scores with the catalogue and print the operating table
+    scan      window the whole record, score every window, write (t, p) per
+              chunk and arm
+    report    associate one arm's scores with the catalogue and tabulate
 
     python3 scripts/continuous_false_alarms.py baseline \\
         --zips 'afad_raw/MANT/*.zip' --out mant_baseline.json
     python3 scripts/continuous_false_alarms.py scan \\
         --zips 'afad_raw/MANT/*.zip' --baseline-json mant_baseline.json \\
-        --ckpt-dir trained_model_branch1d_asinh --out-dir scores_mant
+        --arm 6s:6.0:trained_model_branch1d_asinh:cnn-lstm \\
+        --arm ponly:3.4:trained_model_ponly_matched:cnn-lstm \\
+        --out-dir scores_mant
     python3 scripts/continuous_false_alarms.py report \\
-        --scores 'scores_mant/*.npz' --station MANT \\
+        --scores 'scores_mant/6s/*.npz' --station MANT \\
         --stations-csv catalogs/istasyon_katalog.csv \\
-        --catalog catalogs/catalog_current.csv --out-prefix mant_fa
+        --catalog catalogs/catalog_current.csv --out-prefix mant_fa_6s
 
 The preprocessing here is not a reimplementation-by-eye: it is the same order of
 operations `seismic_cli.core` applies when it builds a training window (detrend
@@ -98,16 +113,18 @@ def parse_args():
     s = sub.add_parser("scan", help="score every window in every chunk")
     common(s)
     s.add_argument("--baseline-json", required=True)
-    s.add_argument("--ckpt-dir", required=True)
-    s.add_argument("--branch-1d", default="cnn-lstm", choices=["lstm", "cnn", "cnn-lstm"])
+    s.add_argument("--arm", action="append", required=True, metavar="SPEC",
+                   help="NAME:WINDOW_SECONDS:CKPT_DIR:BRANCH[:STEP_SECONDS], "
+                        "repeatable. Each arm windows and scores the same "
+                        "record independently; the archive is read once for "
+                        "all of them, which is why running two costs well "
+                        "under twice one. STEP defaults to WINDOW, giving "
+                        "disjoint windows -- so an alarm count is also a count "
+                        "of independent decisions.")
     s.add_argument("--channels", default="1d", choices=["all", "1d", "2d"])
     s.add_argument("--fusion", default="linear", choices=["linear", "gate"])
     s.add_argument("--hidden", type=int, default=48)
     s.add_argument("--fusion-dim", type=int, default=96)
-    s.add_argument("--window-seconds", type=float, default=6.0)
-    s.add_argument("--step-seconds", type=float, default=6.0,
-                   help="6.0 (the default) gives disjoint windows, so an alarm "
-                        "count is also a count of independent decisions")
     s.add_argument("--batch-size", type=int, default=1024)
     s.add_argument("--block-windows", type=int, default=20000,
                    help="windows preprocessed per vectorized block")
@@ -142,6 +159,10 @@ def parse_args():
     v.add_argument("--hidden", type=int, default=48)
     v.add_argument("--fusion-dim", type=int, default=96)
     v.add_argument("--limit", type=int, default=4000)
+    v.add_argument("--expect-auc", default=None,
+                   help="what this arm's training log reports, echoed for "
+                        "comparison -- the subsample makes an exact match "
+                        "neither expected nor meaningful")
 
     return p.parse_args()
 
@@ -319,19 +340,17 @@ def cmd_baseline(args):
 # scan
 # ---------------------------------------------------------------------------
 
-def load_models(args, device):
+def load_models(ckpt_dir, branch_1d, args, device):
     """Loads every seed of one training arm as an evaluation ensemble."""
-    ckpts = find_checkpoints(args.ckpt_dir, args.channels, args.fusion, args.branch_1d)
+    ckpts = find_checkpoints(ckpt_dir, args.channels, args.fusion, branch_1d)
     models = []
     for c in ckpts:
         m = DualChannelBinaryNet(3, 3, hidden=args.hidden, fusion_dim=args.fusion_dim,
                                  channels=args.channels, fusion=args.fusion,
-                                 branch1d=args.branch_1d).to(device)
+                                 branch1d=branch_1d).to(device)
         m.load_state_dict(torch.load(c, weights_only=True))
         m.eval()
         models.append(m)
-    print(f"[ensemble] {len(ckpts)} checkpoint(s): "
-          + ", ".join(c.name.split('_seed')[-1].replace('.pth', '') for c in ckpts))
     return models
 
 
@@ -347,23 +366,55 @@ def score_block(models, seq, device):
     return (acc / len(models)).cpu().numpy().astype(np.float32)
 
 
-def cmd_scan(args):
-    """Windows every chunk, scores every window, writes (t, p) per chunk."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    models = load_models(args, device)
-    base = json.loads(pathlib.Path(args.baseline_json).read_text())
+class Arm:
+    """One detector to score the record with: its window geometry and weights.
 
-    win = int(round(args.window_seconds * args.fs))
-    step = int(round(args.step_seconds * args.fs))
-    taper = taper_vector(win)
+    Two arms answer different questions of the same data. The 6 s detector is
+    the one TODO 2.3's 257-alarms-per-day extrapolation is derived from. The
+    P-only detector is a **P-phase detector**, not an early-warning one: its
+    3.4 s window is [P-2.0, P+1.4], and the 1.4 s tail excludes S only for
+    events far enough away that S-P exceeds 1.4 s. Framing it as early warning
+    would smuggle in a distance condition the window itself imposes, so its
+    recall is reported against distance and read as phase detection.
+    """
+
+    def __init__(self, spec, args, device):
+        parts = spec.split(":")
+        if len(parts) not in (4, 5):
+            sys.exit(f"--arm wants NAME:WINDOW:CKPT_DIR:BRANCH[:STEP], got {spec!r}")
+        self.name = parts[0]
+        self.window_seconds = float(parts[1])
+        self.ckpt_dir = parts[2]
+        self.branch_1d = parts[3]
+        self.step_seconds = float(parts[4]) if len(parts) == 5 else self.window_seconds
+        self.win = int(round(self.window_seconds * args.fs))
+        self.step = int(round(self.step_seconds * args.fs))
+        self.taper = taper_vector(self.win)
+        self.models = load_models(self.ckpt_dir, self.branch_1d, args, device)
+        print(f"[arm {self.name}] {self.window_seconds:g}s window every "
+              f"{self.step_seconds:g}s ({self.win} samples), "
+              f"{len(self.models)} seed(s) from {self.ckpt_dir}")
+
+
+def cmd_scan(args):
+    """Windows every chunk, scores every window, writes (t, p) per chunk and arm.
+
+    Each archive is read, merged and gap-split exactly once and every arm
+    windows the result, because reading and decoding 876 MB of mseed is a fixed
+    cost that should not be paid per detector.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    base = json.loads(pathlib.Path(args.baseline_json).read_text())
+    arms = [Arm(spec, args, device) for spec in args.arm]
+
     out_dir = pathlib.Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    for a in arms:
+        (out_dir / a.name).mkdir(parents=True, exist_ok=True)
 
     zips = sorted(glob.glob(args.zips))
     if args.limit_chunks:
         zips = zips[:args.limit_chunks]
-    print(f"[scan] {len(zips)} chunk(s), {args.window_seconds:g}s windows "
-          f"every {args.step_seconds:g}s, device={device}, "
+    print(f"[scan] {len(zips)} chunk(s), {len(arms)} arm(s), device={device}, "
           f"{args.workers} filter thread(s)")
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
 
@@ -371,8 +422,8 @@ def cmd_scan(args):
     grand_t = time.time()
     for zi, z in enumerate(zips, 1):
         stem = pathlib.Path(z).stem
-        dest = out_dir / f"{stem}.npz"
-        if dest.exists():
+        todo = [a for a in arms if not (out_dir / a.name / f"{stem}.npz").exists()]
+        if not todo:
             print(f"[{zi}/{len(zips)}] {stem}: already scored, skipped", flush=True)
             continue
         t_chunk = time.time()
@@ -386,49 +437,56 @@ def cmd_scan(args):
             sys.exit(f"{stem}: no baseline for component(s) {missing}")
 
         seg_lists = [component_segments(st, c, args.fs) for c in comps]
-        spans = common_spans(seg_lists, args.fs, win)
         del st
+        t_read = time.time() - t_chunk
 
-        times, probs = [], []
-        for t0, where, n_samp in spans:
-            n_win = (n_samp - win) // step + 1
-            if n_win < 1:
+        for arm in todo:
+            t_arm = time.time()
+            spans = common_spans(seg_lists, args.fs, arm.win)
+            win, step, taper = arm.win, arm.step, arm.taper
+
+            times, probs = [], []
+            for t0, where, n_samp in spans:
+                n_win = (n_samp - win) // step + 1
+                if n_win < 1:
+                    continue
+                views = [make_windows(seg_lists[k][si][1], off, n_win, win, step)
+                         for k, (si, off) in enumerate(where)]
+                for lo in range(0, n_win, args.block_windows):
+                    hi = min(lo + args.block_windows, n_win)
+                    blk = np.empty((hi - lo, win, 3), dtype=np.float32)
+
+                    def fill(task, lo=lo, views=views, win=win, taper=taper, blk=blk):
+                        k, a, b = task
+                        comp = comps[k]
+                        c = clean_block(np.array(views[k][a:b]), args.fs,
+                                        args.freqmin, args.freqmax, taper)
+                        mu, sigma = base[comp]["mu"], base[comp]["sigma"]
+                        blk[a - lo:b - lo, :, k] = ((c - mu) / max(sigma, 1e-12))
+
+                    rows = max(1, math.ceil((hi - lo) / max(args.workers // 3, 1)))
+                    tasks = [(k, a, min(a + rows, hi))
+                             for k in range(3) for a in range(lo, hi, rows)]
+                    list(pool.map(fill, tasks))
+                    for bl in range(0, len(blk), args.batch_size):
+                        bh = min(bl + args.batch_size, len(blk))
+                        probs.append(score_block(arm.models, blk[bl:bh], device))
+                    times.append(t0 + (np.arange(lo, hi) * step) / args.fs)
+
+            if not times:
+                print(f"[{zi}/{len(zips)}] {stem} {arm.name}: no unbroken "
+                      f"3-component span", flush=True)
                 continue
-            views = [make_windows(seg_lists[k][si][1], off, n_win, win, step)
-                     for k, (si, off) in enumerate(where)]
-            for lo in range(0, n_win, args.block_windows):
-                hi = min(lo + args.block_windows, n_win)
-                blk = np.empty((hi - lo, win, 3), dtype=np.float32)
-
-                def fill(task):
-                    k, a, b = task
-                    comp = comps[k]
-                    c = clean_block(np.array(views[k][a:b]), args.fs,
-                                    args.freqmin, args.freqmax, taper)
-                    mu, sigma = base[comp]["mu"], base[comp]["sigma"]
-                    blk[a - lo:b - lo, :, k] = ((c - mu) / max(sigma, 1e-12))
-
-                rows = max(1, math.ceil((hi - lo) / max(args.workers // 3, 1)))
-                tasks = [(k, a, min(a + rows, hi))
-                         for k in range(3) for a in range(lo, hi, rows)]
-                list(pool.map(fill, tasks))
-                for bl in range(0, len(blk), args.batch_size):
-                    bh = min(bl + args.batch_size, len(blk))
-                    probs.append(score_block(models, blk[bl:bh], device))
-                times.append(t0 + (np.arange(lo, hi) * step) / args.fs)
-
-        if not times:
-            print(f"[{zi}/{len(zips)}] {stem}: no unbroken 3-component span", flush=True)
-            continue
-        t_arr = np.concatenate(times)
-        p_arr = np.concatenate(probs)
-        np.savez_compressed(dest, t=t_arr, p=p_arr)
-        grand_n += len(t_arr)
-        dt = time.time() - t_chunk
-        print(f"[{zi}/{len(zips)}] {stem}: {len(t_arr):>7,} windows "
-              f"({len(t_arr) * args.step_seconds / 86400:.1f} d), "
-              f"{(p_arr > 0.5).mean() * 100:5.2f}% over 0.5, "
-              f"{dt:.0f}s ({len(t_arr) / dt:,.0f} win/s)", flush=True)
+            t_arr = np.concatenate(times)
+            p_arr = np.concatenate(probs)
+            np.savez_compressed(out_dir / arm.name / f"{stem}.npz", t=t_arr, p=p_arr)
+            grand_n += len(t_arr)
+            dt = time.time() - t_arm
+            print(f"[{zi}/{len(zips)}] {stem} {arm.name:>6}: {len(t_arr):>8,} windows "
+                  f"({len(t_arr) * arm.step_seconds / 86400:5.1f} d), "
+                  f"{(p_arr > 0.5).mean() * 100:5.2f}% over 0.5, "
+                  f"{dt:.0f}s ({len(t_arr) / dt:,.0f} win/s"
+                  + (f", +{t_read:.0f}s read)" if arm is todo[0] else ")"), flush=True)
 
     total = time.time() - grand_t
     print(f"[scan] {grand_n:,} windows in {total / 60:.1f} min -> {out_dir}")
@@ -651,7 +709,7 @@ def cmd_verify(args):
 
     check_filter_equivalence()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    models = load_models(args, device)
+    models = load_models(args.ckpt_dir, args.branch_1d, args, device)
     ds = RamDualTensorDataset(f"{args.dataset_dir}/test", seq_transform="none")
 
     idx = np.linspace(0, len(ds.samples) - 1, min(args.limit, len(ds.samples)))
@@ -667,7 +725,9 @@ def cmd_verify(args):
     auc = roc_auc_score(labels, probs)
     fpr = float((probs[np.array(labels) == 0] > 0.5).mean())
     print(f"[verify] n={len(probs):,}  ROC-AUC {auc:.4f}  FPR@0.5 {fpr:.4f}")
-    print("         training log reports 0.9896 AUC and 141/7906 = 0.0178 FPR")
+    print(f"         published for this arm: {args.expect_auc}"
+          if args.expect_auc else
+          "         compare against the arm's published test AUC")
 
 
 def main():
