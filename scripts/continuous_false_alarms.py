@@ -135,6 +135,16 @@ def parse_args():
     s.add_argument("--out-dir", required=True)
     s.add_argument("--limit-chunks", type=int, default=None,
                    help="stop after N chunks (for a timing probe)")
+    s.add_argument("--near-csv", default=None,
+                   help="restrict scoring to the neighbourhood of the epoch "
+                        "times in this CSV's `p_epoch` column (a `timing` "
+                        "output works directly). Catalogued events occupy well "
+                        "under 1%% of a station-year, so a dense rescan of just "
+                        "their guards costs minutes where a dense full-record "
+                        "scan costs days -- which is how detection timing gets "
+                        "resolved below the disjoint-window grid.")
+    s.add_argument("--near-pre", type=float, default=30.0)
+    s.add_argument("--near-post", type=float, default=90.0)
 
     r = sub.add_parser("report", help="associate with the catalogue and tabulate")
     r.add_argument("--scores", required=True, help="glob of scan .npz files")
@@ -149,6 +159,22 @@ def parse_args():
                    help="seconds after it -- long enough to cover the coda a "
                         "regional event leaves in the record")
     r.add_argument("--out-prefix", required=True)
+
+    m = sub.add_parser("timing", help="per-event: when did it fire, relative to S")
+    m.add_argument("--scores", required=True, help="glob of scan .npz files")
+    m.add_argument("--station", required=True)
+    m.add_argument("--stations-csv", required=True)
+    m.add_argument("--catalog", required=True)
+    m.add_argument("--max-distance", type=float, default=500.0)
+    m.add_argument("--guard-pre", type=float, default=10.0)
+    m.add_argument("--guard-post", type=float, default=60.0)
+    m.add_argument("--window-seconds", type=float, required=True,
+                   help="the arm's window length. A detection cannot be declared "
+                        "before the whole window exists, so the alarm time is the "
+                        "window's END -- this is what converts a start time into "
+                        "one.")
+    m.add_argument("--threshold", type=float, default=0.5)
+    m.add_argument("--out", required=True)
 
     v = sub.add_parser("verify", help="check the preprocessing against real tensors")
     v.add_argument("--dataset-dir", required=True)
@@ -211,6 +237,43 @@ def component_segments(stream, comp, fs):
         segs.append((tr.stats.starttime.timestamp, np.asarray(tr.data, dtype=np.float64)))
     segs.sort(key=lambda s: s[0])
     return segs
+
+
+def merge_intervals(iv):
+    """Sorts and coalesces overlapping (lo, hi) pairs."""
+    out = []
+    for lo, hi in sorted(iv):
+        if out and lo <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [(a, b) for a, b in out]
+
+
+def clip_spans(spans, near, fs, win, step):
+    """Cuts spans down to the parts overlapping `near`, keeping the window grid.
+
+    The grid matters. A window's start must stay on the same `t0 + k * step`
+    lattice the unrestricted scan would have used, or a restricted rescan is not
+    comparable with the full one -- so this advances the offset by whole steps
+    rather than starting fresh at each interval's edge.
+    """
+    if near is None:
+        return spans
+    out = []
+    for t0, where, n_samp in spans:
+        span_end = t0 + n_samp / fs
+        for a, b in near:
+            lo, hi = max(t0, a), min(span_end, b)
+            if hi - lo < win / fs:
+                continue
+            k0 = int(math.ceil((lo - t0) * fs / step))
+            n_win = int((min(hi, span_end) - t0) * fs - k0 * step - win) // step + 1
+            if n_win < 1:
+                continue
+            shifted = [(si, off + k0 * step) for si, off in where]
+            out.append((t0 + k0 * step / fs, shifted, n_win * step + win - step))
+    return out
 
 
 def common_spans(seg_lists, fs, min_samples):
@@ -414,6 +477,12 @@ def cmd_scan(args):
     zips = sorted(glob.glob(args.zips))
     if args.limit_chunks:
         zips = zips[:args.limit_chunks]
+    near = None
+    if args.near_csv:
+        col = pd.read_csv(args.near_csv)["p_epoch"].dropna().values
+        near = merge_intervals([(x - args.near_pre, x + args.near_post) for x in col])
+        print(f"[scan] restricted to {len(near):,} interval(s) around "
+              f"{len(col):,} event(s) from {args.near_csv}")
     print(f"[scan] {len(zips)} chunk(s), {len(arms)} arm(s), device={device}, "
           f"{args.workers} filter thread(s)")
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
@@ -442,7 +511,8 @@ def cmd_scan(args):
 
         for arm in todo:
             t_arm = time.time()
-            spans = common_spans(seg_lists, args.fs, arm.win)
+            spans = clip_spans(common_spans(seg_lists, args.fs, arm.win),
+                               near, args.fs, arm.win, arm.step)
             win, step, taper = arm.win, arm.step, arm.taper
 
             times, probs = [], []
@@ -519,23 +589,32 @@ def predicted_arrivals(args):
     model = TauPyModel(model="iasp91")
     cache = {}
 
-    def travel(dist_km, depth_km):
-        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0))
+    def travel(dist_km, depth_km, phases):
+        # Travel time depends mostly on distance and depth; caching on a coarse
+        # grid avoids one taup call per event without materially moving either
+        # arrival. The S phase is wanted as well as P: the question "did the
+        # detector fire before S got here" cannot be asked without it.
+        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0), phases)
         if key not in cache:
             try:
                 arr = model.get_travel_times(source_depth_in_km=key[1] * 5.0,
                                              distance_in_degree=key[0] * 5.0 / 111.195,
-                                             phase_list=["p", "P", "Pn", "Pg"])
+                                             phase_list=list(phases))
                 cache[key] = arr[0].time if arr else None
             except Exception:
                 cache[key] = None
         return cache[key]
 
-    tt = [travel(d, dep if pd.notna(dep) else 10.0)
-          for d, dep in zip(cat.dist.values, cat.Depth.values)]
-    cat["tt"] = tt
-    cat = cat.dropna(subset=["tt"])
-    cat["p_epoch"] = cat.t.map(lambda x: UTCDateTime(x.to_pydatetime()).timestamp) + cat.tt
+    P = ("p", "P", "Pn", "Pg")
+    S = ("s", "S", "Sn", "Sg")
+    depth = [d if pd.notna(d) else 10.0 for d in cat.Depth.values]
+    cat["tt_p"] = [travel(d, z, P) for d, z in zip(cat.dist.values, depth)]
+    cat["tt_s"] = [travel(d, z, S) for d, z in zip(cat.dist.values, depth)]
+    cat = cat.dropna(subset=["tt_p"])
+    origin = cat.t.map(lambda x: UTCDateTime(x.to_pydatetime()).timestamp)
+    cat["p_epoch"] = origin + cat.tt_p
+    cat["s_epoch"] = origin + cat.tt_s
+    cat["sp_seconds"] = cat.tt_s - cat.tt_p
     return cat.sort_values("p_epoch").reset_index(drop=True), (slat, slon)
 
 
@@ -730,10 +809,88 @@ def cmd_verify(args):
           "         compare against the arm's published test AUC")
 
 
+def cmd_timing(args):
+    """Per catalogued event: when the detector first fired, relative to P and S.
+
+    **The alarm time is the window's END, not its start.** A detection cannot be
+    declared before the whole window has been observed and scored, so a 6 s
+    window starting at t announces at t+6. Using the start would credit the
+    detector with information it did not yet have, and would make some events
+    look detected before their P arrived.
+
+    **Read the deltas against the window step, not below it.** Disjoint windows
+    put the alarm time on a grid, so with a 6 s step a delta is only meaningful
+    to +/-6 s -- which is coarser than S-P itself for anything inside ~50 km.
+    Rescan the event guards densely (`scan --near-csv`, small `:STEP`) before
+    reading a close event's number as a real lead time.
+    """
+    files = sorted(glob.glob(args.scores))
+    if not files:
+        sys.exit(f"no score files matched {args.scores}")
+    t = np.concatenate([np.load(f)["t"] for f in files])
+    p = np.concatenate([np.load(f)["p"] for f in files])
+    order = np.argsort(t)
+    t, p = t[order], p[order]
+
+    cat, _ = predicted_arrivals(args)
+    ev = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)].copy()
+
+    first, best = [], []
+    for a, b in zip(ev.p_epoch - args.guard_pre - args.window_seconds,
+                    ev.p_epoch + args.guard_post):
+        i, j = np.searchsorted(t, a), np.searchsorted(t, b, side="right")
+        if j <= i:
+            first.append(np.nan)
+            best.append(np.nan)
+            continue
+        best.append(float(p[i:j].max()))
+        hit = np.flatnonzero(p[i:j] > args.threshold)
+        first.append(t[i + hit[0]] + args.window_seconds if len(hit) else np.nan)
+
+    ev["best_prob"] = best
+    ev["alarm_epoch"] = first
+    ev["dt_after_p"] = ev.alarm_epoch - ev.p_epoch
+    ev["dt_vs_s"] = ev.alarm_epoch - ev.s_epoch
+    ev["covered"] = ~np.isnan(best)
+    ev["detected"] = ~np.isnan(first)
+
+    cov = ev[ev.covered]
+    det = ev[ev.detected]
+    print(f"{'=' * 70}\nDETECTION TIMING  --  {args.station}  "
+          f"(threshold {args.threshold}, {args.window_seconds:g}s window)\n{'=' * 70}")
+    print(f"  {len(ev):,} catalogued events in span, {len(cov):,} with data, "
+          f"{len(det):,} detected ({len(det) / max(len(cov), 1):.1%})")
+    if len(det):
+        before = int((det.dt_vs_s < 0).sum())
+        print(f"  {before:,} of {len(det):,} ({before / len(det):.1%}) fired BEFORE "
+              f"the predicted S arrival")
+        print(f"  alarm after P: median {det.dt_after_p.median():.1f}s  "
+              f"(quantized to the {args.window_seconds:g}s window grid)")
+        print(f"\n  {'dist (km)':>12}{'events':>9}{'found':>8}{'recall':>9}"
+              f"{'med S-P':>9}{'med dt vs S':>13}{'before S':>10}")
+        for band, g in cov.groupby(pd.cut(cov.dist, [0, 25, 50, 100, 200, 500]),
+                                   observed=True):
+            d = g[g.detected]
+            if not len(g):
+                continue
+            print(f"    {str(band):>10}{len(g):>9,}{len(d):>8,}"
+                  f"{len(d) / len(g):>9.3f}{g.sp_seconds.median():>9.1f}"
+                  + (f"{d.dt_vs_s.median():>13.1f}{(d.dt_vs_s < 0).mean():>10.2f}"
+                     if len(d) else f"{'-':>13}{'-':>10}"))
+
+    # p_epoch and s_epoch are carried so this file can drive `scan --near-csv`
+    # for a dense rescan, which is how the deltas get resolved below the grid.
+    cols = ["EventID", "t", "Magnitude", "dist", "Depth", "p_epoch", "s_epoch",
+            "sp_seconds", "best_prob", "alarm_epoch", "dt_after_p", "dt_vs_s",
+            "Location"]
+    ev[ev.covered][cols].to_csv(args.out, index=False)
+    print(f"\n  wrote {args.out} ({int(ev.covered.sum()):,} rows)")
+
+
 def main():
     args = parse_args()
-    {"baseline": cmd_baseline, "scan": cmd_scan,
-     "report": cmd_report, "verify": cmd_verify}[args.cmd](args)
+    {"baseline": cmd_baseline, "scan": cmd_scan, "report": cmd_report,
+     "timing": cmd_timing, "verify": cmd_verify}[args.cmd](args)
 
 
 if __name__ == "__main__":
