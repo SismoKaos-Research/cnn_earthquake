@@ -451,6 +451,40 @@ def score_block(models, seq, device):
     return (acc / len(models)).cpu().numpy().astype(np.float32)
 
 
+class StaLtaArm:
+    """Classical STA/LTA on the same stream, as the reference the models need.
+
+    A deep detector's alarms-per-day means nothing on its own -- 10/day at 65%
+    recall is good or embarrassing depending entirely on what the method it
+    replaces achieves on the identical record. Almost no paper in this space
+    reports that comparison on continuous data, and the ones that do compare
+    against a batch-mode AR picker rather than a tuned operational one.
+
+    The characteristic function is computed on the CONTINUOUS segment, not
+    per window: a 10 s LTA does not fit inside a 6 s window, and computing it
+    per window would handicap the baseline in a way that flatters the network.
+    Each window then takes the maximum CF inside it, so the two are scored on
+    exactly the same windows and the same report machinery applies.
+    """
+
+    def __init__(self, spec, args, device):
+        parts = spec.split(":")
+        self.name = parts[0]
+        self.window_seconds = float(parts[1])
+        self.ckpt_dir = parts[2]
+        sta, lta = parts[3].split("-")
+        self.sta, self.lta = float(sta), float(lta)
+        self.branch_1d = parts[3]
+        self.step_seconds = float(parts[4]) if len(parts) == 5 else self.window_seconds
+        self.win = int(round(self.window_seconds * args.fs))
+        self.step = int(round(self.step_seconds * args.fs))
+        self.taper = taper_vector(self.win)
+        self.models = None
+        print(f"[arm {self.name}] STA/LTA {self.sta:g}s/{self.lta:g}s on the "
+              f"vertical, {self.window_seconds:g}s windows every "
+              f"{self.step_seconds:g}s")
+
+
 class Arm:
     """One detector to score the record with: its window geometry and weights.
 
@@ -481,6 +515,43 @@ class Arm:
               f"{len(self.models)} seed(s) from {self.ckpt_dir}")
 
 
+def sta_lta_scores(arm, spans, seg_lists, args, comps):
+    """Max recursive STA/LTA inside each window, on the cleaned vertical.
+
+    The vertical component only, which is what an operational STA/LTA trigger
+    uses. The segment is cleaned whole with the same detrend/taper/bandpass the
+    networks get, so the two see identical signal conditioning and differ only
+    in the detector.
+    """
+    from obspy.signal.trigger import recursive_sta_lta
+
+    times, probs = [], []
+    nsta, nlta = int(arm.sta * args.fs), int(arm.lta * args.fs)
+    cache = {}
+    for t0, where, n_samp in spans:
+        n_win = (n_samp - arm.win) // arm.step + 1
+        if n_win < 1:
+            continue
+        si, off = where[0]                       # component 0 is the vertical
+        if si not in cache:
+            data = seg_lists[0][si][1]
+            if len(data) < nlta * 2:
+                cache[si] = None
+            else:
+                c = clean_block(data[None, :].copy(), args.fs, args.freqmin,
+                                args.freqmax, taper_vector(len(data)))[0]
+                cache[si] = recursive_sta_lta(c, nsta, nlta)
+        cf = cache[si]
+        if cf is None:
+            continue
+        idx = off + np.arange(n_win) * arm.step
+        # max of the characteristic function inside each window
+        win_max = np.array([cf[i:i + arm.win].max() for i in idx])
+        times.append(t0 + (np.arange(n_win) * arm.step) / args.fs)
+        probs.append(win_max.astype(np.float32))
+    return times, probs
+
+
 def cmd_scan(args):
     """Windows every chunk, scores every window, writes (t, p) per chunk and arm.
 
@@ -490,7 +561,8 @@ def cmd_scan(args):
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     base = json.loads(pathlib.Path(args.baseline_json).read_text())
-    arms = [Arm(spec, args, device) for spec in args.arm]
+    arms = [(StaLtaArm if spec.split(":")[2] == "stalta" else Arm)(spec, args, device)
+            for spec in args.arm]
 
     out_dir = pathlib.Path(args.out_dir)
     for a in arms:
@@ -543,6 +615,21 @@ def cmd_scan(args):
             spans = clip_spans(common_spans(seg_lists, args.fs, arm.win),
                                near, args.fs, arm.win, arm.step)
             win, step, taper = arm.win, arm.step, arm.taper
+
+            if isinstance(arm, StaLtaArm):
+                times, probs = sta_lta_scores(arm, spans, seg_lists, args, comps)
+                if times:
+                    t_arr, p_arr = np.concatenate(times), np.concatenate(probs)
+                    np.savez_compressed(out_dir / arm.name / f"{stem}.npz",
+                                        t=t_arr, p=p_arr)
+                    grand_n += len(t_arr)
+                    dt = time.time() - t_arm
+                    print(f"[{zi}/{len(zips)}] {stem} {arm.name:>6}: "
+                          f"{len(t_arr):>8,} windows "
+                          f"({len(t_arr) * arm.step_seconds / 86400:5.1f} d), "
+                          f"median CF {np.median(p_arr):.2f}, {dt:.0f}s",
+                          flush=True)
+                continue
 
             times, probs = [], []
             for t0, where, n_samp in spans:
@@ -859,6 +946,41 @@ def cmd_report(args):
         auc = roc_auc_score(y, np.r_[g.best_prob.values, fake])
         print(f"    {s:>9}{len(g):>8,}{auc:>9.4f}{g.best_prob.median():>10.4f}"
               f"{np.median(fake):>12.4f}")
+
+    # Diurnal cycle of the alarms. Cultural noise is strongly diurnal, so a
+    # detector firing on anthropogenic transients shows a working-hours peak
+    # that a detector firing on seismicity does not.
+    thr10 = float(np.quantile(bg, 1.0 - min(10.0 * days, len(bg) - 1) / len(bg)))
+    at = t[(p > thr10) & ~explained]
+    if len(at) > 24:
+        hod = (pd.to_datetime(at, unit="s").tz_localize("UTC")
+               .tz_convert("Europe/Istanbul").hour)
+        counts = np.bincount(np.asarray(hod), minlength=24)
+        peak, trough = counts.max(), max(counts.min(), 1)
+        print(f"\n  unexplained alarms by local hour at {thr10:.4f} "
+              f"({len(at):,} alarms, peak/trough = {peak / trough:.2f}x)")
+        for h in range(0, 24, 3):
+            bar = "#" * int(38 * counts[h] / max(peak, 1))
+            print(f"    {h:02d}:00 {counts[h]:>6,} {bar}")
+        day = counts[6:20].sum() / 14
+        night = (counts[:6].sum() + counts[20:].sum()) / 10
+        print(f"    day (06-20) {day:.1f}/h vs night {night:.1f}/h "
+              f"= {day / max(night, 1e-9):.2f}x"
+              + ("   <- anthropogenic signature" if day > 1.5 * night else ""))
+
+    # Recall by magnitude, on events the station actually recorded.
+    mg = cov[cov.snr >= args.snr_min]
+    if len(mg) > 20:
+        print(f"\n  recall by magnitude at {thr10:.4f} (SNR>={args.snr_min:g} only, "
+              f"n={len(mg):,})")
+        print(f"    {'band':>12}{'events':>9}{'found':>8}{'recall':>9}{'med dist':>10}")
+        for band, g in mg.groupby(pd.cut(mg.Magnitude, [0, 2, 2.5, 3, 3.5, 4, 10]),
+                                  observed=True):
+            if not len(g):
+                continue
+            hit = int((g.best_prob > thr10).sum())
+            print(f"    {str(band):>12}{len(g):>9,}{hit:>8,}{hit / len(g):>9.3f}"
+                  f"{g.dist.median():>10.0f}")
 
     # Confusion matrices at the budgets a deployment would actually pick.
     for target in (10.0, 1.0):
