@@ -76,6 +76,7 @@ import torch
 from obspy import read, UTCDateTime
 from obspy.taup import TauPyModel
 from scipy import signal
+from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
@@ -158,6 +159,14 @@ def parse_args():
     r.add_argument("--guard-post", type=float, default=60.0,
                    help="seconds after it -- long enough to cover the coda a "
                         "regional event leaves in the record")
+    r.add_argument("--window-seconds", type=float, required=True,
+                   help="the arm's window length, needed so a guard test is an "
+                        "overlap test and not a start-time test")
+    r.add_argument("--snr-csv", default=None,
+                   help="station_detection_range.py output. Without it, recall "
+                        "is asked of every catalogued event including those the "
+                        "station never recorded, which measures the catalogue's "
+                        "reach rather than the detector's.")
     r.add_argument("--out-prefix", required=True)
 
     m = sub.add_parser("timing", help="per-event: when did it fire, relative to S")
@@ -618,195 +627,148 @@ def predicted_arrivals(args):
     return cat.sort_values("p_epoch").reset_index(drop=True), (slat, slon)
 
 
+def background_and_guards(t, p, cat, args, win_s):
+    """Splits scored windows into event guards and background.
+
+    A window is "explained" when it overlaps any catalogued event's guard. The
+    `- win_s` on the lower edge is what makes that an overlap test rather than a
+    start-time test: a window beginning before the guard still reaches into it.
+    """
+    lo = cat.p_epoch.values - args.guard_pre - win_s
+    hi = cat.p_epoch.values + args.guard_post
+    explained = np.zeros(len(t), dtype=bool)
+    idx = []
+    for a, b in zip(lo, hi):
+        i, j = np.searchsorted(t, a), np.searchsorted(t, b, side="right")
+        explained[i:j] = True
+        idx.append((i, j))
+    return explained, idx
+
+
 def cmd_report(args):
-    """Tabulates alarms against the catalogue, at a range of thresholds."""
+    """The operating table: what a threshold costs per day, and what it buys.
+
+    **The benchmark's 0.5 is not an operating point here and using it would be a
+    mistake.** That threshold was fixed on balanced classes whose negatives were
+    amplitude-mined, and it carries no meaning against continuous background: on
+    MANT the 6 s detector scores a median of 0.83 on *noise*, so 0.5 flags 95% of
+    a quiet station-day. Thresholds are therefore derived from the measured
+    background distribution -- pick the alarm budget, read off the threshold --
+    with the 0.5 row kept only to show how far off it is.
+
+    **Recall is reported against events the station actually recorded.** Only
+    11.5% of catalogued events within 500 km of MANT reach SNR 3, and the median
+    is 1.10, i.e. no signal in the raw trace. Scoring a detector on events whose
+    waveform does not exist measures the catalogue's reach, not the model's.
+    """
     files = sorted(glob.glob(args.scores))
     if not files:
         sys.exit(f"no score files matched {args.scores}")
-    t_all, p_all = [], []
-    for f in files:
-        d = np.load(f)
-        t_all.append(d["t"])
-        p_all.append(d["p"])
-    t = np.concatenate(t_all)
-    p = np.concatenate(p_all)
+    t = np.concatenate([np.load(f)["t"] for f in files])
+    p = np.concatenate([np.load(f)["p"] for f in files])
     order = np.argsort(t)
     t, p = t[order], p[order]
+    win_s = args.window_seconds
 
-    step = float(np.median(np.diff(t[:100000]))) if len(t) > 1 else 6.0
+    step = float(np.median(np.diff(t[:100000]))) if len(t) > 1 else win_s
     days = len(t) * step / 86400.0
-    print(f"{'=' * 70}\nCONTINUOUS FALSE ALARMS  --  {args.station}\n{'=' * 70}")
-    print(f"  {len(t):,} windows from {len(files)} chunk(s), {step:g}s apart")
-    print(f"  {days:.1f} days of record, "
+    print(f"{'=' * 78}\nCONTINUOUS OPERATING TABLE  --  {args.station}  "
+          f"({win_s:g}s windows every {step:g}s)\n{'=' * 78}")
+    print(f"  {len(t):,} windows, {days:.1f} days of record, "
           f"{pd.to_datetime(t.min(), unit='s'):%Y-%m-%d} .. "
           f"{pd.to_datetime(t.max(), unit='s'):%Y-%m-%d}")
 
     cat, (slat, slon) = predicted_arrivals(args)
-    in_span = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)]
-    print(f"  {len(in_span):,} catalogued events within {args.max_distance:g} km "
-          f"of ({slat:.4f}, {slon:.4f}) in that span")
+    cat = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)].copy()
+    explained, idx = background_and_guards(t, p, cat, args, win_s)
+    bg = p[~explained]
+    print(f"  {len(cat):,} catalogued events within {args.max_distance:g} km of "
+          f"({slat:.4f}, {slon:.4f}); their guards cover "
+          f"{100 * explained.mean():.2f}% of windows")
 
-    # A window is "explained" when it overlaps any event's guard interval.
-    lo = in_span.p_epoch.values - args.guard_pre - step
-    hi = in_span.p_epoch.values + args.guard_post
-    explained = np.zeros(len(t), dtype=bool)
-    for a, b in zip(lo, hi):
-        i, j = np.searchsorted(t, a), np.searchsorted(t, b, side="right")
-        explained[i:j] = True
-    print(f"  {explained.sum():,} windows ({100 * explained.mean():.3f}%) fall inside "
-          f"an event guard [-{args.guard_pre:g}s, +{args.guard_post:g}s]")
+    print(f"\n  BACKGROUND score distribution ({len(bg):,} windows outside every guard)")
+    print("    " + "  ".join(f"p{q}={np.percentile(bg, q):.4f}"
+                             for q in (50, 90, 99, 99.9, 99.99)) +
+          f"  max={bg.max():.4f}")
+    if np.percentile(bg, 50) > 0.5:
+        print("    ** the median NOISE window scores above 0.5: the benchmark "
+              "threshold is meaningless here **")
 
-    print(f"\n  {'threshold':>10}{'alarms':>12}{'unexplained':>13}"
-          f"{'per day':>10}{'per hour':>10}{'FPR':>10}")
+    # Attach measured SNR so recall is asked only of events with a waveform.
+    if args.snr_csv:
+        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
+        cat = cat.merge(snr, left_on="EventID", right_on="event_id", how="left")
+    else:
+        cat["snr"] = np.nan
+    best = np.array([p[i:j].max() if j > i else np.nan for i, j in idx])
+    cat["best_prob"] = best
+    cat["covered"] = ~np.isnan(best)
+    cov = cat[cat.covered]
+    n_gap = int((~cat.covered).sum())
+    print(f"  {n_gap:,} event(s) fall in a data gap and are excluded -- no "
+          f"waveform, so not a miss")
+    if args.snr_csv:
+        print(f"  measured SNR available for {int(cov.snr.notna().sum()):,} of "
+              f"{len(cov):,}; median {cov.snr.median():.2f}, "
+              f"{100 * (cov.snr >= 3).mean():.1f}% reach SNR 3")
+
+    # Thresholds chosen to buy a stated alarm budget, not inherited from the benchmark.
+    print(f"\n  {'alarms/day':>11}{'threshold':>11}{'actual/day':>12}{'FPR':>10}"
+          + "".join(f"{'R(SNR>=' + str(s) + ')':>13}" for s in (3, 5, 10)))
     rows = []
-    for thr in (0.5, 0.9, 0.95, 0.99, 0.999, 0.9999):
-        alarm = p > thr
-        unexp = int((alarm & ~explained).sum())
-        n_quiet = int((~explained).sum())
-        rows.append({"threshold": thr, "alarms": int(alarm.sum()),
-                     "unexplained": unexp, "per_day": unexp / days,
-                     "fpr": unexp / max(n_quiet, 1)})
-        print(f"  {thr:>10.4g}{int(alarm.sum()):>12,}{unexp:>13,}"
-              f"{unexp / days:>10.1f}{unexp / days / 24:>10.2f}"
-              f"{unexp / max(n_quiet, 1):>10.5f}")
+    for target in (100.0, 10.0, 1.0, 0.1):
+        want = target * days
+        if want >= len(bg):
+            continue
+        thr = float(np.quantile(bg, 1.0 - want / len(bg)))
+        n_alarm = int((bg > thr).sum())
+        rec = []
+        for s in (3, 5, 10):
+            g = cov[cov.snr >= s]
+            rec.append((g.best_prob > thr).mean() if len(g) else np.nan)
+        rows.append({"target_per_day": target, "threshold": thr,
+                     "alarms_per_day": n_alarm / days, "fpr": n_alarm / len(bg),
+                     **{f"recall_snr{s}": r for s, r in zip((3, 5, 10), rec)}})
+        print(f"  {target:>11.4g}{thr:>11.4f}{n_alarm / days:>12.2f}"
+              f"{n_alarm / len(bg):>10.6f}"
+              + "".join(f"{r:>13.3f}" if r == r else f"{'-':>13}" for r in rec))
 
+    n05 = int((bg > 0.5).sum())
+    rec05 = [(cov[cov.snr >= s].best_prob > 0.5).mean() if len(cov[cov.snr >= s])
+             else np.nan for s in (3, 5, 10)]
+    print(f"  {'(0.5)':>11}{0.5:>11.4f}{n05 / days:>12.2f}{n05 / len(bg):>10.6f}"
+          + "".join(f"{r:>13.3f}" if r == r else f"{'-':>13}" for r in rec05)
+          + "   <- the benchmark threshold, for comparison only")
     pd.DataFrame(rows).to_csv(f"{args.out_prefix}_thresholds.csv", index=False)
 
-    # Recall on catalogued events, on continuous data rather than cut windows.
-    #
-    # The denominator is events whose guard interval actually contains scored
-    # windows, NOT every catalogued event in the span. The record has gaps -- the
-    # four dead MANT chunks, and every place a component dropped out -- and an
-    # event nobody has data for is not a miss, it is an absence. Counting those
-    # as misses would understate recall by however much the station was down.
-    idx = [(np.searchsorted(t, a), np.searchsorted(t, b, side="right"))
-           for a, b in zip(lo, hi)]
-    covered = np.array([j > i for i, j in idx])
-    print(f"\n  recall on catalogued events (any window over threshold in the guard)")
-    print(f"    {len(in_span) - covered.sum():,} of {len(in_span):,} events fall in a "
-          f"gap and are excluded -- no data, so not a miss")
-    print(f"    {'threshold':>10}{'events':>9}{'found':>8}{'recall':>9}")
-    best = np.array([p[i:j].max() if j > i else np.nan for i, j in idx])
-    for thr in (0.5, 0.9, 0.99):
-        hits = int(np.nansum(best > thr))
-        print(f"    {thr:>10.4g}{int(covered.sum()):>9,}{hits:>8,}"
-              f"{hits / max(int(covered.sum()), 1):>9.4f}")
-
-    ev = in_span.copy()
-    ev["best_prob"] = best
-    ev = ev[covered]
-    print(f"\n  recall by magnitude at p>0.5")
-    print(f"    {'band':>12}{'events':>9}{'found':>8}{'recall':>9}{'med dist':>10}")
-    for band, g in ev.groupby(pd.cut(ev.Magnitude, [0, 2, 2.5, 3, 3.5, 4, 10]),
-                              observed=True):
-        if not len(g):
-            continue
-        hits = int((g.best_prob > 0.5).sum())
-        print(f"    {str(band):>12}{len(g):>9,}{hits:>8,}{hits / len(g):>9.4f}"
-              f"{g.dist.median():>10.0f}")
-    print(f"\n  recall by epicentral distance at p>0.5")
-    print(f"    {'band (km)':>12}{'events':>9}{'found':>8}{'recall':>9}{'med mag':>10}")
-    for band, g in ev.groupby(pd.cut(ev.dist, [0, 25, 50, 100, 200, 500]),
-                              observed=True):
-        if not len(g):
-            continue
-        hits = int((g.best_prob > 0.5).sum())
-        print(f"    {str(band):>12}{len(g):>9,}{hits:>8,}{hits / len(g):>9.4f}"
-              f"{g.Magnitude.median():>10.1f}")
-    ev[["EventID", "t", "Magnitude", "dist", "Depth", "best_prob", "Location"]] \
-        .to_csv(f"{args.out_prefix}_events.csv", index=False)
-
-    # Alarms by hour of local day: a cultural-noise signature would show here.
-    hod = pd.to_datetime(t[(p > 0.99) & ~explained], unit="s").tz_localize("UTC") \
-        .tz_convert("Europe/Istanbul").hour
-    if len(hod):
-        counts = np.bincount(hod, minlength=24)
-        peak, trough = counts.max(), counts[counts > 0].min()
-        print(f"\n  unexplained alarms at p>0.99 by local hour "
-              f"(peak {peak:,} / trough {trough:,} = {peak / max(trough, 1):.2f}x)")
-        for h in range(0, 24, 2):
-            bar = "#" * int(40 * counts[h] / max(peak, 1))
-            print(f"    {h:02d}:00 {counts[h]:>7,} {bar}")
-
-    keep = (p > 0.99) & ~explained
-    pd.DataFrame({"time": pd.to_datetime(t[keep], unit="s"), "prob": p[keep]}) \
-        .to_csv(f"{args.out_prefix}_alarms.csv", index=False)
-    print(f"\n  wrote {args.out_prefix}_thresholds.csv, {args.out_prefix}_events.csv "
-          f"and {args.out_prefix}_alarms.csv ({int(keep.sum()):,} rows)")
-
-
-# ---------------------------------------------------------------------------
-# verify
-# ---------------------------------------------------------------------------
-
-def reference_clean(x, fs, freqmin, freqmax):
-    """`seismic_cli.core.clean_and_filter_1d`, transcribed for one window.
-
-    Kept here so the equivalence check runs anywhere -- the real function lives
-    in the data_downloader project, which is not on the machine that scans.
-    """
-    x = signal.detrend(x, type="linear")
-    x = signal.detrend(x, type="constant")
-    n = len(x)
-    taper_len = int(n * 0.05)
-    if taper_len > 0:
-        w = signal.windows.hann(taper_len * 2)
-        x[:taper_len] *= w[:taper_len]
-        x[-taper_len:] *= w[-taper_len:]
-    nyquist = fs / 2.0
-    actual_freqmax = freqmax if nyquist > freqmax else nyquist - 1.0
-    if actual_freqmax > freqmin:
-        b, a = signal.butter(4, [freqmin, actual_freqmax], btype="bandpass", fs=fs)
-        x = signal.filtfilt(b, a, x)
-    return x
-
-
-def check_filter_equivalence(win=600, fs=100.0, freqmin=1.0, freqmax=45.0, n=64):
-    """Vectorized `clean_block` vs the per-window reference, on random windows."""
+    # Threshold-free: can a real guard be told from a random stretch of record?
     rng = np.random.default_rng(0)
-    x = rng.standard_normal((n, win)) * rng.uniform(1, 1e4, (n, 1))
-    got = clean_block(x.copy(), fs, freqmin, freqmax, taper_vector(win))
-    want = np.stack([reference_clean(x[i].copy(), fs, freqmin, freqmax) for i in range(n)])
-    err = np.abs(got - want).max() / np.abs(want).max()
-    print(f"[verify] clean_block vs per-window reference: max relative "
-          f"difference {err:.3e} over {n} windows")
-    if err > 1e-12:
-        sys.exit("preprocessing does NOT match the training pipeline -- stop here")
+    cand = rng.choice(t, size=min(8000, len(t)), replace=False)
+    keep = np.ones(len(cand), bool)
+    for c in cat.p_epoch.values:
+        keep &= np.abs(cand - c) > (args.guard_pre + args.guard_post + 60)
+    fake = []
+    for c in cand[keep]:
+        i, j = np.searchsorted(t, c - args.guard_pre - win_s), \
+               np.searchsorted(t, c + args.guard_post, side="right")
+        if j > i:
+            fake.append(p[i:j].max())
+    fake = np.asarray(fake)
+    print(f"\n  event-level separation: max score in a real guard vs in "
+          f"{len(fake):,} random ones")
+    print(f"    {'SNR cut':>9}{'events':>8}{'AUC':>9}{'med real':>10}{'med random':>12}")
+    for s in (0, 2, 3, 5, 10):
+        g = cov[(cov.snr >= s) | (np.isnan(cov.snr) & (s == 0))].dropna(subset=["best_prob"])
+        if len(g) < 8 or not len(fake):
+            continue
+        y = np.r_[np.ones(len(g)), np.zeros(len(fake))]
+        auc = roc_auc_score(y, np.r_[g.best_prob.values, fake])
+        print(f"    {s:>9}{len(g):>8,}{auc:>9.4f}{g.best_prob.median():>10.4f}"
+              f"{np.median(fake):>12.4f}")
 
-
-def cmd_verify(args):
-    """Reproduces the benchmark score through this file's own scoring path.
-
-    The scan path standardizes, asinh-compresses and batches windows itself
-    rather than loading dataset tensors, so it can drift from the training
-    pipeline silently. Two checks: the vectorized filter must equal the
-    per-window one it replaces, and real dataset tensors pushed through
-    `score_block` must recover the published AUC.
-    """
-    from sklearn.metrics import roc_auc_score
-    from detection.cnn_lstm_classify import RamDualTensorDataset
-
-    check_filter_equivalence()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    models = load_models(args.ckpt_dir, args.branch_1d, args, device)
-    ds = RamDualTensorDataset(f"{args.dataset_dir}/test", seq_transform="none")
-
-    idx = np.linspace(0, len(ds.samples) - 1, min(args.limit, len(ds.samples)))
-    seqs, labels = [], []
-    for i in idx:
-        fpath, lbl = ds.samples[int(round(i))]
-        seqs.append(torch.load(fpath, weights_only=True)["seq"].numpy())
-        labels.append(lbl)
-    probs = []
-    for lo in range(0, len(seqs), 512):
-        probs.append(score_block(models, np.stack(seqs[lo:lo + 512]), device))
-    probs = np.concatenate(probs)
-    auc = roc_auc_score(labels, probs)
-    fpr = float((probs[np.array(labels) == 0] > 0.5).mean())
-    print(f"[verify] n={len(probs):,}  ROC-AUC {auc:.4f}  FPR@0.5 {fpr:.4f}")
-    print(f"         published for this arm: {args.expect_auc}"
-          if args.expect_auc else
-          "         compare against the arm's published test AUC")
+    cov.to_csv(f"{args.out_prefix}_events.csv", index=False)
+    print(f"\n  wrote {args.out_prefix}_thresholds.csv and "
+          f"{args.out_prefix}_events.csv ({len(cov):,} rows)")
 
 
 def cmd_timing(args):
@@ -858,8 +820,27 @@ def cmd_timing(args):
     det = ev[ev.detected]
     print(f"{'=' * 70}\nDETECTION TIMING  --  {args.station}  "
           f"(threshold {args.threshold}, {args.window_seconds:g}s window)\n{'=' * 70}")
+
+    # A saturated model "detects" everything, so recall alone is not readable.
+    # Quoting the background rate next to it makes that impossible to miss: at a
+    # 95% background rate, a 98% recall is arithmetic, not detection.
+    inside = np.zeros(len(t), dtype=bool)
+    for a, b in zip(ev.p_epoch - args.guard_pre - args.window_seconds,
+                    ev.p_epoch + args.guard_post):
+        i, j = np.searchsorted(t, a), np.searchsorted(t, b, side="right")
+        inside[i:j] = True
+    bg_rate = float((p[~inside] > args.threshold).mean())
     print(f"  {len(ev):,} catalogued events in span, {len(cov):,} with data, "
           f"{len(det):,} detected ({len(det) / max(len(cov), 1):.1%})")
+    print(f"  background alarm rate at this threshold: {bg_rate:.4%} of windows "
+          f"outside every guard")
+    if bg_rate > 0.05:
+        print(f"  ** WARNING: at this background rate a guard of "
+              f"{(args.guard_pre + args.guard_post) / args.window_seconds:.0f} "
+              f"windows contains an alarm "
+              f"{1 - (1 - bg_rate) ** ((args.guard_pre + args.guard_post) / args.window_seconds):.1%} "
+              f"of the time BY CHANCE. The recall and timing below are not "
+              f"measuring detection -- pick a threshold from `report` first. **")
     if len(det):
         before = int((det.dt_vs_s < 0).sum())
         print(f"  {before:,} of {len(det):,} ({before / len(det):.1%}) fired BEFORE "
