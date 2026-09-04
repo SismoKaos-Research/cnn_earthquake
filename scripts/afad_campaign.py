@@ -337,9 +337,18 @@ def cmd_paste(args):
         tgt = next((r for r in rows if r["station"] == sta
                     and r["start"][:10] == start.strftime("%Y-%m-%d")), None)
     if tgt is None:
-        print(f"[WARN] could not match '{names[0]}' to a ledger chunk; "
-              f"falling back to the oldest submitted one")
-        tgt = next(r for r in rows if r["state"] == "submitted")
+        # Never guess. This used to fall back to "the oldest submitted chunk",
+        # which files an unrecognised archive under some other window's name --
+        # exactly the mislabelling that once cost 825 MB when the corrected
+        # download overwrote it. An archive we cannot place is kept, named for
+        # what it actually contains, and left for the operator.
+        stray = out / f"UNMATCHED_{pathlib.Path(names[0]).name}.zip"
+        zpath.replace(stray)
+        print(f"[FAIL] '{names[0]}' matches no chunk in {args.ledger}")
+        print(f"       kept as {stray} — nothing recorded")
+        print("       If it belongs to another ledger, paste it there with "
+              "--from-file; otherwise delete it.")
+        return 1
     else:
         print(f"       matched to {tgt['station']} {tgt['start'][:10]}..{tgt['end'][:10]}"
               f" ({tgt['email'] or 'unknown address'})")
