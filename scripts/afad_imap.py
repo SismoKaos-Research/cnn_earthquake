@@ -153,16 +153,19 @@ def handle(m, uid, args):
     to = recipient_of(msg)
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
-    ok = True
+    pasted = failures = 0
     dead = failed_urls()
     for url in urls:
         if url in dead:
             log(f"  already failed before, not re-fetching: {url.rsplit('/', 1)[-1]}")
+            failures += 1
             continue
         rc = run([str(CAMPAIGN), "--ledger", args.ledger, "paste",
                   "--url", url, "--out-dir", args.out_dir], args.dry_run)
-        if rc != 0:
-            ok = False
+        if rc == 0:
+            pasted += 1
+        else:
+            failures += 1
             # The bytes are gone but the URL must not be: an expired link has to
             # be reset and re-requested, and that needs the window it belonged to.
             if not args.dry_run:
@@ -170,9 +173,12 @@ def handle(m, uid, args):
                     fh.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}"
                              f"\t{to}\t{url}\n")
                 log(f"  recorded in {FAIL_LOG} — `reset --start <ISO>` to requeue")
-    if ok and args.pump and to:
+    # Only an archive that actually landed frees a queue slot. Refilling after a
+    # skipped dead link asks an address that still has a chunk in flight for
+    # another one, and TDVMS answers [BUSY] -- noise that reads like a fault.
+    if pasted and args.pump and to:
         run([str(CAMPAIGN), "--ledger", args.ledger, "next", "--email", to], args.dry_run)
-    return ok
+    return failures == 0
 
 
 def poll(m, args):
