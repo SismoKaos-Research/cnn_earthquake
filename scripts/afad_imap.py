@@ -164,6 +164,10 @@ def handle(m, uid, args):
                   "--url", url, "--out-dir", args.out_dir], args.dry_run)
         if rc == 0:
             pasted += 1
+        elif rc == 2:
+            # Already banked -- an older mail resurfacing. Handled, but no slot
+            # was freed, so it must not trigger a refill.
+            log("  link was already banked; nothing new landed")
         else:
             failures += 1
             # The bytes are gone but the URL must not be: an expired link has to

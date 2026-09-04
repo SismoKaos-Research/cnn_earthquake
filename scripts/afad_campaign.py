@@ -242,7 +242,11 @@ def cmd_paste(args):
     if dup and not args.force:
         print(f"[SKIP] already fetched as {dup['station']} "
               f"{dup['start'][:10]}..{dup['end'][:10]} ({(dup['bytes'] or 0)/1e6:.1f} MB)")
-        return 0
+        # Exit 2, not 0: nothing went wrong, but no archive landed either. A
+        # caller driving the queue has to tell those apart -- treating a
+        # duplicate as a fresh fetch made the poller refill a slot that was
+        # never freed, and TDVMS answered [BUSY].
+        return 2
     if not any(r["state"] == "submitted" for r in rows):
         print("no chunk is awaiting a link")
         return 1
