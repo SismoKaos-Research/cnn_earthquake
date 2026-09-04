@@ -167,6 +167,19 @@ def parse_args():
                         "is asked of every catalogued event including those the "
                         "station never recorded, which measures the catalogue's "
                         "reach rather than the detector's.")
+    r.add_argument("--snr-min", type=float, default=3.0,
+                   help="SNR a catalogued event must reach to count as a "
+                        "positive in the confusion matrix. Below this the "
+                        "station has no waveform to detect and the event says "
+                        "nothing about the model.")
+    r.add_argument("--signal-post", type=float, default=20.0,
+                   help="seconds after P a window must overlap to be labelled "
+                        "positive. Tighter than the guard, which is deliberately "
+                        "generous about what an alarm may be excused by.")
+    r.add_argument("--cluster-seconds", type=float, default=60.0,
+                   help="alarms closer together than this are one declaration. "
+                        "Without clustering a single noise burst spanning ten "
+                        "windows counts as ten false positives.")
     r.add_argument("--out-prefix", required=True)
 
     m = sub.add_parser("timing", help="per-event: when did it fire, relative to S")
@@ -645,6 +658,75 @@ def background_and_guards(t, p, cat, args, win_s):
     return explained, idx
 
 
+def confusion(t, p, thr, cat, explained, args, win_s):
+    """Confusion matrix at one threshold, at both the event and window level.
+
+    Two units, because on continuous data neither alone is honest.
+
+    **Event level** is what a detector is actually judged on, and it has no TN:
+    there is no such thing as a "negative earthquake" to correctly not detect.
+    Alarms are clustered first -- a noise burst spanning ten windows is one false
+    declaration, not ten, and counting windows would inflate FP by whatever
+    window length happened to be chosen.
+
+    **Window level** has all four cells but TN is millions, so accuracy is
+    meaningless there and only precision/recall are worth reading.
+
+    Positives are events reaching `--snr-min`. Below that the station recorded no
+    signal, so counting the event as a miss would charge the model for the
+    catalogue's reach. Those events are excluded from BOTH classes rather than
+    swept into the negatives, since a real arrival may well be present.
+    """
+    good = cat[(cat.snr >= args.snr_min) & cat.covered]
+
+    # --- event level -------------------------------------------------------
+    tp_ev = int((good.best_prob > thr).sum())
+    fn_ev = int(len(good) - tp_ev)
+    alarms = t[(p > thr) & ~explained]
+    if len(alarms):
+        breaks = np.flatnonzero(np.diff(alarms) > args.cluster_seconds)
+        fp_ev = len(breaks) + 1
+    else:
+        fp_ev = 0
+
+    # --- window level ------------------------------------------------------
+    pos = np.zeros(len(t), dtype=bool)
+    for c in good.p_epoch.values:
+        i = np.searchsorted(t, c - win_s)
+        j = np.searchsorted(t, c + args.signal_post, side="right")
+        pos[i:j] = True
+    neg = ~explained                      # outside every guard, any SNR
+    tp_w = int(((p > thr) & pos).sum())
+    fn_w = int(((p <= thr) & pos).sum())
+    fp_w = int(((p > thr) & neg).sum())
+    tn_w = int(((p <= thr) & neg).sum())
+    return dict(tp_ev=tp_ev, fn_ev=fn_ev, fp_ev=fp_ev, n_ev=len(good),
+                tp_w=tp_w, fn_w=fn_w, fp_w=fp_w, tn_w=tn_w)
+
+
+def print_confusion(c, thr, days, label):
+    """Prints one confusion block, with the metrics each unit can support."""
+    pr_e = c["tp_ev"] / max(c["tp_ev"] + c["fp_ev"], 1)
+    rc_e = c["tp_ev"] / max(c["tp_ev"] + c["fn_ev"], 1)
+    f1_e = 2 * pr_e * rc_e / max(pr_e + rc_e, 1e-12)
+    pr_w = c["tp_w"] / max(c["tp_w"] + c["fp_w"], 1)
+    rc_w = c["tp_w"] / max(c["tp_w"] + c["fn_w"], 1)
+    print(f"\n  CONFUSION MATRIX  --  {label}  (threshold {thr:.4f})")
+    print(f"    EVENT level, n={c['n_ev']:,} events with signal"
+          f"                    WINDOW level")
+    print(f"                  alarm   no alarm                     "
+          f"        alarm    no alarm")
+    print(f"      event    {c['tp_ev']:>7,}   {c['fn_ev']:>8,}    <- TP / FN     "
+          f"  event  {c['tp_w']:>7,}  {c['fn_w']:>10,}")
+    print(f"      no event {c['fp_ev']:>7,}   {'n/a':>8}    <- FP / TN     "
+          f"  none   {c['fp_w']:>7,}  {c['tn_w']:>10,}")
+    print(f"      precision {pr_e:.4f}  recall {rc_e:.4f}  F1 {f1_e:.4f}"
+          f"        precision {pr_w:.4f}  recall {rc_w:.4f}")
+    print(f"      {c['fp_ev'] / max(days, 1e-9):.2f} false declarations/day. "
+          f"TN is undefined at event level -- there is no negative earthquake, "
+          f"and every FP may be an event AFAD never catalogued.")
+
+
 def cmd_report(args):
     """The operating table: what a threshold costs per day, and what it buys.
 
@@ -765,6 +847,15 @@ def cmd_report(args):
         auc = roc_auc_score(y, np.r_[g.best_prob.values, fake])
         print(f"    {s:>9}{len(g):>8,}{auc:>9.4f}{g.best_prob.median():>10.4f}"
               f"{np.median(fake):>12.4f}")
+
+    # Confusion matrices at the budgets a deployment would actually pick.
+    for target in (10.0, 1.0):
+        want = target * days
+        if want >= len(bg):
+            continue
+        thr = float(np.quantile(bg, 1.0 - want / len(bg)))
+        c = confusion(t, p, thr, cat, explained, args, win_s)
+        print_confusion(c, thr, days, f"{target:g} alarms/day budget")
 
     cov.to_csv(f"{args.out_prefix}_events.csv", index=False)
     print(f"\n  wrote {args.out_prefix}_thresholds.csv and "
