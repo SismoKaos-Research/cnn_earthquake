@@ -52,6 +52,13 @@ def parse_args():
     p.add_argument("--epochs", type=int, default=40)
     p.add_argument("--patience", type=int, default=5)
     p.add_argument("--seeds", type=int, default=3)
+    p.add_argument("--band-spec", default=None,
+                   help="custom bands as 'radius:mag,radius:mag,...' e.g. "
+                        "'100:2.0,300:3.0,500:5.0,1000:6.0'. Implies --bands.")
+    p.add_argument("--bands", action="store_true",
+                   help="use the distance-graded magnitude label instead of the "
+                        "flat M>=2.5 / 400 km one. Moves the positive class AND "
+                        "the persistence floor, so compare both numbers.")
     p.add_argument("--label", choices=["forecast", "concurrent"], default="forecast",
                    help="forecast: an event in the next 6 h, our published task. "
                         "concurrent: an event in THIS hour -- 'risk durumu', which "
@@ -184,7 +191,13 @@ def run_arm(name, feats, labels, dsp, args, device):
 def main():
     args = parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    feats, labels, dsp, idx = cd.build(args.parquet, args.catalog, station=args.station)
+    if args.band_spec:
+        bands = tuple(tuple(float(x) for x in part.split(":"))
+                      for part in args.band_spec.split(","))
+    else:
+        bands = cd.MAGNITUDE_BANDS if args.bands else None
+    feats, labels, dsp, idx = cd.build(args.parquet, args.catalog,
+                                       station=args.station, bands=bands)
     ev = event_columns(idx, args.catalog, args.station)
 
     if args.label == "concurrent":
@@ -195,7 +208,8 @@ def main():
         labels = ev["Deprem_Sayisi"].notna().to_numpy().astype(int)
 
     print(f"{len(feats)} hourly rows, {labels.mean():.1%} positive, "
-          f"{feats.shape[1]} chaos features, label={args.label}, device={device}\n")
+          f"{feats.shape[1]} chaos features, label={args.label}, "
+          f"scheme={bands if bands else 'flat M>=2.5/400km'}, device={device}\n")
     filled = ev.notna().any(axis=1).sum()
     print(f"event columns populated on {filled} of {len(ev)} hours "
           f"({filled/len(ev):.1%}) -- theirs: 7,731 of 53,565 (14.4%)\n")

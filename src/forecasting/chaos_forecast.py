@@ -36,10 +36,24 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from forecasting.chaos_dataset import (HORIZON_HOURS, MIN_MAGNITUDE, RADIUS_KM,
+from forecasting.chaos_dataset import (HORIZON_HOURS, MAGNITUDE_BANDS,
+                                       MIN_MAGNITUDE, RADIUS_KM,
                                        build, persistence_scores)
 from seismolib.metrics import safe_auc
 from seismolib.splits import walk_forward_splits
+
+
+def resolve_bands(args):
+    """The band tuple this run should use, or None for the flat label.
+
+    Kept out of the default so every published number stays reproducible: the
+    graded scheme changes which events are positive AND what the persistence
+    floor is, so a silent switch would move both sides of every comparison.
+    """
+    if getattr(args, "band_spec", None):
+        return tuple(tuple(float(x) for x in part.split(":"))
+                     for part in args.band_spec.split(","))
+    return MAGNITUDE_BANDS if getattr(args, "bands", False) else None
 
 
 def parse_args():
@@ -58,6 +72,13 @@ def parse_args():
                         "the first test hours.")
     p.add_argument("--num-boost-round", type=int, default=300)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--bands", action="store_true",
+                   help="distance-graded magnitude label (MAGNITUDE_BANDS) instead "
+                        "of the flat M>=%.1f / %.0f km one. Moves the positive class "
+                        "and the persistence floor together." % (MIN_MAGNITUDE, RADIUS_KM))
+    p.add_argument("--band-spec", default=None,
+                   help="custom bands, 'radius:mag,...' e.g. "
+                        "'100:2.0,300:3.0,500:5.0,1000:6.0'. Implies --bands.")
     p.add_argument("--top-features", type=int, default=15)
     return p.parse_args()
 
@@ -101,13 +122,17 @@ def fit_logreg(xtr, ytr, xva, yva, xte, args):
 
 def main():
     args = parse_args()
+    bands = resolve_bands(args)
     feats, y, dsp, idx = build(os.path.expanduser(args.parquet),
                                os.path.expanduser(args.catalog),
-                               horizon_hours=args.horizon_hours, shape=args.shape, lags=args.lags)
+                               horizon_hours=args.horizon_hours, shape=args.shape,
+                               lags=args.lags, bands=bands)
     pers = persistence_scores(dsp)
     log1p_dsp = np.log1p(np.nan_to_num(dsp, nan=np.nanmax(dsp)))
 
-    print(f"cell        M>={MIN_MAGNITUDE}, {RADIUS_KM:g} km, {args.horizon_hours:g} h")
+    cell = (f"M>={MIN_MAGNITUDE}, {RADIUS_KM:g} km" if bands is None
+            else "graded " + " ".join(f"<{r:g}km:M>={m:g}" for r, m in bands))
+    print(f"cell        {cell}, {args.horizon_hours:g} h")
     print(f"hours       {len(y):,}  positives {int(y.sum()):,} ({y.mean():.1%})")
     print(f"features    {feats.shape[1]:,} chaos columns (+1 when dsp is included)")
     print(f"folds       {args.folds} walk-forward, {args.embargo_hours} h embargo\n")

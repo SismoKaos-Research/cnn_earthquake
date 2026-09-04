@@ -43,6 +43,16 @@ MIN_MAGNITUDE = 2.5
 RADIUS_KM = 400.0
 HORIZON_HOURS = 6.0
 
+# Distance-graded alternative, from Sırdar et al. (AIMSA 2026) on ELBA.
+# A flat threshold is physically inconsistent: an M2.5 at 20 km sits far above
+# the station's noise floor while an M2.5 at 380 km sits under it, yet the flat
+# label calls both positive. Grading the floor with distance approximates
+# constant detectability, so the positive class is "an event this station could
+# actually have seen" rather than "an event that happened somewhere nearby".
+#
+# (outer radius km, minimum magnitude), innermost first, contiguous.
+MAGNITUDE_BANDS = ((100.0, 0.0), (300.0, 3.0), (500.0, 5.0), (1000.0, 6.0))
+
 AGGS = ("mean", "std", "min", "max")
 ID_COLUMNS = ("Pencere_ID", "Zaman_Dk", "hour_start", "index")
 
@@ -135,12 +145,16 @@ def load_chaos_hourly(parquet_path, aggs=AGGS, shape=False):
 
 
 def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM,
-                station=None):
+                station=None, bands=None):
     """Qualifying event times, sorted, as datetime64.
 
     Args:
         station: (lat, lon), or a key in `seismolib.catalog.STATION_COORDS`.
             Defaults to BODT.
+        bands: Distance-graded magnitude floors, e.g. `MAGNITUDE_BANDS`. When
+            given, `min_magnitude` and `radius_km` are ignored. Left None by
+            default so every published number stays reproducible -- this
+            changes the positive class AND the persistence floor together.
 
     Returns:
         np.ndarray of event times within `radius_km` of the station.
@@ -156,8 +170,29 @@ def load_events(catalog_path, min_magnitude=MIN_MAGNITUDE, radius_km=RADIUS_KM,
     cat["t"] = pd.to_datetime(cat.Date, format="%d/%m/%Y %H:%M:%S", errors="coerce")
     cat = cat.dropna(subset=["t", "Magnitude", "Latitude", "Longitude"])
     d = haversine_km(lat, lon, cat.Latitude.values, cat.Longitude.values)
-    sel = cat[(cat.Magnitude >= min_magnitude) & (d <= radius_km)]
-    return np.sort(sel.t.values.astype("datetime64[s]"))
+    if bands is None:
+        keep = (cat.Magnitude.values >= min_magnitude) & (d <= radius_km)
+    else:
+        keep = band_selection(d, cat.Magnitude.values, bands)
+    return np.sort(cat[keep].t.values.astype("datetime64[s]"))
+
+
+def band_selection(distance_km, magnitude, bands=MAGNITUDE_BANDS):
+    """Boolean mask for the distance-graded magnitude scheme.
+
+    Bands are contiguous and given innermost first as (outer radius, minimum
+    magnitude). An event beyond the outermost radius is excluded whatever its
+    magnitude, which is what makes this a cap rather than an open tail.
+    """
+    distance_km = np.asarray(distance_km, dtype=float)
+    magnitude = np.asarray(magnitude, dtype=float)
+    keep = np.zeros(distance_km.shape, dtype=bool)
+    inner = -np.inf
+    for outer, m_min in bands:
+        in_band = (distance_km > inner) & (distance_km <= outer)
+        keep |= in_band & (magnitude >= m_min)
+        inner = outer
+    return keep
 
 
 def add_lags(feats, lag_hours=LAG_HOURS, base=None):
@@ -190,7 +225,7 @@ def add_lags(feats, lag_hours=LAG_HOURS, base=None):
 
 
 def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
-          shape=False, lags=False, lag_top=40, station=None):
+          shape=False, lags=False, lag_top=40, station=None, bands=None):
     """Features, labels and the persistence predictor, on one shared hour index.
 
     Returns:
@@ -199,7 +234,7 @@ def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
         dropped; NaNs inside a kept row are left for the model to handle.
     """
     feats = load_chaos_hourly(parquet_path, aggs, shape=shape)
-    events = load_events(catalog_path, station=station)
+    events = load_events(catalog_path, station=station, bands=bands)
     idx = pd.DatetimeIndex(feats.index)
 
     # (t, t + horizon] -- an event at exactly t is already observable, so
