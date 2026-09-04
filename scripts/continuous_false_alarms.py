@@ -632,10 +632,16 @@ def cmd_scan(args):
                 continue
 
             # Batches are filled ACROSS span boundaries, not per span. A chunk
-            # where the station drops out tens of thousands of times yields
-            # tens of thousands of tiny spans, and dispatching a thread-pool
-            # job per span made MANT_2025-02-19 cost hours where its neighbours
-            # cost 90 s. Window contents are unchanged -- only the grouping is.
+            # where the station drops out hundreds of times yields many tiny
+            # spans, and dispatching a thread-pool job per span paid full
+            # overhead on each: 3.4x slower on a synthetic 3,000-segment chunk
+            # (480 vs 1,730 win/s). Window contents are unchanged -- only the
+            # grouping into GPU batches is.
+            #
+            # This is NOT what made MANT_2025-02-19 slow, despite the guess that
+            # prompted the change. That chunk spent 2215 s in the obspy read and
+            # 85 s scoring, so the fragmentation cost there is in merge/split,
+            # not here. Fixing the read is a separate problem.
             times, probs = [], []
             views_of, nwin_of = {}, {}
             for si_, (t0, where, n_samp) in enumerate(spans):
