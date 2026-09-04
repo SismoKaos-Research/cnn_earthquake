@@ -248,8 +248,12 @@ def cmd_paste(args):
         # never freed, and TDVMS answered [BUSY].
         return 2
     if not any(r["state"] == "submitted" for r in rows):
-        print("no chunk is awaiting a link")
-        return 1
+        # Exit 4, not 1: TRANSIENT. The ledger simply has nothing in flight
+        # right now, which says nothing about the link. Recorded as permanent,
+        # this once blacklisted a valid 38 MB archive that had to be recovered
+        # by hand from the failure log.
+        print("no chunk is awaiting a link — nothing to match this against yet")
+        return 4
     # Staged at the out-dir root, NOT under a station directory: which station
     # this archive belongs to is only known after the window is matched below.
     # Taking it from rows[0] filed every station's data under whichever station

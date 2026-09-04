@@ -79,9 +79,21 @@ def failed_urls(path):
     out = set()
     for line in path.read_text().splitlines():
         parts = line.split("\t")
-        if len(parts) >= 3:
+        if len(parts) < 3:
+            continue
+        # Fourth column is the reason; lines written before it existed are
+        # permanent by convention. Only permanent failures are never retried --
+        # a transient one is logged so the URL survives, then tried again.
+        reason = parts[3] if len(parts) > 3 else "permanent"
+        if reason == "permanent":
             out.add(parts[2])
     return out
+
+
+def record_failure(path, to, url, reason):
+    with pathlib.Path(path).open("a") as fh:
+        fh.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}"
+                 f"\t{to}\t{url}\t{reason}\n")
 
 
 def log(msg):
@@ -175,6 +187,12 @@ def handle(m, uid, args):
                 run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
                      "--state", "nodata", "--note",
                      "TDVMS: veri bulunmamaktadır (email, no link)"], args.dry_run)
+                # This answer ends the request, so the address is free again.
+                # Omitting the refill here is what drained the GCAM queue: five
+                # of these arrived, five slots emptied, nothing took their place.
+                if args.pump:
+                    run([str(CAMPAIGN), "--ledger", args.ledger, "next",
+                         "--email", to], args.dry_run)
             return False
         if to and "tdvms" in (msg.get("From") or "").lower():
             # From TDVMS but unrecognised. Consume it -- an unconsumed message
@@ -189,7 +207,7 @@ def handle(m, uid, args):
         return None
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
-    pasted = failures = 0
+    pasted = failures = freed = 0
     dead = failed_urls(args.fail_log)
     for url in urls:
         if url in dead:
@@ -200,6 +218,7 @@ def handle(m, uid, args):
                   "--url", url, "--out-dir", args.out_dir], args.dry_run)
         if rc == 0:
             pasted += 1
+            freed += 1
         elif rc == 2:
             # Already banked -- an older mail resurfacing. Handled, but no slot
             # was freed, so it must not trigger a refill.
@@ -213,20 +232,28 @@ def handle(m, uid, args):
                 run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
                      "--state", "pending", "--note", "empty archive, requeued"],
                     args.dry_run)
+            freed += 1
             failures += 1
+        elif rc == 4:
+            # Nothing in flight to match against. Not the link's fault, so it is
+            # recorded but never blacklisted.
+            log("  ledger has nothing awaiting a link; kept for a later retry")
+            if not args.dry_run:
+                record_failure(args.fail_log, to, url, "transient")
         else:
             failures += 1
+            freed += 1
             # The bytes are gone but the URL must not be: an expired link has to
             # be reset and re-requested, and that needs the window it belonged to.
             if not args.dry_run:
-                with pathlib.Path(args.fail_log).open("a") as fh:
-                    fh.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}"
-                             f"\t{to}\t{url}\n")
+                record_failure(args.fail_log, to, url, "permanent")
                 log(f"  recorded in {args.fail_log} — `reset --start <ISO>` to requeue")
-    # Only an archive that actually landed frees a queue slot. Refilling after a
-    # skipped dead link asks an address that still has a chunk in flight for
-    # another one, and TDVMS answers [BUSY] -- noise that reads like a fault.
-    if pasted and args.pump and to:
+    # A refill follows a FREED SLOT, not a landed archive. TDVMS answering at
+    # all -- with data, with a no-data notice, or with an empty archive -- ends
+    # that address's request. Refilling only on success drained the GCAM queue
+    # to zero: five windows retired as nodata, no refill fired for any of them,
+    # and six idle addresses sat holding nothing.
+    if freed and args.pump and to:
         run([str(CAMPAIGN), "--ledger", args.ledger, "next", "--email", to], args.dry_run)
     return failures == 0
 
