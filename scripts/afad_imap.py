@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 
 CAMPAIGN = pathlib.Path(__file__).resolve().parent / "afad_campaign.py"
 LINK_RE = re.compile(r'https?://tdvms\.afad\.gov\.tr/[^\s"\'<>\\]+\.zip')
-FAIL_LOG = pathlib.Path("afad_imap_failures.log")
+DEFAULT_FAIL_LOG = "afad_imap_failures.log"
 
 
 def parse_args():
@@ -45,6 +45,9 @@ def parse_args():
     p.add_argument("--ledger", default="afad_campaign_ledger.jsonl")
     p.add_argument("--out-dir", default="afad_raw")
     p.add_argument("--folder", default=os.environ.get("AFAD_IMAP_FOLDER", "INBOX"))
+    p.add_argument("--fail-log", default=DEFAULT_FAIL_LOG,
+                   help="where dead links are recorded; give each station its own "
+                        "when several pollers run side by side")
     p.add_argument("--interval", type=int, default=60,
                    help="seconds between polls; ignored with --once")
     p.add_argument("--once", action="store_true", help="one pass, then exit")
@@ -56,16 +59,17 @@ def parse_args():
     return p.parse_args()
 
 
-def failed_urls():
+def failed_urls(path):
     """URLs already known dead, so a permanent failure is not re-downloaded.
 
     Read fresh each pass rather than cached: the log is the durable record, and
     a run that restarts must not start retrying links it already gave up on.
     """
-    if not FAIL_LOG.exists():
+    path = pathlib.Path(path)
+    if not path.exists():
         return set()
     out = set()
-    for line in FAIL_LOG.read_text().splitlines():
+    for line in path.read_text().splitlines():
         parts = line.split("\t")
         if len(parts) >= 3:
             out.add(parts[2])
@@ -154,7 +158,7 @@ def handle(m, uid, args):
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
     pasted = failures = 0
-    dead = failed_urls()
+    dead = failed_urls(args.fail_log)
     for url in urls:
         if url in dead:
             log(f"  already failed before, not re-fetching: {url.rsplit('/', 1)[-1]}")
@@ -173,10 +177,10 @@ def handle(m, uid, args):
             # The bytes are gone but the URL must not be: an expired link has to
             # be reset and re-requested, and that needs the window it belonged to.
             if not args.dry_run:
-                with FAIL_LOG.open("a") as fh:
+                with pathlib.Path(args.fail_log).open("a") as fh:
                     fh.write(f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}"
                              f"\t{to}\t{url}\n")
-                log(f"  recorded in {FAIL_LOG} — `reset --start <ISO>` to requeue")
+                log(f"  recorded in {args.fail_log} — `reset --start <ISO>` to requeue")
     # Only an archive that actually landed frees a queue slot. Refilling after a
     # skipped dead link asks an address that still has a chunk in flight for
     # another one, and TDVMS answers [BUSY] -- noise that reads like a fault.

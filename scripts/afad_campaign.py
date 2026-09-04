@@ -250,7 +250,12 @@ def cmd_paste(args):
     if not any(r["state"] == "submitted" for r in rows):
         print("no chunk is awaiting a link")
         return 1
-    out = pathlib.Path(args.out_dir) / rows[0]["station"]
+    # Staged at the out-dir root, NOT under a station directory: which station
+    # this archive belongs to is only known after the window is matched below.
+    # Taking it from rows[0] filed every station's data under whichever station
+    # happened to be first in the ledger, so a second station in the same ledger
+    # wrote GCAM archives into afad_raw/MANT/.
+    out = pathlib.Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     # Unique per invocation: two links can be in flight at once (one per email
     # address), and a shared scratch name would have them overwrite each other.
@@ -339,13 +344,15 @@ def cmd_paste(args):
         print(f"       matched to {tgt['station']} {tgt['start'][:10]}..{tgt['end'][:10]}"
               f" ({tgt['email'] or 'unknown address'})")
 
-    final = out / f"{tgt['station']}_{tgt['start'][:10]}.zip"
+    dest = out / tgt["station"]
+    dest.mkdir(parents=True, exist_ok=True)
+    final = dest / f"{tgt['station']}_{tgt['start'][:10]}.zip"
     # Never replace an existing archive silently. A mislabelled earlier download
     # once left the wrong window under this name, and the corrected download then
     # overwrote 825 MB of good data that had to be re-fetched. If something is
     # already here, keep both and let the operator decide.
     if final.exists() and not args.force:
-        keep = out / f"{tgt['station']}_{tgt['start'][:10]}.dup{os.getpid()}.zip"
+        keep = dest / f"{tgt['station']}_{tgt['start'][:10]}.dup{os.getpid()}.zip"
         zpath.replace(keep)
         print(f"[WARN] {final.name} already exists — saved this one as {keep.name}")
         print("       Inspect both, delete the wrong one, then rename. "
