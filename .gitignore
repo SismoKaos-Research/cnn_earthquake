@@ -24,3 +24,8 @@ afad_raw/
 # TUBITAK report renders (generated from the .md sources via scripts/md2docx.py)
 docs/tubitak/*.docx
 
+# Credentials for the TDVMS pollers. Never commit these -- the campaign runs
+# from the same directory as the ledger, so a stray `git add .` would otherwise
+# sweep an app password into the history.
+.env
+.env.*
