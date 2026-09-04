@@ -290,7 +290,11 @@ def cmd_paste(args):
         _discard(zpath, args.from_file)
         return 1
     if not names:
-        print(f"[FAIL] zip is empty ({size} B) — the window is probably too long")
+        # 22 bytes is a bare end-of-central-directory: TDVMS built an archive and
+        # put nothing in it. Seen on 21-day windows, which are known good, so the
+        # old "window is too long" guess was wrong and sent operators chasing it.
+        print(f"[FAIL] zip is empty ({size} B) — TDVMS produced no archive content. "
+              "Reset the window and request it again.")
         _discard(zpath, args.from_file)
         return 1
 

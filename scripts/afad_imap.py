@@ -56,6 +56,22 @@ def parse_args():
     return p.parse_args()
 
 
+def failed_urls():
+    """URLs already known dead, so a permanent failure is not re-downloaded.
+
+    Read fresh each pass rather than cached: the log is the durable record, and
+    a run that restarts must not start retrying links it already gave up on.
+    """
+    if not FAIL_LOG.exists():
+        return set()
+    out = set()
+    for line in FAIL_LOG.read_text().splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            out.add(parts[2])
+    return out
+
+
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -138,7 +154,11 @@ def handle(m, uid, args):
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
     ok = True
+    dead = failed_urls()
     for url in urls:
+        if url in dead:
+            log(f"  already failed before, not re-fetching: {url.rsplit('/', 1)[-1]}")
+            continue
         rc = run([str(CAMPAIGN), "--ledger", args.ledger, "paste",
                   "--url", url, "--out-dir", args.out_dir], args.dry_run)
         if rc != 0:
@@ -165,8 +185,16 @@ def poll(m, args):
         return
     log(f"{len(uids)} unread message(s)")
     for uid in uids:
-        if handle(m, uid, args) and not args.dry_run:
-            m.uid("store", uid, "+FLAGS", "(\\Seen)")
+        ok = handle(m, uid, args)
+        if args.dry_run:
+            continue
+        # Mark it read either way. Leaving a failure unread meant a dead link was
+        # re-fetched every single tick, forever -- three of them ran 21 times in
+        # seven minutes. The URL is preserved in the failure log, which is what
+        # makes the message safe to consume; \Flagged leaves it visible in the
+        # mailbox so it is not simply lost.
+        flags = "(\\Seen)" if ok else "(\\Seen \\Flagged)"
+        m.uid("store", uid, "+FLAGS", flags)
 
 
 def main():
