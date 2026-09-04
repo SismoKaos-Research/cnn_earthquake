@@ -36,6 +36,9 @@ from datetime import datetime, timezone
 
 CAMPAIGN = pathlib.Path(__file__).resolve().parent / "afad_campaign.py"
 LINK_RE = re.compile(r'https?://tdvms\.afad\.gov\.tr/[^\s"\'<>\\]+\.zip')
+# TDVMS's third way of saying "nothing here": an email with no link at all.
+# "...talep ettiğiniz istasyon/istasyonlara ait veri bulunmamaktadır"
+NODATA_RE = re.compile(r"veri\s+bulunmamaktad", re.IGNORECASE)
 DEFAULT_FAIL_LOG = "afad_imap_failures.log"
 
 
@@ -156,13 +159,34 @@ def handle(m, uid, args):
         return False
     msg = email.message_from_bytes(data[0][1])
     subj = str(email.header.make_header(email.header.decode_header(msg.get("Subject", ""))))
+    to = recipient_of(msg)
     urls = links_in(msg)
     if not urls:
+        body = "".join(
+            (part.get_payload(decode=True) or b"").decode(
+                part.get_content_charset() or "utf-8", errors="replace")
+            for part in msg.walk() if part.get_content_maintype() == "text")
+        if NODATA_RE.search(body):
+            # A real outcome with nothing to download. The address names the
+            # window, so the chunk can be retired instead of waiting forever
+            # for a link that is never coming.
+            log(f"uid {uid.decode()}: NO DATA at source, to {to or 'unknown'}")
+            if to:
+                run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
+                     "--state", "nodata", "--note",
+                     "TDVMS: veri bulunmamaktadır (email, no link)"], args.dry_run)
+            return False
+        if to and "tdvms" in (msg.get("From") or "").lower():
+            # From TDVMS but unrecognised. Consume it -- an unconsumed message
+            # that matches the search is re-fetched every tick forever -- and
+            # flag it so it is visible rather than lost.
+            log(f"uid {uid.decode()}: TDVMS mail with no link and no notice — "
+                f"flagged for inspection ({subj[:50]})")
+            return False
         # Not TDVMS mail. Leave it untouched -- marking it read to avoid
         # re-scanning would consume someone's actual inbox. Narrow --search
         # instead if the mailbox carries unrelated mail.
         return None
-    to = recipient_of(msg)
     log(f"uid {uid.decode()}: {len(urls)} link(s), to {to or 'unknown'} — {subj[:60]}")
 
     pasted = failures = 0
@@ -180,6 +204,16 @@ def handle(m, uid, args):
             # Already banked -- an older mail resurfacing. Handled, but no slot
             # was freed, so it must not trigger a refill.
             log("  link was already banked; nothing new landed")
+        elif rc == 3:
+            # Empty archive: TDVMS failed to build it, the window still has
+            # data. Requeue rather than blacklisting the URL, which would
+            # retire a window that was only ever a server-side hiccup.
+            log("  empty archive — requeuing the window for another request")
+            if to:
+                run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
+                     "--state", "pending", "--note", "empty archive, requeued"],
+                    args.dry_run)
+            failures += 1
         else:
             failures += 1
             # The bytes are gone but the URL must not be: an expired link has to

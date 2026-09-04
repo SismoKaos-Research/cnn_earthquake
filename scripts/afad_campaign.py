@@ -304,8 +304,12 @@ def cmd_paste(args):
         # old "window is too long" guess was wrong and sent operators chasing it.
         print(f"[FAIL] zip is empty ({size} B) — TDVMS produced no archive content. "
               "Reset the window and request it again.")
+        # Exit 3, not 1: this is TRANSIENT. GCAM 2024-09-04..09-25 came back as
+        # 22 bytes while both neighbouring windows hold ~700 MB, so the station
+        # was plainly recording and TDVMS simply failed to build the archive.
+        # Treating it as permanent silently retired windows that still have data.
         _discard(zpath, args.from_file)
-        return 1
+        return 3
 
     # "No data" does NOT arrive as an empty zip. TDVMS returns a well-formed
     # archive holding one 82-byte notice --
@@ -396,6 +400,33 @@ def _reset_locked(args):
     return 0
 
 
+def cmd_mark(args):
+    """Sets the state of whatever chunk an address currently holds.
+
+    Some outcomes never reach an archive at all: TDVMS answers "no data" with a
+    plain email carrying no link and no window, naming only the address it went
+    to. That is enough to act on, because a queue slot holds exactly one chunk
+    at a time, so the address identifies the window unambiguously.
+    """
+    with ledger_lock(args.ledger):
+        rows = load_ledger(args.ledger)
+        held = [r for r in rows if r["state"] in ("claimed", "submitted")
+                and r["email"] == args.email]
+        if not held:
+            print(f"no chunk in flight for {args.email}")
+            return 1
+        r = held[0]
+        print(f"  {r['station']} {r['start'][:10]}..{r['end'][:10]}: "
+              f"{r['state']} -> {args.state}")
+        r["state"] = args.state
+        if args.note:
+            r["note"] = args.note
+        if args.state == "pending":
+            r["email"] = None
+        save_ledger(args.ledger, rows)
+    return 0
+
+
 def cmd_status(args):
     rows = load_ledger(args.ledger)
     if not rows:
@@ -471,6 +502,12 @@ def main():
 
     rs = sub.add_parser("reset"); rs.set_defaults(fn=cmd_reset)
     rs.add_argument("--start", required=True, help="ISO start of the chunk, e.g. 2024-05-01")
+
+    mk = sub.add_parser("mark"); mk.set_defaults(fn=cmd_mark)
+    mk.add_argument("--email", required=True,
+                    help="the address whose in-flight chunk this concerns")
+    mk.add_argument("--state", required=True, choices=["pending", "nodata", "failed"])
+    mk.add_argument("--note", default=None)
 
     st = sub.add_parser("status"); st.set_defaults(fn=cmd_status)
 
