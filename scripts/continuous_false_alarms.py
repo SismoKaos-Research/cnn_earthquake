@@ -89,6 +89,9 @@ def parse_args():
     common(b)
     b.add_argument("--sample-chunks", type=int, default=6,
                    help="chunks to scan, spread evenly across the archive")
+    b.add_argument("--piece-seconds", type=float, default=3600.0,
+                   help="length of the pieces each segment is cleaned in; see "
+                        "cmd_baseline for why this is not a free parameter")
     b.add_argument("--out", required=True)
 
     s = sub.add_parser("scan", help="score every window in every chunk")
@@ -252,13 +255,20 @@ def taper_vector(n):
 def cmd_baseline(args):
     """Accumulates (mu, sigma) per component over whole cleaned traces.
 
-    This mirrors `core.compute_station_noise_baselines`, which scans whole noise
-    files rather than windows. The difference worth stating: that function is
-    given noise-only files, while a continuous record also contains the events.
-    Earthquakes occupy a vanishing fraction of a station-year, so the effect on
-    sigma is far below the precision that matters here -- but it is a difference,
-    and it biases sigma UP, which makes the detector marginally more conservative
-    rather than less.
+    This mirrors `core.compute_station_noise_baselines`, which cleans each trace
+    of each noise file whole and accumulates over all of them. Two differences,
+    both stated rather than hidden:
+
+    - That function is given noise-only files; a continuous record also contains
+      the events. Earthquakes occupy a vanishing fraction of a station-year, so
+      the effect on sigma is far below the precision that matters -- and it
+      biases sigma UP, making the detector marginally more conservative.
+    - It cleans whole traces, and the `noise_pre_3h` files it was pointed at are
+      fragmented into pieces of seconds to minutes. Cleaning a 21-day trace whole
+      is neither faithful to that nor affordable in memory, so segments are cut
+      into `--piece-seconds` pieces first. This does not bias the comparison: the
+      5% Hann taper always attenuates the same 10% *fraction* of any piece, so
+      its effect on sigma is the same at any piece length.
     """
     zips = sorted(glob.glob(args.zips))
     if not zips:
@@ -275,14 +285,18 @@ def cmd_baseline(args):
         if comps is None:
             print(f"  {pathlib.Path(z).stem}: incomplete components, skipped")
             continue
+        piece = int(round(args.piece_seconds * args.fs))
         for comp in comps:
             for _, data in component_segments(st, comp, args.fs):
-                if len(data) < args.fs * 10:
-                    continue
-                c = clean_block(data[None, :], args.fs, args.freqmin, args.freqmax,
-                                taper_vector(len(data)))[0]
-                s, ss, n = accum.get(comp, (0.0, 0.0, 0))
-                accum[comp] = (s + float(c.sum()), ss + float((c ** 2).sum()), n + c.size)
+                for lo in range(0, len(data), piece):
+                    part = data[lo:lo + piece]
+                    if len(part) < args.fs * 10:
+                        continue
+                    c = clean_block(part[None, :].copy(), args.fs, args.freqmin,
+                                    args.freqmax, taper_vector(len(part)))[0]
+                    s, ss, n = accum.get(comp, (0.0, 0.0, 0))
+                    accum[comp] = (s + float(c.sum()), ss + float((c ** 2).sum()),
+                                   n + c.size)
         del st
         print(f"  {pathlib.Path(z).stem}: done in {time.time() - t:.0f}s", flush=True)
 
