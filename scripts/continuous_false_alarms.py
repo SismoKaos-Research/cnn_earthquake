@@ -521,17 +521,48 @@ def cmd_report(args):
     pd.DataFrame(rows).to_csv(f"{args.out_prefix}_thresholds.csv", index=False)
 
     # Recall on catalogued events, on continuous data rather than cut windows.
-    print(f"\n  recall on catalogued events (any window over threshold in guard)")
+    #
+    # The denominator is events whose guard interval actually contains scored
+    # windows, NOT every catalogued event in the span. The record has gaps -- the
+    # four dead MANT chunks, and every place a component dropped out -- and an
+    # event nobody has data for is not a miss, it is an absence. Counting those
+    # as misses would understate recall by however much the station was down.
+    idx = [(np.searchsorted(t, a), np.searchsorted(t, b, side="right"))
+           for a, b in zip(lo, hi)]
+    covered = np.array([j > i for i, j in idx])
+    print(f"\n  recall on catalogued events (any window over threshold in the guard)")
+    print(f"    {len(in_span) - covered.sum():,} of {len(in_span):,} events fall in a "
+          f"gap and are excluded -- no data, so not a miss")
     print(f"    {'threshold':>10}{'events':>9}{'found':>8}{'recall':>9}")
-    ev_hit = {}
+    best = np.array([p[i:j].max() if j > i else np.nan for i, j in idx])
     for thr in (0.5, 0.9, 0.99):
-        hits = 0
-        for a, b in zip(lo, hi):
-            i, j = np.searchsorted(t, a), np.searchsorted(t, b, side="right")
-            if j > i and (p[i:j] > thr).any():
-                hits += 1
-        ev_hit[thr] = hits
-        print(f"    {thr:>10.4g}{len(in_span):>9,}{hits:>8,}{hits / max(len(in_span), 1):>9.4f}")
+        hits = int(np.nansum(best > thr))
+        print(f"    {thr:>10.4g}{int(covered.sum()):>9,}{hits:>8,}"
+              f"{hits / max(int(covered.sum()), 1):>9.4f}")
+
+    ev = in_span.copy()
+    ev["best_prob"] = best
+    ev = ev[covered]
+    print(f"\n  recall by magnitude at p>0.5")
+    print(f"    {'band':>12}{'events':>9}{'found':>8}{'recall':>9}{'med dist':>10}")
+    for band, g in ev.groupby(pd.cut(ev.Magnitude, [0, 2, 2.5, 3, 3.5, 4, 10]),
+                              observed=True):
+        if not len(g):
+            continue
+        hits = int((g.best_prob > 0.5).sum())
+        print(f"    {str(band):>12}{len(g):>9,}{hits:>8,}{hits / len(g):>9.4f}"
+              f"{g.dist.median():>10.0f}")
+    print(f"\n  recall by epicentral distance at p>0.5")
+    print(f"    {'band (km)':>12}{'events':>9}{'found':>8}{'recall':>9}{'med mag':>10}")
+    for band, g in ev.groupby(pd.cut(ev.dist, [0, 25, 50, 100, 200, 500]),
+                              observed=True):
+        if not len(g):
+            continue
+        hits = int((g.best_prob > 0.5).sum())
+        print(f"    {str(band):>12}{len(g):>9,}{hits:>8,}{hits / len(g):>9.4f}"
+              f"{g.Magnitude.median():>10.1f}")
+    ev[["EventID", "t", "Magnitude", "dist", "Depth", "best_prob", "Location"]] \
+        .to_csv(f"{args.out_prefix}_events.csv", index=False)
 
     # Alarms by hour of local day: a cultural-noise signature would show here.
     hod = pd.to_datetime(t[(p > 0.99) & ~explained], unit="s").tz_localize("UTC") \
@@ -548,8 +579,8 @@ def cmd_report(args):
     keep = (p > 0.99) & ~explained
     pd.DataFrame({"time": pd.to_datetime(t[keep], unit="s"), "prob": p[keep]}) \
         .to_csv(f"{args.out_prefix}_alarms.csv", index=False)
-    print(f"\n  wrote {args.out_prefix}_thresholds.csv and "
-          f"{args.out_prefix}_alarms.csv ({int(keep.sum()):,} rows)")
+    print(f"\n  wrote {args.out_prefix}_thresholds.csv, {args.out_prefix}_events.csv "
+          f"and {args.out_prefix}_alarms.csv ({int(keep.sum()):,} rows)")
 
 
 # ---------------------------------------------------------------------------
