@@ -631,38 +631,63 @@ def cmd_scan(args):
                           flush=True)
                 continue
 
+            # Batches are filled ACROSS span boundaries, not per span. A chunk
+            # where the station drops out tens of thousands of times yields
+            # tens of thousands of tiny spans, and dispatching a thread-pool
+            # job per span made MANT_2025-02-19 cost hours where its neighbours
+            # cost 90 s. Window contents are unchanged -- only the grouping is.
             times, probs = [], []
-            for t0, where, n_samp in spans:
+            views_of, nwin_of = {}, {}
+            for si_, (t0, where, n_samp) in enumerate(spans):
                 n_win = (n_samp - win) // step + 1
                 if n_win < 1:
                     continue
-                views = [make_windows(seg_lists[k][si][1], off, n_win, win, step)
-                         for k, (si, off) in enumerate(where)]
-                for lo in range(0, n_win, args.block_windows):
-                    hi = min(lo + args.block_windows, n_win)
-                    blk = np.empty((hi - lo, win, 3), dtype=np.float32)
+                views_of[si_] = [make_windows(seg_lists[k][sj][1], off,
+                                              n_win, win, step)
+                                 for k, (sj, off) in enumerate(where)]
+                nwin_of[si_] = n_win
+                times.append(t0 + (np.arange(n_win) * step) / args.fs)
 
-                    def fill(task, lo=lo, views=views, win=win, taper=taper, blk=blk):
-                        k, a, b = task
-                        comp = comps[k]
-                        c = clean_block(np.array(views[k][a:b]), args.fs,
+            def flush(pending, total):
+                """Cleans, standardizes and scores one cross-span batch."""
+                blk = np.empty((total, win, 3), dtype=np.float32)
+                tasks, dest = [], 0
+                for si_, a, b in pending:
+                    tasks.append((si_, a, b, dest))
+                    dest += b - a
+
+                def fill(task):
+                    sj, a, b, d = task
+                    for k in range(3):
+                        c = clean_block(np.array(views_of[sj][k][a:b]), args.fs,
                                         args.freqmin, args.freqmax, taper)
-                        mu, sigma = base[comp]["mu"], base[comp]["sigma"]
-                        blk[a - lo:b - lo, :, k] = ((c - mu) / max(sigma, 1e-12))
+                        mu, sigma = base[comps[k]]["mu"], base[comps[k]]["sigma"]
+                        blk[d:d + (b - a), :, k] = ((c - mu) / max(sigma, 1e-12))
 
-                    rows = max(1, math.ceil((hi - lo) / max(args.workers // 3, 1)))
-                    tasks = [(k, a, min(a + rows, hi))
-                             for k in range(3) for a in range(lo, hi, rows)]
-                    list(pool.map(fill, tasks))
-                    for bl in range(0, len(blk), args.batch_size):
-                        bh = min(bl + args.batch_size, len(blk))
-                        probs.append(score_block(arm.models, blk[bl:bh], device))
-                    times.append(t0 + (np.arange(lo, hi) * step) / args.fs)
-                    done_w += hi - lo
-                    if time.time() - last_beat > 60:
-                        print(f"    ... {stem} {arm.name}: {done_w:,} windows "
-                              f"scored, {time.time() - t_arm:.0f}s", flush=True)
-                        last_beat = time.time()
+                list(pool.map(fill, tasks))
+                for bl in range(0, total, args.batch_size):
+                    bh = min(bl + args.batch_size, total)
+                    probs.append(score_block(arm.models, blk[bl:bh], device))
+
+            pending, total = [], 0
+            for si_ in sorted(views_of):
+                lo = 0
+                while lo < nwin_of[si_]:
+                    take = min(args.block_windows - total, nwin_of[si_] - lo)
+                    pending.append((si_, lo, lo + take))
+                    total += take
+                    lo += take
+                    if total >= args.block_windows:
+                        flush(pending, total)
+                        done_w += total
+                        pending, total = [], 0
+                        if time.time() - last_beat > 60:
+                            print(f"    ... {stem} {arm.name}: {done_w:,} windows "
+                                  f"scored, {time.time() - t_arm:.0f}s", flush=True)
+                            last_beat = time.time()
+            if total:
+                flush(pending, total)
+                done_w += total
 
             if not times:
                 print(f"[{zi}/{len(zips)}] {stem} {arm.name}: no unbroken "
