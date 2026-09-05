@@ -59,6 +59,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
+from seismolib.runlog import RunLog
 from magnitude.cnn_regression import (AUX_COLUMNS, detect_aux_columns,
                                       regression_metrics, report_baselines)
 from seismolib.metrics import (predict_mean_baseline, print_report,
@@ -369,6 +370,10 @@ def main():
                        detector_manifest=args.detector_manifest)
     report_split(manifest, args.split_by)
 
+    # Provenance is opened BEFORE training, so a run that dies mid-epoch still
+    # leaves a record of what was attempted rather than none at all.
+    runlog = RunLog(f"magnitude/cnn_lstm_regression", args.save_dir, vars(args))
+
     parts = {}
     for split in ("train", "val", "test"):
         sub = manifest[manifest.split == split]
@@ -504,6 +509,8 @@ def main():
     model.load_state_dict(torch.load(save_path, weights_only=True))
     yt, yp = evaluate(test_loader)
     tm = regression_metrics(yt, yp)
+    runlog.note(dataset=str(root), n_train=len(train_ds), n_val=len(val_ds),
+                n_test=len(test_ds), aux_columns=AUX_COLUMNS)
 
     ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
 
@@ -519,6 +526,10 @@ def main():
           f"R2 {mean_floor['R2']:+.4f}")
     if ridge_mae is not None:
         print(f"  ridge(amplitude,distance) MAE {ridge_mae:.4f}   <- the physics floor")
+    runlog.finish(metrics=dict(tm, ridge_floor=ridge_mae,
+                               mean_floor=mean_floor["MAE"]),
+                  checkpoints=[save_path])
+    print(f"  provenance -> {runlog.path}")
 
     print_report(f"Magnitude regressor [channels={args.channels}] (seed {args.seed}, test set)",
                  regression_report(yt, yp))

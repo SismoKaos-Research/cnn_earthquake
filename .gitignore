@@ -29,3 +29,8 @@ docs/tubitak/*.docx
 # sweep an app password into the history.
 .env
 .env.*
+
+# Run provenance records — one JSON per training run (seismolib.runlog).
+# Not tracked: they are machine-local evidence, and a shared repo would collide
+# on every parallel run. Copy the ones a write-up cites into docs/ instead.
+runs/
