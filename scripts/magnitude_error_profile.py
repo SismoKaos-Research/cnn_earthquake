@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from magnitude.cnn_lstm_regression import (DualChannelRegressionNet,
                                            DualMagnitudeDataset, resplit)
 from magnitude.cnn_regression import AUX_COLUMNS
+from seismolib.model.registry import ModelSpec
 
 
 def parse_args():
@@ -110,9 +111,34 @@ def main():
     ds_te = DualMagnitudeDataset(te, root, aux_stats=ds_tr.aux_stats())
 
     seq, img, aux, _ = ds_te[0]
-    model = DualChannelRegressionNet(seq.shape[-1], img.shape[0], aux.numel(),
-                                     hidden=args.hidden, fusion_dim=args.fusion_dim,
-                                     channels=args.channels).to(device)
+    # The saved spec wins over the flags. --channels defaults to "2d+aux" here
+    # and to "all" in the trainer, so scoring a --channels all run without
+    # saying so builds a different network; load_state_dict then either raises
+    # or, if the shapes happen to line up, quietly reports another model's
+    # numbers. A run that wrote `model.json` beside its weights no longer needs
+    # its geometry retyped, and a disagreement is named rather than guessed at.
+    spec = ModelSpec.load(Path(args.ckpt).parent)
+    if spec is None:
+        print(f"  [spec] no model.json beside {args.ckpt} -- using the flags as "
+              f"given (channels={args.channels}, hidden={args.hidden}, "
+              f"fusion_dim={args.fusion_dim}); check they match the run")
+        spec = ModelSpec(model="dual-channel", branch="lstm",
+                         params={"channels": args.channels, "hidden": args.hidden,
+                                 "fusion_dim": args.fusion_dim, "fusion": "linear",
+                                 "dropout": 0.3, "lstm_layers": 1, "lstm_heads": 4})
+    else:
+        print(f"  [spec] {spec.describe()}   (from model.json)")
+        asked = {"channels": args.channels, "hidden": args.hidden,
+                 "fusion_dim": args.fusion_dim}
+        clash = {k: (v, spec.params.get(k)) for k, v in asked.items()
+                 if k in spec.params and v != spec.params[k]}
+        if clash:
+            print("  [spec] flags disagree with the saved spec; the SPEC is used:")
+            for k, (was, now) in clash.items():
+                print(f"           --{k.replace('_', '-')} {was!r} ignored, {now!r} used")
+
+    model = spec.build(seq_dim=seq.shape[-1], img_channels=img.shape[0],
+                       aux_dim=aux.numel(), squeeze_output=True).to(device)
     model.load_state_dict(torch.load(args.ckpt, weights_only=True))
     model.eval()
 
