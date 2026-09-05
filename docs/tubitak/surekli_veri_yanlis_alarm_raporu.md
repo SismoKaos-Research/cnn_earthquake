@@ -1,4 +1,4 @@
-# EK- SÜREKLİ VERİ ÜZERİNDE YANLIŞ ALARM ORANI ANALİZ RAPORU
+# SÜREKLİ VERİ ÜZERİNDE YANLIŞ ALARM ORANI ANALİZ RAPORU
 
 Bu rapor, MANT istasyonuna ait 728 günlük kesintisiz sismik kayıt üzerinde hazırlanmıştır. Kayıt 30 Nisan 2024 – 9 Ağustos 2026 dönemini kapsamakta olup 36 arşiv parçasından oluşmaktadır. Projede geliştirilen kısa pencereli deprem/gürültü sınıflandırıcıları ile klasik bir eşik yöntemi, aynı pencerelerde ve aynı ön işlemeyle karşılaştırılmıştır. 6 saniyelik model için 10.487.211, 3,4 saniyelik modeller için 18.519.887 pencere puanlanmıştır.
 
@@ -124,6 +124,38 @@ Günde 10 alarm bütçesindeki karışıklık matrisi Çizelge 5'te verilmiştir
 
 Bu rapordaki bütün yanlış alarm sayıları biçimsel olarak **üst sınırdır**: katalogda karşılığı bulunmayan bir alarm ya gerçek bir yanlış pozitiftir ya da AFAD'ın kataloglamadığı bir depremdir ve buradaki yöntem ikisini ayıramamaktadır. Ancak günlük döngü bu sınırı önemli ölçüde daraltmaktadır: **depremlerin mesai saatlerinde tepe yapması beklenmez.** Dört kolun tamamında 12:00–15:00 arasında gözlenen tepe, alarmların kayda değer bir bölümünün gerçekten kültürel gürültü olduğunu göstermektedir. Bu bulgu ancak iki yıla yayılan tam günler içeren bir kayıtta görünür hale gelmektedir.
 
+### 5.5 P dalgasının S dalgasından önce bildirilmesi
+
+Bir tespit, penceresinin tamamı gözlenip puanlanmadan bildirilemez. Bu nedenle **alarm zamanı pencerenin sonudur**, başlangıcı değil: *t* anında başlayan 6 saniyelik bir pencere *t*+6'da bildirim üretmektedir. Başlangıcın kullanılması, modele henüz sahip olmadığı bilgiyi atfetmek ve bazı olayları P varışından önce tespit edilmiş göstermek anlamına gelirdi.
+
+Ayrık pencerelerde P varışı pencere içinde rastgele bir konuma düşmektedir. Ölçülen ortanca bildirim gecikmesi 6 saniyelik kol için P+4,5 s, 3,4 saniyelik kol için P+2,9 s'dir.
+
+S−P farkı yaklaşık olarak *uzaklık* / 8,4 saniye olduğundan, bir tespit edicinin S dalgasını geçebilmesi için **S−P farkının kendi bildirim gecikmesini aşması** gerekmektedir. Buradan çıkan başabaş uzaklıklar 6 saniyelik kol için yaklaşık 38 km, P-dalgası kolu için yaklaşık 24 km'dir.
+
+| Uzaklık aralığı | Ortanca S−P | 6s | ponly | stalta |
+|---|---|---|---|---|
+| 0 – 25 km | 1,4 s | 0,19 | **0,39** | 0,16 |
+| 25 – 50 km | 4,0 s | 0,41 | **0,66** | 0,52 |
+| 50 – 100 km | 10,7 s | 0,69 | 0,76 | **0,97** |
+| 100 – 200 km | 15,1 s | 0,86 | 0,85 | **0,97** |
+| 200 – 500 km | 32,1 s | 0,94 | 0,93 | **0,98** |
+
+Çizelge 7. S dalgasından önce bildirilen olayların oranı (günde 10 alarm bütçesi, SGO≥3).
+
+Ölçülen başabaş uzaklıklar, çizelgedeki %50 geçişleriyle birebir örtüşmektedir: 6 saniyelik kol 25–50 km bandında, P-dalgası kolu ise bu bandın altında %50'yi aşmaktadır. **Kısa pencere yaklaşık 14 km'lik ek kullanılabilir menzil kazandırmaktadır.** 25 km içinde ise her iki model de çoğunlukla geç kalmaktadır; S dalgası, model daha karar veremeden istasyona ulaşmaktadır.
+
+Toplam oranlar Çizelge 8'de verilmiştir. Burada dikkat çeken nokta, klasik yöntemin en yüksek "S'den önce" oranına sahip olmasına karşın en az olayı bulmasıdır; bu, tespitlerinin uzak olaylara kaymasından kaynaklanmaktadır.
+
+| Kol | Tespit edilen | S'den önce | Ortanca bildirim |
+|---|---|---|---|
+| 6s | 9.672 (%74,1) | 6.729 (%69,6) | P+4,5 s |
+| ponly | 8.182 (%62,7) | 6.216 (%76,0) | P+2,9 s |
+| stalta | 7.152 (%54,8) | 6.744 (%94,3) | P+4,3 s |
+
+Çizelge 8. Toplam tespit ve öncelik oranları (günde 10 alarm bütçesi, SGO≥3, 13.056 olay).
+
+50 km'nin ötesinde klasik yöntemin öncelik tutarlılığı belirgin biçimde yüksektir (%97–98). Ortanca öncelik süreleri benzer olduğuna göre (50–100 km bandında −6,3 s ve −5,8 s), fark dağılımın yayılımındadır: STA/LTA yalnızca keskin başlangıca tepki vermekte, sinir ağları ise zayıf olaylarda zaman zaman dalga formunun daha geç bölümlerine kilitlenmektedir. Bu, tespit başarımını etkilememekte ancak zamanlamayı dağıtmaktadır. **Öncelik süresi tutarlılığı açısından klasik yöntem daha güvenilirdir.**
+
 ## 6. Değerlendirme
 
 Bulgular dört maddede özetlenebilir.
@@ -135,6 +167,8 @@ Birincisi, **düzenlenmiş sınama kümesinde belirlenen eşik sürekli veriye a
 Üçüncüsü ve yöntemsel olarak en genel bulgu, **AUC ile çalışma noktasının ters sıralama verebilmesidir.** Bu veri üzerinde dört tespit ediciyi AUC ile sıralamak, işletme koşullarındaki sıralamanın tam tersini vermektedir. Bulgu bu modellere özgü bir tuhaflık değil, ölçütün tanımından çıkan bir sonuçtur.
 
 Dördüncüsü, açıklanamayan alarmların günlük döngüsü, bunların önemli bir bölümünün kataloglanmamış deprem değil kültürel gürültü olduğunu göstermektedir.
+
+Beşincisi, S dalgasından önce bildirim yapabilme yeteneği bir uzaklık koşuluna bağlıdır ve bu koşul pencere boyunun kendisinden doğmaktadır. 25 km içinde her iki model de çoğunlukla geç kalmaktadır. Bu nedenle P-dalgası kolu bir erken uyarı bileşeni olarak değil, uzaklık tabanı bulunan bir faz tespiti bileşeni olarak değerlendirilmelidir.
 
 **Sınırlılıklar açıkça belirtilmelidir.** Sonuçlar tek istasyona (MANT) dayanmaktadır; istasyonlar arası değişkenlik ölçülmemiştir ve alan yazında bu değişkenliğin makine öğrenmesi tabanlı seçicilerde arttığına dair bulgular bulunmaktadır. Ölçüm tek istasyonlu ve ilişkilendirme (association) öncesidir; işletimdeki bütün erken uyarı sistemleri yanlış alarmları birden çok istasyonun uyuşmasını şart koşarak bastırmaktadır, dolayısıyla buradaki oranlar bir ağ için üst sınırdır. Gecikme ayrıştırması yapılmamıştır; yalnızca model terimi bilinmektedir, çünkü bir tespit ancak pencerenin tamamı gözlendikten sonra bildirilebilmektedir. Son olarak sinir ağı çıkışları kalibre edilmiş olasılık değildir ve bu çalışmada kalibre edilmemiştir.
 
