@@ -1266,17 +1266,30 @@ def cmd_coincidence(args):
               f"(median {dp.median():.1f}) -- the window must cover this")
 
     # --- background at each station ---------------------------------------
-    bg = {}
+    # The guard mask is kept, not just the background scores. Declarations have
+    # to be counted on UNEXPLAINED windows only: a catalogued earthquake is
+    # detected at both stations by construction, so leaving real events in the
+    # streams makes every one of them a guaranteed coincidence and the "excess"
+    # then measures how many events the span contains rather than how much the
+    # two stations' false alarms agree. On MANT+DEMI that is 11.6 catalogued
+    # events per day at SNR>=3 against a measured 3.97 coincidences per day --
+    # enough to account for all of them.
+    bg, unexplained = {}, {}
     for side, name, tt, pp in (("a", args.station_a, ta, pa),
                                ("b", args.station_b, tb, pb)):
         args.station = name
         explained, _ = background_and_guards(tt, pp, cats[side], args, win_s)
         bg[side] = pp[~explained]
+        unexplained[side] = ~explained
 
     # --- the table ---------------------------------------------------------
     print(f"\n  Each station is thresholded to the SAME alarm budget, not the same")
     print(f"  threshold: their backgrounds differ and a shared number would not")
     print(f"  mean the same thing at both.\n")
+    print(f"  Alarm rates below count UNEXPLAINED declarations only -- windows")
+    print(f"  overlapping a catalogued event's guard are removed from both")
+    print(f"  streams first, since a real earthquake is seen at both stations by")
+    print(f"  construction and would otherwise be counted as agreement.\n")
     print(f"  {'budget/day':>11}{'thr ' + args.station_a:>12}{'thr ' + args.station_b:>12}"
           f"{'A/day':>9}{'B/day':>9}{'2of2/day':>10}{'if indep':>10}{'excess':>8}"
           f"{'recall':>9}")
@@ -1287,8 +1300,9 @@ def cmd_coincidence(args):
             continue
         thr = {s: float(np.quantile(bg[s], 1.0 - want / len(bg[s])))
                for s in ("a", "b")}
-        da_t, _ = declarations(ta, pa, thr["a"], args.cluster_seconds)
-        db_t, _ = declarations(tb, pb, thr["b"], args.cluster_seconds)
+        ua, ub = unexplained["a"], unexplained["b"]
+        da_t, _ = declarations(ta[ua], pa[ua], thr["a"], args.cluster_seconds)
+        db_t, _ = declarations(tb[ub], pb[ub], thr["b"], args.cluster_seconds)
         ok = confirmed(da_t, db_t, w)
         n_a, n_b, n_2 = len(da_t), len(db_t), int(ok.sum())
         # Independent Poisson streams of rate ra, rb coincide within +/-w at
