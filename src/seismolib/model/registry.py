@@ -259,8 +259,12 @@ ARCHITECTURES = (
             "exist. No effect under --channels 2d."),
         params=(
             Param("channels", str, "all",
-                  "Ablation switch: which branches are active.",
-                  choices=("all", "1d", "2d", "aux", "1d+aux", "2d+aux")),
+                  "Ablation switch: which branches are active. 1d+2d is both "
+                  "waveform branches with the aux vector withheld -- the only "
+                  "configuration a cascade can supply at run time, since "
+                  "log_distance needs a catalogued hypocentre a fresh detection "
+                  "does not have.",
+                  choices=("all", "1d", "2d", "aux", "1d+aux", "2d+aux", "1d+2d")),
             Param("fusion", str, "linear",
                   "linear: the paper's a*F1+b*F2 (two global scalars). gate: a "
                   "per-example gate g(x)*F1+(1-g(x))*F2. Only affects --channels all.",

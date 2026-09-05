@@ -20,7 +20,8 @@ class DualChannelTrunk(nn.Module):
     attach whatever head(s) their task needs.
 
     `channels` ablates which branches are active: "all", "1d", "2d", "aux",
-    "1d+aux", "2d+aux" (aux-only variants require `aux_dim > 0`).
+    "1d+aux", "2d+aux" (aux-only variants require `aux_dim > 0`), and "1d+2d"
+    (both waveform branches with the aux vector withheld).
     `fusion="linear"` is a*F1+b*F2 with learned scalars (the paper's
     default); `fusion="gate"` is a per-example gate (`model.blocks.GatedFusion`),
     only meaningful when both 1D and 2D are active.
@@ -41,8 +42,9 @@ class DualChannelTrunk(nn.Module):
                 fusion, and the fused output's width.
             dropout: Dropout used throughout the branches and fusion.
             channels: Which branches are active -- "all", "1d", "2d", "aux",
-                "1d+aux", or "2d+aux" (aux-only variants require
-                `aux_dim > 0`).
+                "1d+aux", "2d+aux" (aux-only variants require `aux_dim > 0`),
+                or "1d+2d" (both waveform branches, no aux -- what a cascade
+                can actually supply at run time).
             fusion: "linear" (a*F1+b*F2 with learned scalars) or "gate" (a
                 per-example gate, `model.blocks.GatedFusion`); "gate" only
                 takes effect when both 1D and 2D are active.
@@ -63,8 +65,14 @@ class DualChannelTrunk(nn.Module):
         self.channels = channels
         self.fusion = fusion
         self.aux_dim = aux_dim
-        self.use_1d = channels in ("all", "1d", "1d+aux")
-        self.use_2d = channels in ("all", "2d", "2d+aux")
+        self.use_1d = channels in ("all", "1d", "1d+aux", "1d+2d")
+        self.use_2d = channels in ("all", "2d", "2d+aux", "1d+2d")
+        # "1d+2d" is deliberately absent here: both waveform branches, no aux.
+        # It exists because a deployable cascade cannot supply the aux vector.
+        # `log_distance` is the epicentral distance to a CATALOGUED hypocentre,
+        # and a window the detector just flagged has no catalogue entry, so the
+        # one configuration an operational stage 2 needs -- everything the
+        # waveform gives and nothing it does not -- had no name.
         self.use_aux = aux_dim > 0 and channels in ("all", "aux", "1d+aux", "2d+aux")
         if not (self.use_1d or self.use_2d or self.use_aux):
             raise ValueError(f"--channels {channels} disables every branch")

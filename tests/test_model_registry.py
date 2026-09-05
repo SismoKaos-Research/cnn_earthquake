@@ -317,3 +317,42 @@ def test_magnitude_keeps_its_checkpoint_names_and_gains_the_new_flags():
     assert segment(spec_for([])) == "", "existing checkpoint names would change"
     assert segment(spec_for(["--model-branch", "cnn-lstm", "--fusion", "gate"])) \
         == "_cnn-lstm_gate"
+
+
+@pytest.mark.parametrize("channels,expect", [
+    ("all", (True, True, True)),
+    ("1d+2d", (True, True, False)),
+    ("1d", (True, False, False)),
+    ("2d", (False, True, False)),
+    ("2d+aux", (False, True, True)),
+])
+def test_channels_select_the_branches_they_name(channels, expect):
+    """`1d+2d` is the deployable one: both waveforms, no catalogue-derived aux.
+
+    `aux = (log_snr, log_distance)` and log_distance is the distance to a
+    CATALOGUED hypocentre, which a window the detector just flagged does not
+    have. Every other multi-branch value pulls that vector in, so without
+    `1d+2d` an operational stage 2 had to drop a waveform branch to drop the
+    aux -- confounding the two ablations.
+    """
+    m = ModelSpec(model="dual-channel", branch="lstm",
+                  params={"channels": channels}).build(
+        seq_dim=3, img_channels=3, aux_dim=2)
+    assert (m.use_1d, m.use_2d, m.use_aux) == expect
+    m.eval()
+    with torch.no_grad():
+        out = m(torch.randn(2, 600, 3), torch.randn(2, 3, 32, 32), torch.randn(2, 2))
+    assert tuple(out.shape) == (2, 1)
+
+
+def test_1d_2d_ignores_the_aux_vector_entirely():
+    """Not merely zeroed: the aux path must not exist, so it cannot leak."""
+    m = ModelSpec(model="dual-channel", branch="lstm",
+                  params={"channels": "1d+2d"}).build(
+        seq_dim=3, img_channels=3, aux_dim=2)
+    m.eval()
+    seq, img = torch.randn(2, 600, 3), torch.randn(2, 3, 32, 32)
+    with torch.no_grad():
+        a = m(seq, img, torch.zeros(2, 2))
+        b = m(seq, img, torch.full((2, 2), 99.0))
+    assert torch.equal(a, b), "aux changed the output of a --channels 1d+2d model"
