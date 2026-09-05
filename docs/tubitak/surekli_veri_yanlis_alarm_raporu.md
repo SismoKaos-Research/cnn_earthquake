@@ -288,42 +288,49 @@ Günde 100 yanlış alarm — yaklaşık saatte dört — kabul edilebiliyorsa k
 
 ### 4.8 Yanlış alarm oranı istasyona özgüdür
 
-Aynı model, aynı ön işleme ve aynı eşik türetme yöntemiyle iki istasyonda
+Aynı model, aynı ön işleme ve aynı eşik türetme yöntemiyle üç istasyonda
 çalıştırıldığında arka plan dağılımları örtüşmemektedir:
 
-| Yüzdelik | MANT (728,3 gün) | GCAM (172,8 gün) |
-|---|---|---|
-| p50 | **0,8019** | **0,1205** |
-| p90 | 0,8272 | 0,3594 |
-| p99 | 0,8345 | 0,7543 |
-| p99,9 | 0,8472 | 0,8377 |
-| p99,99 | 0,8931 | 0,8878 |
-| en büyük | 0,9031 | 0,9022 |
+| | MANT (728,3 gün) | DEMI (472,0 gün) | GCAM (172,8 gün) |
+|---|---|---|---|
+| p50 | **0,8019** | **0,8358** | **0,1205** |
+| p90 | 0,8272 | 0,8378 | 0,3594 |
+| p99 | 0,8345 | 0,8395 | 0,7543 |
+| p99,9 | 0,8472 | 0,8644 | 0,8377 |
+| en büyük | 0,9031 | 0,9025 | 0,9022 |
+| 0,5 üzeri parça aralığı | ~%92,7 | %93,8–99,8 | **%0,44–17,4** |
+| σ_Z (uzun dönem) | 963,4 | **2130,4** | **362,9** |
 
-Çizelge 10. 6 saniyelik modelin arka plan puan dağılımı, iki istasyon.
+Çizelge 10. 6 saniyelik modelin arka plan puan dağılımı, üç istasyon.
 
-Fark ortancada **6,7 kat**tır. MANT'ta sessiz kaydın %92,7'si 0,5 eşiğini
-aşarken GCAM'de ortanca pencere 0,12 puan almakta, yani model orada beklendiği
-gibi davranmaktadır. Parça bazında GCAM'in 0,5 üzeri oranı %0,44 ile %17,43
-arasında değişmektedir — tek bir istasyonun içinde bile 40 kat.
+**Üç istasyondan ikisinde model kullanılamaz durumdadır, birinde değildir.**
+MANT ve DEMI'de sessiz kaydın neredeyse tamamı 0,5 eşiğini aşmakta (ortanca
+0,80 ve 0,84), GCAM'de ise ortanca pencere 0,12 puan almakta, yani model orada
+beklendiği gibi davranmaktadır. Fark ortancada 6,7 kattır ve parça bazında
+GCAM'in oranı %0,44 ile %17,4 arasında değişirken diğer ikisi hiçbir parçada
+%90'ın altına inmemektedir.
 
-Bu bulgu Bölüm 4.2'deki tanıyı **ikinci bir istasyonda bağımsız olarak**
-desteklemektedir. Sorun modelin genel bir kusuru değil, istasyonun tipik
-penceresinin kendi uzun dönem σ'sına göre nerede durduğudur. İki istasyonun
-σ değerleri de bununla tutarlıdır: MANT'ta σ_Z = 963,4, GCAM'de σ_Z = 362,9.
-σ büyük genlikli ender olaylarca belirlendiğinden, σ'sı küçük olan istasyonda
-tipik gürültü kendi σ'sının daha büyük bir kesridir; yani GCAM'in arka planı
-genlik ekseninde sessizlik boşluğunun **dışında** kalmaktadır.
+Bu bulgu Bölüm 4.2'deki tanıyı iki bağımsız istasyonda desteklemektedir, ve
+sıralama σ ile **tek yönlüdür**: σ_Z 2130 olan DEMI en yüksek, 963 olan MANT
+ortada, 363 olan GCAM en düşük arka plan puanını vermektedir. Mekanizma bununla
+tutarlıdır — σ ender büyük genlikli olaylarca belirlendiğinden, σ'sı büyük olan
+istasyonda tipik pencere kendi σ'sının daha küçük bir kesridir, yani genlik
+ekseninde sessizlik boşluğunun daha derinine düşmektedir.
 
-Bunun doğrudan işletme sonucu şudur: **bir istasyonda ölçülen yanlış alarm oranı
-başka bir istasyona aktarılamaz.** Eşik, her istasyon için kendi kaydından
-türetilmek zorundadır. Bu, Bölüm 5.1'de "tek istasyon" başlığıyla açık bir
-sınırlılık olarak bırakılmış olan sorunun yanıtıdır; yanıt, değişkenliğin
-küçük olmadığıdır.
+**Bu bir tutarlılık gözlemidir, kanıt değildir.** İstasyonlar arası ham sayım
+değerleri cihaz duyarlılığına bağlıdır ve burada cihaz tepkisi giderilmemiştir;
+bağı kesinleştirmek için her istasyonun tipik pencere genliğinin kendi σ'suna
+oranının ölçülmesi gerekmektedir, ki bu ayrı bir arşiv taraması demektir.
 
-Kaydedilebilirlik açısından da iki istasyon farklıdır: GCAM'de ortanca SGO
-1,06 ve olayların yalnızca %11,7'si SGO 3'ü aşmaktadır (MANT: 1,39 ve %27).
-GCAM günde 10 alarm bütçesinde SGO≥3 olaylarının %63,9'unu bulmaktadır.
+İşletme sonucu bundan bağımsız olarak geçerlidir: **bir istasyonda ölçülen
+yanlış alarm oranı başka bir istasyona aktarılamaz.** Eşik, her istasyon için
+kendi kaydından türetilmek zorundadır. Bu, önceki sürümde "tek istasyon"
+başlığıyla açık bir sınırlılık olarak bırakılmış olan sorunun yanıtıdır; yanıt,
+değişkenliğin küçük olmadığıdır.
+
+Kaydedilebilirlik de üç istasyonda farklıdır: SGO≥3 oranı DEMI'de %45,2,
+MANT'ta %27,0, GCAM'de %11,7'dir. Günde 10 alarm bütçesinde SGO≥3 olaylarının
+bulunma oranı sırasıyla 0,528, 0,741 ve 0,639'dur.
 
 ### 4.9 Uyuşmanın kazancı istasyon uzaklığına bağlıdır
 
@@ -436,7 +443,7 @@ yoludur.
 4. Açıklanamayan alarmların günlük döngüsü, önemli bir bölümünün kültürel gürültü olduğunu göstermektedir.
 5. S dalgasından önce bildirim yeteneği, pencere boyunun dayattığı bir başabaş uzaklığa bağlıdır (~38 km ve ~24 km); 25 km içinde her iki model de çoğunlukla geç kalmaktadır.
 6. Öncelik süresi tarama sıklığıyla iyileştirilememektedir; bu bir ayar sorunu değil mimari bir sınırdır.
-7. Yanlış alarm oranı istasyona özgüdür: aynı model MANT'ta 0,80, GCAM'de 0,12 arka plan ortancası vermektedir. Eşik her istasyon için kendi kaydından türetilmelidir.
+7. Yanlış alarm oranı istasyona özgüdür: aynı model MANT'ta 0,80, DEMI'de 0,84, GCAM'de 0,12 arka plan ortancası vermektedir ve sıralama istasyonun uzun dönem σ'suyla tek yönlüdür. Eşik her istasyon için kendi kaydından türetilmelidir.
 8. İki istasyonun uyuşmasının kazancı istasyon uzaklığına bağlıdır. 63 km aralıklı çiftte yanlış alarmlar bağımsızlığın öngördüğünün 29–58 katı örtüşmekte, 144 km'de varsayım geçerli olmaktadır. Uzak çift aynı duyarlılıkta on kat daha az yanlış bildirim vermektedir (23 günde bir, 2,4 güne karşılık). Bir ağ tasarlanırken istasyonların birbirine yakınlığı bir avantaj değil, maliyettir.
 9. Bu fazlalığın bir bölümü kataloglanmamış deprem olabilir; iki istasyonun 10 saniye içinde uyuşması gerçek bir yakın depremin görünümüdür. Dolayısıyla ölçülen uyuşma oranı yanlış alarm için bir **üst sınır**, katalog eksikliği için bir alt sınırdır.
 
