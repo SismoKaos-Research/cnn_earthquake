@@ -143,6 +143,14 @@ def fig3():
     plt.close(fig)
 
 
-if __name__ == "__main__":
-    fig1(); fig2(); fig3()
+def main():
+    """Writes all three figures. Named so `sk figures` can dispatch to it."""
+    fig1()
+    fig2()
+    fig3()
     print("wrote 3 figures to", OUT)
+    return 0
+
+
+if __name__ == "__main__":
+    main()
