@@ -2,7 +2,7 @@
 # P-only (3.4 s = 2.0 s pre-P + 1.4 s post-P) detector grid.
 # Sequential, not parallel: three concurrent runs have OOM'd this 3.68 GiB card.
 set -u
-D=/home/hogib/Projects/Sismokaos/data_downloader/dataset_specdual_ponly_3p4s_hard
+D=/home/hogib/Projects/Sismokaos/seismic_cli/dataset_specdual_ponly_3p4s_hard
 S=trained_model_ponly_3p4s
 mkdir -p "$S" logs
 for arm in "1d cnn-lstm" "2d cnn-lstm"; do

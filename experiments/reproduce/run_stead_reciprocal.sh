@@ -6,7 +6,7 @@
 # Both Aegean-trained arms are scored against all four corpora/regimes, so the
 # cross-corpus drop is read next to the in-domain number rather than alone.
 set -u
-B=/home/hogib/Projects/Sismokaos/data_downloader
+B=/home/hogib/Projects/Sismokaos/seismic_cli
 SETS=(aegean_matched=$B/dataset_specdual_ponly_3p4s_matched
       aegean_natural=$B/dataset_specdual_ponly_3p4s_natural
       stead_matched=$B/dataset_specdual_stead_ponly_matched

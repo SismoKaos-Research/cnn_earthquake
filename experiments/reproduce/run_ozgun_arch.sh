@@ -24,7 +24,7 @@ if [[ -n "$WAIT_PID" ]]; then
   while kill -0 "$WAIT_PID" 2>/dev/null; do sleep 30; done
 fi
 
-DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s_baseline
+DATA=/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/dataset_specdual_6s_baseline
 SAVE=trained_model_ozgun_arch
 mkdir -p "$SAVE" logs
 

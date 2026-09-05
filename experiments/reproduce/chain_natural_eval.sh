@@ -9,7 +9,7 @@ set -u
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 until grep -q "ALL NATURAL ARMS DONE" logs/ponly_natural_all.log 2>/dev/null; do sleep 60; done
 echo "=== grid finished, scoring four regimes ==="
-B=/home/hogib/Projects/Sismokaos/data_downloader
+B=/home/hogib/Projects/Sismokaos/seismic_cli
 .venv/bin/python src/detection/negative_regime_transfer.py \
     --ckpt-dir trained_model_ponly_natural \
     --datasets matched=$B/dataset_specdual_ponly_3p4s_matched \

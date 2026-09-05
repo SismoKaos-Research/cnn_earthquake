@@ -12,7 +12,7 @@
 # All-or-nothing: FeatureWriter accumulates in memory and writes once at the end.
 # The output filename comes from the DATA-DIR basename, hence dat_q1_chaos_5hz.
 set -u
-cd /home/hogib/Projects/sismokaos-cli
+cd /home/hogib/Projects/Sismokaos/sismokaos-cli
 ./target/release/sismokaos-cli --config config_chaos_5hz.json \
     run --data-dir ./dat_q1_chaos_5hz --out-dir ./dataset_features_chaos_q1_5hz \
     --station DAT

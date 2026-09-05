@@ -15,24 +15,33 @@ import pytest
 from forecasting.chaos_dataset import RADIUS_KM, load_events
 from seismolib.catalog import STATION_COORDS, haversine_km
 
-# The sibling data repo is checked out under a different path on different
-# machines (Sismokaos/ here, sismokaos/ on the desktop, and the account name
-# differs), so an absolute path pins this suite to one box. Resolve instead, and
-# skip cleanly when the catalogue is simply not present -- these tests need real
-# catalogue data and there is nothing to assert without it.
-_CANDIDATES = [
-    pathlib.Path.home() / "Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv",
-    pathlib.Path.home() / "Projects/sismokaos/data_downloader/catalogs/catalog_current.csv",
-    pathlib.Path(__file__).resolve().parents[2] / "Sismokaos/data_downloader/catalogs/catalog_current.csv",
-    pathlib.Path(__file__).resolve().parents[2] / "sismokaos/data_downloader/catalogs/catalog_current.csv",
-]
+# The catalogue lives in a sibling checkout whose name is not stable: it has
+# been `data_downloader` and is now `seismic_cli`, under a parent that is
+# `Sismokaos` here and `sismokaos` on the box. The previous version enumerated
+# four absolute paths, which is a list that can only ever be right about renames
+# someone thought of -- the `seismic_cli` rename turned eight passing tests into
+# eight skips whose only explanation was "not found".
+#
+# So search rather than enumerate: this repo, then every sibling of it. That
+# survives a rename, and it fails only when the file is genuinely absent.
+_LEAF = pathlib.Path("catalogs") / "catalog_current.csv"
+
+
+def _search_roots():
+    """This repo, then its siblings -- the two places the catalogue has lived."""
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    yield repo
+    try:
+        yield from sorted(d for d in repo.parent.iterdir() if d.is_dir())
+    except OSError:
+        pass
 
 
 def _find_catalog():
     env = os.environ.get("SEISMO_CATALOG")
     if env:
         return pathlib.Path(env)
-    return next((p for p in _CANDIDATES if p.exists()), None)
+    return next((r / _LEAF for r in _search_roots() if (r / _LEAF).exists()), None)
 
 
 _FOUND = _find_catalog()
@@ -40,7 +49,11 @@ CATALOG = str(_FOUND) if _FOUND else None
 
 pytestmark = pytest.mark.skipif(
     CATALOG is None,
-    reason="no catalogue found; set SEISMO_CATALOG to point at catalog_current.csv",
+    # Name what was searched. A skip that says only "not found" is what made the
+    # rename take a while to spot.
+    reason=(f"no {_LEAF} under "
+            f"{pathlib.Path(__file__).resolve().parents[2]}/*; "
+            f"set SEISMO_CATALOG to point at one"),
 )
 
 

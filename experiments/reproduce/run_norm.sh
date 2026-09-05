@@ -27,7 +27,7 @@ if [[ -n "$WAIT_PID" ]]; then
   echo "ozgun re-check finished at $(date -Is); starting normalised grid"
 fi
 
-DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s
+DATA=/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/dataset_specdual_6s
 SAVE=trained_model_norm_branch1d
 mkdir -p "$SAVE" logs
 

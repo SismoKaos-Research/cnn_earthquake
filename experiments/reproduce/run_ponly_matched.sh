@@ -12,7 +12,7 @@
 #
 # Sequential, not parallel: three concurrent runs have OOM'd this 3.68 GiB card.
 set -u
-D=/home/hogib/Projects/Sismokaos/data_downloader/dataset_specdual_ponly_3p4s_matched
+D=/home/hogib/Projects/Sismokaos/seismic_cli/dataset_specdual_ponly_3p4s_matched
 S=trained_model_ponly_matched
 mkdir -p "$S" logs
 for ch in 1d 2d; do

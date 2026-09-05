@@ -15,7 +15,7 @@ set -u
 # checkout moves and a hardcoded `cd` then lands nowhere.
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s
+DATA=/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/dataset_specdual_6s
 SAVE=trained_model_norm_branch1d
 mkdir -p "$SAVE" logs
 

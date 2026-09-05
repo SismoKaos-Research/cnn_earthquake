@@ -10,7 +10,7 @@
 # two runs over same-named input directories silently overwrite each other.
 # Here: bodt_q1_chaos_5hz -> dataset_features_chaos_q1_5hz/bodt_q1_chaos_5hz_features.parquet
 set -u
-cd /home/hogib/Projects/sismokaos-cli
+cd /home/hogib/Projects/Sismokaos/sismokaos-cli
 ./target/release/sismokaos-cli --config config_chaos_5hz.json \
     run --data-dir ./bodt_q1_chaos_5hz --out-dir ./dataset_features_chaos_q1_5hz
 echo "CHAOS Q1 DONE"
