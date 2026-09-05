@@ -81,6 +81,7 @@ from sklearn.metrics import roc_auc_score
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet
+from seismolib.catalog import haversine_km as haversine
 from seismolib.checkpoints import find_checkpoints
 
 EARTH_KM = 6371.0
@@ -725,11 +726,6 @@ def cmd_scan(args):
 # report
 # ---------------------------------------------------------------------------
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def predicted_arrivals(args):

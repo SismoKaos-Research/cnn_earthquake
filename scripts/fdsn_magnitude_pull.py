@@ -50,6 +50,8 @@ from obspy import UTCDateTime
 from obspy.clients.fdsn import Client
 from obspy.taup import TauPyModel
 
+from seismolib.catalog import haversine_km as haversine
+
 warnings.filterwarnings("ignore")
 
 EARTH_KM = 6371.0
@@ -106,11 +108,6 @@ def parse_args():
     return p.parse_args()
 
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def load_inventory(url, network, start, end):

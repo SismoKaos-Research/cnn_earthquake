@@ -26,6 +26,8 @@ import pandas as pd
 from obspy import read, UTCDateTime
 from obspy.taup import TauPyModel
 
+from seismolib.catalog import haversine_km as haversine
+
 EARTH_KM = 6371.0
 NOISE_WIN = (-60.0, -10.0)   # seconds relative to predicted P
 SIGNAL_WIN = (-1.0, 12.0)    # a little before, to tolerate model error
@@ -46,11 +48,6 @@ def parse_args():
     return p.parse_args()
 
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def main():
