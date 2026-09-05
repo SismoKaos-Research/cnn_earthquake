@@ -886,10 +886,17 @@ def cmd_report(args):
     background distribution -- pick the alarm budget, read off the threshold --
     with the 0.5 row kept only to show how far off it is.
 
-    **Recall is reported against events the station actually recorded.** Only
-    11.5% of catalogued events within 500 km of MANT reach SNR 3, and the median
-    is 1.10, i.e. no signal in the raw trace. Scoring a detector on events whose
-    waveform does not exist measures the catalogue's reach, not the model's.
+    **Recall is reported against events the station actually recorded.** Over the
+    full 728-day MANT record, 27.0% of the catalogued events within 500 km with a
+    measured SNR reach SNR 3, and the median is 1.39 -- the typical catalogued
+    earthquake leaves no visible trace. Scoring a detector on events whose
+    waveform does not exist measures the catalogue's reach, not the model's: the
+    same arm scores AUC 0.675 against every event and 0.9403 against the ones
+    with signal.
+
+    (An earlier draft of this docstring quoted 11.5% and a median of 1.10. Those
+    came from the first 195 days, when both the record and the SNR table were
+    partial, and are not what the finished run says.)
     """
     files = sorted(glob.glob(args.scores))
     if not files:

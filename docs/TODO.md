@@ -110,22 +110,37 @@ and GCAM does not.
 
 ### 2.3 Continuous-data / P-wave picking
 
-**In progress 2026-09-04**, `scripts/continuous_false_alarms.py` on 747 days of
-MANT, three arms (6 s, P-only mined, P-only natural). First 195 days:
+**Done.** `scripts/continuous_false_alarms.py` on the full 728 days of MANT,
+three arms (6 s, P-only mined, P-only natural). The table below is the finished
+run; the partial numbers that stood here (from the first 195 days: 6 s AUC
+0.872, recall 0.653, "10.7% reach SNR 3", median SNR 1.09) were superseded and
+are recorded only so they are not mistaken for the current ones if they
+resurface. `docs/tubitak/surekli_veri_yanlis_alarm_raporu.md` already carries
+the finished figures.
 
 | arm | event AUC, SNR>=3 | recall @ 10 alarms/day | background median |
 |---|---|---|---|
-| 6s | 0.872 | 0.653 | **0.797** |
-| ponly | 0.938 | 0.597 | 0.429 |
-| pnat | 0.937 | 0.585 | 0.301 |
+| 6s | 0.9403 | 0.741 | **0.8019** |
+
+At the 10 alarms/day operating point the 6 s arm reaches precision 0.645,
+recall 0.741, F1 0.690 on 13,056 events with signal — 7.31 false declarations
+per day. 27.0% of the 47,522 catalogued events with a measured SNR reach SNR 3;
+the median is 1.39, so the typical catalogued earthquake still leaves no visible
+trace at MANT.
 
 Three things that only continuous data could show. The benchmark's 0.5 threshold
-is meaningless here (12,891 alarms/day for the 6 s arm) and thresholds must come
-from measured background. Scored against *every* catalogued event the AUC is
-0.53–0.62, because only 10.7% of them reach SNR 3 at MANT and the median is 1.09
-— that number measures the catalogue's reach, not the model. And the 6 s arm's
-whole background spans 0.797–0.839, so a 0.016 seasonal drift would move its
-alarm rate by an order of magnitude; §2.6 is the response to why.
+is meaningless here (12,599 alarms/day for the 6 s arm, flagging 92.7% of quiet
+record) and thresholds must come from measured background. Scored against
+*every* catalogued event the AUC is 0.675 rather than 0.9403 — that gap measures
+the catalogue's reach, not the model. And the 6 s arm's whole background spans
+0.8019–0.9031, so a small seasonal drift would move its alarm rate by an order
+of magnitude; §2.6 is the response to why.
+
+Recall falls with magnitude above M2.5 (0.844 at M2.0–2.5 down to 0.599 above
+M4.0) and that is distance, not size: the median distance of the M>4 band is
+316 km against 88 km at M2.0–2.5. Worth stating explicitly in any write-up,
+since a naive reading of the band table says the detector is worse at large
+earthquakes.
 
 Partially addressed earlier by the GPD baseline work
 ([`experiment_gpd_baseline_2026-08-27.md`](experiment_gpd_baseline_2026-08-27.md)),
