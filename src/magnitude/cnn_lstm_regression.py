@@ -59,6 +59,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.runlog import RunLog
 from magnitude.cnn_regression import (AUX_COLUMNS, detect_aux_columns,
                                       regression_metrics, report_baselines)
@@ -289,16 +290,16 @@ def parse_args():
     p.add_argument("--dataset-dir", required=True,
                   help="Directory from `seismic-cli generate-regression-dataset --dual`.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_regression")
-    p.add_argument("--channels", default="all",
-                  choices=["all", "1d", "2d", "aux", "1d+aux", "2d+aux"],
-                  help="Ablation switch: which branches to enable.")
+    # The regressor's own flags were --channels/--hidden/--fusion-dim/--dropout,
+    # and its defaults are the architecture's, so nothing here moves. What it
+    # gains is --fusion and --model-branch: DualChannelNet has had a gated
+    # fusion and a convolutional 1D front end all along, and only the detection
+    # scripts ever exposed them. Magnitude has never been tried with either.
+    add_model_args(p, family="dual")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-2)
-    p.add_argument("--hidden", type=int, default=64)
-    p.add_argument("--fusion-dim", type=int, default=128)
-    p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--patience", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-workers", type=int, default=2)
@@ -373,6 +374,7 @@ def main():
     # Provenance is opened BEFORE training, so a run that dies mid-epoch still
     # leaves a record of what was attempted rather than none at all.
     runlog = RunLog(f"magnitude/cnn_lstm_regression", args.save_dir, vars(args))
+    runlog.note(model=spec_from_args(args).to_dict())
 
     parts = {}
     for split in ("train", "val", "test"):
@@ -436,9 +438,13 @@ def main():
     print("=" * 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DualChannelRegressionNet(sample_seq.shape[-1], sample_img.shape[0], sample_aux.numel(),
-                                     hidden=args.hidden, fusion_dim=args.fusion_dim,
-                                     dropout=args.dropout, channels=args.channels).to(device)
+    # Registry-built rather than by class name, so --model-branch/--fusion reach
+    # the model and the resolved spec can be written beside the weights.
+    # DualChannelRegressionNet stays defined above: cascade_eval.py rebuilds it
+    # by name to load these checkpoints, and it is the same network.
+    spec = spec_from_args(args)
+    model = spec.build(seq_dim=sample_seq.shape[-1], img_channels=sample_img.shape[0],
+                       aux_dim=sample_aux.numel(), squeeze_output=True).to(device)
     print(f"Device: {device} | parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
@@ -451,13 +457,20 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
+    spec.save(args.save_dir)
     # The checkpoint name must identify the RUN, not just the task. A fixed
     # filename means two runs sharing --save-dir overwrite each other, and the
     # second silently reloads the first's weights at the end of training. That
     # exact bug produced -- and forced the retraction of -- an ensemble AUC of
     # 0.9108 on the detection side (report.md 8.1). Config, split, seed and PID
     # together make collision impossible even for two identical commands.
-    run_tag = (f"{args.channels}_{args.split_by}_seed{args.seed}"
+    # New segments are appended only when they are not the architecture's
+    # default, so every checkpoint written before --fusion and --model-branch
+    # reached this script keeps the name it has. seismolib/checkpoints.py
+    # records what happened the last time a tag grew for everyone at once.
+    arch_tag = "".join(f"_{v}" for v in (spec.branch, spec.params["fusion"])
+                       if v not in ("lstm", "linear"))
+    run_tag = (f"{args.channels}{arch_tag}_{args.split_by}_seed{args.seed}"
                f"_split{args.seed_split}_pid{os.getpid()}")
     save_path = os.path.join(args.save_dir, f"best_cnnlstm_regression_{run_tag}.pth")
     best_val_mae, no_improve = float("inf"), 0

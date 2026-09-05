@@ -87,6 +87,7 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.runlog import RunLog
 from seismolib.metrics import (binary_report, majority_class_baseline,
                                print_report, safe_auc)
@@ -268,16 +269,12 @@ def parse_args():
                         "`generate-dual-dataset` (legacy RAM images). The 2D "
                         "representation is decided here, not by any flag.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_classify")
-    p.add_argument("--channels", default="all", choices=["all", "1d", "2d"],
-                   help="Ablation switch: 'all' is the full dual-channel model, "
-                        "'1d' is LSTM+attention only, '2d' is CNN-only (close to "
-                        "the existing image-only classifier's architecture).")
-    p.add_argument("--fusion", default="linear", choices=["linear", "gate"],
-                   help="linear: paper's a*F1+b*F2 (two global scalars). gate: "
-                        "per-example gate g(x)*F1+(1-g(x))*F2 (report.md 10.5.1/10.5.2 "
-                        "-- linear fusion underperformed the best single branch on "
-                        "both RAM and spectrogram 2D representations). Only affects "
-                        "--channels all.")
+    # The 1d+aux/2d+aux channel values are withheld: this dataset carries no
+    # auxiliary scalars, so they would build the 1d/2d network under another
+    # name and put that name in the checkpoint filename.
+    add_model_args(p, family="dual",
+                   defaults={"hidden": 48, "fusion_dim": 96, "dropout": 0.4},
+                   restrict={"channels": ("all", "1d", "2d")})
     p.add_argument("--seq-transform", default="none", choices=["none", "asinh"],
                    help="Amplitude handling for the 1D waveform channel. none: raw "
                         "station-sigma multiples, as every existing result used. "
@@ -287,22 +284,10 @@ def parse_args():
                         "reaches 3.6e5 where fp16 stops at 65504, and a single "
                         "overflowing window makes the whole run NaN. No effect on "
                         "--channels 2d, which never reads seq.")
-    p.add_argument("--branch-1d", default="lstm", choices=["lstm", "cnn", "cnn-lstm"],
-                   help="Architecture of the 1D (raw-waveform) branch. lstm: the "
-                        "existing LSTM+attention over raw 100Hz samples, which every "
-                        "published result here used. cnn-lstm: a strided 1D conv "
-                        "encoder first, then that same LSTM+attention -- the order "
-                        "EQTransformer and PhaseNet use, and the thing the 1D branch "
-                        "has never been given. cnn: conv encoder only, to isolate "
-                        "whether the recurrence adds anything once local features "
-                        "exist. No effect under --channels 2d.")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=3e-2)
-    p.add_argument("--hidden", type=int, default=48)
-    p.add_argument("--fusion-dim", type=int, default=96)
-    p.add_argument("--dropout", type=float, default=0.4)
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--seed", type=int, default=42,
                    help="Single-seed shorthand. Ignored if --ensemble-seeds or "
@@ -367,10 +352,13 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
         from the best-val-AUC epoch's weights.
     """
     seed_everything(seed)
-    model = DualChannelBinaryNet(seq_shape[-1], img_shape[0], hidden=args.hidden,
-                                 fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                 channels=args.channels, fusion=args.fusion,
-                                 branch1d=args.branch_1d).to(device)
+    # Built through the registry rather than by naming the subclass: the two are
+    # state-dict-identical (tests/test_model_registry.py asserts it against this
+    # very class), and going through the spec is what lets the resolved
+    # architecture be written next to the checkpoints instead of retyped at
+    # every evaluation.
+    spec = spec_from_args(args)
+    model = spec.build(seq_dim=seq_shape[-1], img_channels=img_shape[0]).to(device)
     n_params = sum(p.numel() for p in model.parameters())
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
@@ -384,6 +372,7 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
+    spec.save(args.save_dir)
     # The checkpoint name must identify the RUN, not just the seed. Seed alone was
     # not enough: two runs launched concurrently with the same seeds wrote the same
     # files, and each then reloaded the other's weights at the end of training.
@@ -397,7 +386,7 @@ def train_one_seed(args, seed, train_ds, val_ds, test_ds, seq_shape, img_shape, 
     # tag rather than sweeping a directory -- `cascade_eval.find_checkpoints`
     # groups by it and refuses a save dir holding more than one run -- so the
     # tag is load-bearing, not decoration.
-    run_tag = (f"{args.channels}_{args.fusion}_{args.branch_1d}_{args.seq_transform}"
+    run_tag = (f"{args.channels}_{args.fusion}_{spec.branch}_{args.seq_transform}"
                f"_{os.path.basename(os.path.normpath(args.dataset_dir))}_pid{os.getpid()}")
     save_path = os.path.join(args.save_dir,
                              f"best_cnnlstm_classify_{run_tag}_seed{seed}.pth")
@@ -557,6 +546,7 @@ def main():
     # was attempting -- the seed list especially, which is otherwise only
     # recoverable from checkpoint filenames.
     runlog = RunLog("detection/cnn_lstm_classify", args.save_dir, vars(args))
+    runlog.note(model=spec_from_args(args).to_dict())
     runlog.note(seeds=seeds, n_train=len(train_ds), n_val=len(val_ds),
                 n_test=len(test_ds), seq_shape=list(seq_shape),
                 img_shape=list(img_shape))

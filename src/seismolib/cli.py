@@ -49,6 +49,7 @@ COMMANDS = {
     "magprofile": ("magnitude_error_profile.py", "where a magnitude regressor's error lives"),
     # what is going on
     "status":     ("status.py", "what is running, how far along, and did the last run work"),
+    "models":     ("models.py", "the model registry: architectures, branches, flags"),
     # reporting
     "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
     "figures":    ("make_report_figures.py", "report figures"),
@@ -60,7 +61,7 @@ GROUPS = [
     ("windows", ["cut-events", "cut-length"]),
     ("evaluate", ["falsealarm", "magprofile"]),
     ("report", ["docx", "figures"]),
-    ("inspect", ["status"]),
+    ("inspect", ["status", "models"]),
 ]
 
 
