@@ -97,6 +97,12 @@ def parse_args():
     f.add_argument("--requests", required=True)
     f.add_argument("--url", default=KOERI)
     f.add_argument("--out-dir", required=True)
+    f.add_argument("--miss-log", default="fdsn_misses.txt",
+                   help="rows the archive returned nothing for. Skipped on the "
+                        "next run so a resume does not re-walk them.")
+    f.add_argument("--retry-misses", action="store_true",
+                   help="attempt the rows in --miss-log again, for when they "
+                        "failed because the archive was down rather than empty")
     f.add_argument("--batch", type=int, default=40,
                    help="windows per bulk call. Larger is faster but a single "
                         "bad row fails the whole call, so this trades speed "
@@ -220,12 +226,33 @@ def cmd_fetch(args):
     out.mkdir(parents=True, exist_ok=True)
     client = Client(args.url, timeout=300)
 
-    todo = []
+    # Rows the archive has already said it has nothing for. Without this the
+    # todo list is rebuilt in CSV ORDER on every restart, so a resumed fetch
+    # re-attempts every previous miss before reaching any new work: after one
+    # interrupted run that was ~8,500 rows and 2.6 hours of requests that
+    # cannot succeed. A miss is usually permanent -- KO.GELI in 2013 carries
+    # BH? at 50 Hz and no HH? at all, so this plan's channel set can never
+    # match it -- but --retry-misses exists for the case where the archive was
+    # simply down when they were tried.
+    misses = set()
+    miss_log = pathlib.Path(args.miss_log) if args.miss_log else None
+    if miss_log and miss_log.exists() and not args.retry_misses:
+        misses = {ln.strip() for ln in miss_log.read_text().splitlines() if ln.strip()}
+
+    todo, skipped = [], 0
     for r in req.itertuples():
         dest = out / f"event_{r.event_id}_{r.station}_raw.mseed"
-        if not dest.exists():
-            todo.append((r, dest))
-    print(f"[fetch] {len(todo):,} to fetch, {len(req) - len(todo):,} already present")
+        if dest.exists():
+            continue
+        if dest.name in misses:
+            skipped += 1
+            continue
+        todo.append((r, dest))
+    print(f"[fetch] {len(todo):,} to fetch, "
+          f"{len(req) - len(todo) - skipped:,} already present, "
+          f"{skipped:,} known-empty skipped"
+          + (" (--retry-misses to try them again)" if skipped else ""))
+    miss_fh = open(miss_log, "a") if miss_log else None
 
     got = miss = 0
     t0 = time.time()
@@ -256,6 +283,8 @@ def cmd_fetch(args):
                                                UTCDateTime(r.start), UTCDateTime(r.end))
                 except Exception:
                     miss += 1
+                    if miss_fh:
+                        miss_fh.write(dest.name + "\n"); miss_fh.flush()
                     continue
             sel = sel.copy()
             sel.merge(method=1, fill_value=None)
@@ -269,6 +298,8 @@ def cmd_fetch(args):
                     keep.append(cand[0])
             if len(keep) < 3:
                 miss += 1
+                if miss_fh:
+                    miss_fh.write(dest.name + "\n"); miss_fh.flush()
                 continue
             from obspy import Stream
             Stream(keep).write(str(dest), format="MSEED")
