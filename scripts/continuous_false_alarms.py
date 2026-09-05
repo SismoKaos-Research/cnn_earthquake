@@ -1211,7 +1211,8 @@ def cmd_coincidence(args):
     print(f"{'=' * 78}\nTWO-STATION COINCIDENCE  --  {args.station_a} + "
           f"{args.station_b}  ({win_s:g}s windows)\n{'=' * 78}")
     print(f"  separation {sep:.0f} km -> coincidence window +/-{w:.1f} s "
-          f"({'default: separation / Vp ' + format(args.vp, 'g') if args.coincidence_seconds is None else 'given'})")
+          f"({'default: separation / Vp ' + format(args.vp, 'g') if args.coincidence_seconds is None else 'given'})",
+          flush=True)
 
     # --- the span both stations recorded ----------------------------------
     spans = intersect_spans(coverage_spans(ta_all, step), coverage_spans(tb_all, step))
@@ -1231,7 +1232,12 @@ def cmd_coincidence(args):
                               (args.station_b, tb, args.snr_csv_b)):
         args.station = name
         cat, _ = predicted_arrivals(args)
-        cat = cat[[any(lo <= x <= hi for lo, hi in spans) for x in cat.p_epoch]].copy()
+        # `in_spans`, not a comprehension over `spans`: a gap-split archive has
+        # tens of thousands of them (MANT's pnat scores have 43,215), and one
+        # Python-level pass per event over all of them is hours rather than
+        # seconds. p_epoch is sorted, which is what lets the searchsorted
+        # version be used here.
+        cat = cat[in_spans(cat.p_epoch.values, spans)].copy()
         if snr_csv:
             cat = cat.merge(pd.read_csv(snr_csv)[["event_id", "snr"]],
                             left_on="EventID", right_on="event_id", how="left")

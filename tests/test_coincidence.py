@@ -154,3 +154,20 @@ def test_the_two_formulas_agree_in_the_regime_that_matters():
     correct = 1.0 - np.exp(-rb * 2 * w)
     pairs = rb * 2 * w
     assert abs(pairs - correct) / correct < 0.005
+
+
+def test_in_spans_handles_a_gap_split_archive_quickly():
+    """The span list is not small: MANT's 3.4 s scores split into 43,215.
+
+    A per-event Python pass over all of them is hours, which is what the first
+    version of the catalogue filter did. This pins the vectorised path by size
+    rather than by clock, so it fails on a machine of any speed if the
+    quadratic version comes back.
+    """
+    n_spans = 40_000
+    spans = [(float(i * 100), float(i * 100 + 50)) for i in range(n_spans)]
+    t = np.arange(0.0, n_spans * 100.0, 250.0)
+    m = cfa.in_spans(t, spans)
+    # every t is either inside its span's first 50 s or in the gap after it
+    expected = ((t % 100.0) <= 50.0)
+    assert np.array_equal(m, expected)

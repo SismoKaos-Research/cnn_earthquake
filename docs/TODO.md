@@ -24,8 +24,36 @@ at 2024-12-18 and nothing but the requests themselves revealed that.
 
 **My recommendation: probe uptime before committing.** A handful of
 single-day requests spread across a candidate's span costs ~6 links and
-answers in one afternoon what GCAM took a full campaign to tell us. The
-stations worth probing are CGC and MTOP, the coincidence pair from §2.2.
+answers in one afternoon what GCAM took a full campaign to tell us.
+
+**Probed 2026-09-05. Both probes are done and the answer is encouraging.**
+
+*Station availability* (`scr.jsonl`, one day each at 2025-06-01): INCE, KZIL,
+PASA and UZP all returned data — four viable candidates for 117 MB of probe
+traffic. **BAKC and IRLI are not in the TDVMS station list at all**, which is a
+result in itself: the station catalogue this repo plans from contains stations
+TDVMS will not serve, so any plan built from it should be checked against
+`_device_code` before the requests are spent.
+
+*Archive depth at MANT* (`depth.jsonl`, one day per year): data returned for
+2012, 2019, 2021 and 2023; 2016-06-01 came back "no waveform at source".
+**MANT's archive reaches back to at least 2012**, roughly ten years earlier
+than the campaign has used, with at least one interior gap. That changes the
+scale of what a MANT campaign could pull, and is worth weighing before spending
+requests on a fourth station.
+
+Two bugs surfaced during the probes, both fixed:
+
+- Two pollers watching one mailbox ran the same `(UNSEEN FROM ...)` search and
+  each consumed the other's links. The station poller took `+dep3` and `+dep5`
+  and burned them as permanent failures while `depth.jsonl` waited for mail
+  that no longer existed. A poller now leaves mail addressed to a slot its own
+  ledger never submitted from unread.
+- `next` wrote its claim before looking the station's device code up, so an
+  unlistable station left the row `claimed` forever, holding a queue slot
+  against a request never made. That is what BAKC and IRLI actually did for
+  most of an afternoon, looking exactly like lost mail. The claim is now
+  released and the row retired.
 
 ---
 
@@ -55,6 +83,30 @@ MANT's unbroken 2024-05-01..2025-08-06 run, and the two stations are ~130 km
 apart, so there is now a genuine two-station **continuous** window to test
 coincidence on — no longer a subset of cut event windows. That is the setup
 §2.3's scan was built for, and it reuses the same scores.
+
+**In progress 2026-09-05.** GCAM is being scanned with the same three arms as
+MANT (`scores_gcam/`), which was the missing input — MANT had 36 chunks scored
+and GCAM had none. `sk falsealarm coincidence` then prices the rule.
+
+**The 1.78% → 0.03% figure above assumes the two stations' false alarms are
+independent, and that is the thing to measure rather than assume.** Two
+stations 130 km apart share weather, share the regional noise field, and share
+whatever drives the 1.7–2.1× day/night ratio §2.3 found. The tool therefore
+reports the measured 2-of-2 rate beside what two independent streams of the
+same rates would produce, and their ratio; the ratio is the result, and the
+reduction on its own is arithmetic.
+
+Two constraints it enforces, because every mistake available here removes false
+alarms faster than the method does. Only the span **both** stations recorded is
+scored — GCAM stops at 2024-12-18, and counting MANT alarms after that as
+suppressed would read as a near-total reduction and be nothing but missing
+data. And recall is asked only of events reaching SNR at both stations, since
+no network rule can confirm an event one station never recorded.
+
+First numbers from the scan already say the two stations are not
+interchangeable: on GCAM the 6 s arm puts **10.55%** of windows over 0.5,
+against MANT's 92.7%. Whatever amplitude hole §2.6 describes, MANT sits in it
+and GCAM does not.
 
 ### 2.3 Continuous-data / P-wave picking
 
