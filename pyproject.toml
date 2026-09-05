@@ -19,6 +19,11 @@ packages = [
     "src/features",
 ]
 
+[project.scripts]
+# One front door for scripts/. Dispatches by path rather than importing them as
+# a package, because afad_imap spawns afad_campaign as a subprocess by path.
+sk = "seismolib.cli:main"
+
 [project]
 name = "model-cnn-lstm"
 version = "0.1.0"
