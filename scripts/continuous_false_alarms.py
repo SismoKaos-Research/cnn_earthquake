@@ -74,13 +74,13 @@ import numpy as np
 import pandas as pd
 import torch
 from obspy import read, UTCDateTime
-from obspy.taup import TauPyModel
 from scipy import signal
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet
+from seismolib.arrivals import ArrivalTimes, P_PHASES, S_PHASES
 from seismolib.catalog import haversine_km as haversine
 from seismolib.checkpoints import find_checkpoints
 
@@ -741,27 +741,12 @@ def predicted_arrivals(args):
     cat["dist"] = haversine(slat, slon, cat.Latitude.values, cat.Longitude.values)
     cat = cat[cat.dist <= args.max_distance].copy()
 
-    model = TauPyModel(model="iasp91")
-    cache = {}
+    taup = ArrivalTimes(grid_km=5.0)
 
     def travel(dist_km, depth_km, phases):
-        # Travel time depends mostly on distance and depth; caching on a coarse
-        # grid avoids one taup call per event without materially moving either
-        # arrival. The S phase is wanted as well as P: the question "did the
-        # detector fire before S got here" cannot be asked without it.
-        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0), phases)
-        if key not in cache:
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 5.0,
-                                             distance_in_degree=key[0] * 5.0 / 111.195,
-                                             phase_list=list(phases))
-                cache[key] = arr[0].time if arr else None
-            except Exception:
-                cache[key] = None
-        return cache[key]
+        return taup.travel(dist_km, depth_km, phases)
 
-    P = ("p", "P", "Pn", "Pg")
-    S = ("s", "S", "Sn", "Sg")
+    P, S = P_PHASES, S_PHASES
     depth = [d if pd.notna(d) else 10.0 for d in cat.Depth.values]
     cat["tt_p"] = [travel(d, z, P) for d, z in zip(cat.dist.values, depth)]
     cat["tt_s"] = [travel(d, z, S) for d, z in zip(cat.dist.values, depth)]

@@ -48,8 +48,8 @@ import numpy as np
 import pandas as pd
 from obspy import UTCDateTime
 from obspy.clients.fdsn import Client
-from obspy.taup import TauPyModel
 
+from seismolib.arrivals import ArrivalTimes
 from seismolib.catalog import haversine_km as haversine
 
 warnings.filterwarnings("ignore")
@@ -150,20 +150,12 @@ def cmd_plan(args):
     cat = pd.concat(kept).sort_values("t").reset_index(drop=True)
     print(f"[plan] {len(cat):,} events after capping each 0.5-band at {args.per_band}")
 
-    model = TauPyModel(model="iasp91")
-    tt_cache = {}
+    # 10 km grid, the resolution this planner was written with; see
+    # seismolib.arrivals for why it is stated rather than defaulted.
+    taup = ArrivalTimes(grid_km=10.0)
 
     def p_travel(dist_km, depth_km):
-        key = (round(dist_km / 10.0), round(max(depth_km, 0.0) / 10.0))
-        if key not in tt_cache:
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 10.0,
-                                             distance_in_degree=key[0] * 10.0 / 111.195,
-                                             phase_list=["p", "P", "Pn", "Pg"])
-                tt_cache[key] = arr[0].time if arr else None
-            except Exception:
-                tt_cache[key] = None
-        return tt_cache[key]
+        return taup.travel(dist_km, depth_km)
 
     slat, slon = inv.lat.to_numpy(), inv.lon.to_numpy()
     s_start, s_end = inv.start.to_numpy(), inv.end.to_numpy()

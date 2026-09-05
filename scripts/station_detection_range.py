@@ -24,8 +24,8 @@ import zipfile
 import numpy as np
 import pandas as pd
 from obspy import read, UTCDateTime
-from obspy.taup import TauPyModel
 
+from seismolib.arrivals import ArrivalTimes
 from seismolib.catalog import haversine_km as haversine
 
 EARTH_KM = 6371.0
@@ -63,23 +63,10 @@ def main():
     cat["dist"] = haversine(slat, slon, cat.Latitude.values, cat.Longitude.values)
     cat = cat[(cat.dist <= args.max_distance) & (cat.Magnitude >= args.min_magnitude)]
 
-    model = TauPyModel(model="iasp91")
-    # Travel time depends mostly on distance and depth; caching on a coarse grid
-    # avoids ~7,000 taup calls without materially changing the arrival estimate.
-    tt_cache = {}
+    taup = ArrivalTimes(grid_km=5.0)
 
     def p_travel(dist_km, depth_km):
-        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0))
-        if key not in tt_cache:
-            deg = key[0] * 5.0 / 111.195
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 5.0,
-                                             distance_in_degree=deg,
-                                             phase_list=["p", "P", "Pn", "Pg"])
-                tt_cache[key] = arr[0].time if arr else None
-            except Exception:
-                tt_cache[key] = None
-        return tt_cache[key]
+        return taup.travel(dist_km, depth_km)
 
     rows = []
     for z in sorted(glob.glob(args.zips)):
