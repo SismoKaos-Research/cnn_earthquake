@@ -47,6 +47,8 @@ COMMANDS = {
     # evaluation
     "falsealarm": ("continuous_false_alarms.py", "false-alarm rate on continuous data"),
     "magprofile": ("magnitude_error_profile.py", "where a magnitude regressor's error lives"),
+    # training
+    "train":      ("train.py", "train a model against one of this repo's labels"),
     # what is going on
     "status":     ("status.py", "what is running, how far along, and did the last run work"),
     "models":     ("models.py", "the model registry: architectures, branches, flags"),
@@ -59,6 +61,7 @@ GROUPS = [
     ("acquire", ["campaign", "poll", "fdsn", "plan-pull", "catalog"]),
     ("stations", ["station-select", "station-range", "station-loss"]),
     ("windows", ["cut-events", "cut-length"]),
+    ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
     ("report", ["docx", "figures"]),
     ("inspect", ["status", "models"]),

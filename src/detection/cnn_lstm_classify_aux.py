@@ -46,6 +46,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from seismolib.metrics import majority_class_baseline
 from seismolib.model.dual_channel import DualChannelNet
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.training import seed_everything
 
 AUX_FEATURES = ["log_snr", "log_rms"]
@@ -195,24 +196,15 @@ def parse_args():
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-dual-aux-dataset`.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_aux")
-    p.add_argument("--channels", default="all", choices=CHANNEL_CHOICES)
-    p.add_argument("--fusion", default="linear", choices=["linear", "gate"],
-                   help="linear: paper's a*F1+b*F2. gate: per-example gate "
-                        "(cnn_lstm.GatedFusion). Only affects channel combos where "
-                        "both 1D and 2D are active (all, not 1d+aux/2d+aux).")
+    # Unlike `detect`, this dataset does carry auxiliary scalars, so the aux
+    # channel values are offered here. --model-branch is new: the convolutional
+    # 1D front end existed in the trunk and only cnn_lstm_classify exposed it.
+    add_model_args(p, family="dual", restrict={"channels": tuple(CHANNEL_CHOICES)},
+                   defaults={"hidden": 48, "fusion_dim": 96, "dropout": 0.4})
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=3e-2)
-    p.add_argument("--hidden", type=int, default=48)
-    p.add_argument("--lstm-layers", type=int, default=1,
-                   help="LSTMAttentionBranch's LSTM depth. Never swept before this run.")
-    p.add_argument("--lstm-heads", type=int, default=4,
-                   help="LSTMAttentionBranch's MultiheadAttention head count. Must divide "
-                        "2*hidden (the bidirectional LSTM's output width). Never swept before "
-                        "this run.")
-    p.add_argument("--fusion-dim", type=int, default=96)
-    p.add_argument("--dropout", type=float, default=0.4)
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-workers", type=int, default=4)
@@ -245,10 +237,9 @@ def main():
     print("=" * 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DualChannelAuxBinaryNet(seq_shape[-1], img_shape[0], aux_shape[-1], hidden=args.hidden,
-                                    fusion_dim=args.fusion_dim, dropout=args.dropout,
-                                    channels=args.channels, fusion=args.fusion,
-                                    lstm_layers=args.lstm_layers, lstm_heads=args.lstm_heads).to(device)
+    spec = spec_from_args(args)
+    model = spec.build(seq_dim=seq_shape[-1], img_channels=img_shape[0],
+                       aux_dim=aux_shape[-1], n_classes=1).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Device: {device} | parameters: {n_params:,} | train samples: {len(train_ds)} "
           f"({n_params / max(1, len(train_ds)):.1f} params/sample)")

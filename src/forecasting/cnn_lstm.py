@@ -53,6 +53,7 @@ from seismolib.metrics import multiclass_report, print_report
 from seismolib.model.blocks import \
     LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
 from seismolib.model.dual_channel import DualChannelNet
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.training import seed_everything
 
 RISK_CLASSES = ["lt_1y", "1_5y", "gt_5y"]
@@ -257,16 +258,11 @@ def parse_args():
     p.add_argument("--dataset-dir", required=True,
                    help="Directory from `seismic-cli generate-catalog-dataset`.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm")
-    p.add_argument("--channels", default="all",
-                   choices=["all", "1d", "2d", "aux", "1d+aux", "2d+aux"],
-                   help="Ablation switch: which branches to enable.")
+    add_model_args(p, family="dual")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-2)
-    p.add_argument("--hidden", type=int, default=64)
-    p.add_argument("--fusion-dim", type=int, default=128)
-    p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--patience", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-workers", type=int, default=2)
@@ -300,9 +296,10 @@ def main():
     print("=" * 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DualChannelRiskNet(train_ds.seq_dim, train_ds.img_shape[0], train_ds.aux_dim,
-                               hidden=args.hidden, fusion_dim=args.fusion_dim,
-                               dropout=args.dropout, channels=args.channels).to(device)
+    spec = spec_from_args(args)
+    model = spec.build(seq_dim=train_ds.seq_dim, img_channels=train_ds.img_shape[0],
+                       aux_dim=train_ds.aux_dim,
+                       n_classes=len(RISK_CLASSES)).to(device)
     print(f"Device: {device} | parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,
