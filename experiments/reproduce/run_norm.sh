@@ -16,7 +16,9 @@
 # This dataset scanned CLEAN for fp16 (max 21.6), so asinh is a no-op here --
 # passed only to keep the pipeline identical to every other arm.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 WAIT_PID=${1:-}
 if [[ -n "$WAIT_PID" ]]; then

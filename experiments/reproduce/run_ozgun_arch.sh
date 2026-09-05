@@ -14,7 +14,9 @@
 # Sequential: 1d arms are small but the GPU is 3.68 GiB and norm_2d may still
 # be finishing when this starts.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 WAIT_PID=${1:-}
 if [[ -n "$WAIT_PID" ]]; then

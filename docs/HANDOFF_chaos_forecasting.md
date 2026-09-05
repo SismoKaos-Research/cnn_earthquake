@@ -303,7 +303,7 @@ strings target/release/sismokaos-cli | grep -c Z_CORR_DIM     # -> >= 1
 cargo run --release --example chaos_bench                     # per-function timing
 
 # Label design reproduces
-cd ~/Projects/model_cnn_lstm
+cd ~/Projects/Sismokaos/cnn_earthquake
 python3 src/forecasting/label_sweep.py --catalog <path-to-catalogue>
 # -> M>=2.5/400km/6h should show 232 events, pos_rate 0.253, floor 0.5426
 

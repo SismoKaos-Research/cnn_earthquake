@@ -4,7 +4,9 @@
 # command-line substring also matches the watcher itself, which has stalled
 # three chains today.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 until grep -q "ALL NATURAL ARMS DONE" logs/ponly_natural_all.log 2>/dev/null; do sleep 60; done
 echo "=== grid finished, scoring four regimes ==="
 B=/home/hogib/Projects/Sismokaos/data_downloader

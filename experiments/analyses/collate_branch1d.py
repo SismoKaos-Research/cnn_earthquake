@@ -8,7 +8,10 @@ import re
 import sys
 from pathlib import Path
 
-LOGS = Path("/home/hogib/Projects/model_cnn_lstm/logs")
+# Resolved from this file, not from where the repo happens to live: the
+# checkout moves (Projects/model_cnn_lstm -> Projects/Sismokaos/cnn_earthquake)
+# and an absolute path silently reads an old tree or none at all.
+LOGS = Path(__file__).resolve().parents[2] / "logs"
 VARIANTS = ["lstm", "cnn-lstm", "cnn"]
 
 PAT = {

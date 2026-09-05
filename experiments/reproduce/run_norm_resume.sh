@@ -11,7 +11,9 @@
 # Sequential: three concurrent --channels all runs OOMed this 3.68 GiB card.
 # cnn and cnn-lstm are already complete (0.9146 and 0.9309) and are NOT rerun.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s
 SAVE=trained_model_norm_branch1d
