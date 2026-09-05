@@ -47,6 +47,8 @@ COMMANDS = {
     # evaluation
     "falsealarm": ("continuous_false_alarms.py", "false-alarm rate on continuous data"),
     "magprofile": ("magnitude_error_profile.py", "where a magnitude regressor's error lives"),
+    # what is going on
+    "status":     ("status.py", "what is running, how far along, and did the last run work"),
     # reporting
     "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
     "figures":    ("make_report_figures.py", "report figures"),
@@ -58,6 +60,7 @@ GROUPS = [
     ("windows", ["cut-events", "cut-length"]),
     ("evaluate", ["falsealarm", "magprofile"]),
     ("report", ["docx", "figures"]),
+    ("inspect", ["status"]),
 ]
 
 
