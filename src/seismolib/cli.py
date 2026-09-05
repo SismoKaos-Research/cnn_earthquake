@@ -35,6 +35,7 @@ COMMANDS = {
     "campaign":   ("afad_campaign.py", "TDVMS ledger: plan, submit, paste, status, mark, reset"),
     "poll":       ("afad_imap.py", "watch the mailbox, fetch links, refill freed queue slots"),
     "fdsn":       ("fdsn_magnitude_pull.py", "plan/fetch event windows from KOERI FDSN (KO network)"),
+    "fdsn-noise": ("plan_fdsn_noise.py", "plan noise windows for the stations an FDSN pull returned"),
     "plan-pull":  ("plan_pbefores_pull.py", "plan a TDVMS pull that can report before S"),
     "catalog":    ("fetch_afad_catalog.py", "rebuild the event catalogue from AFAD's API"),
     # stations
@@ -59,7 +60,7 @@ COMMANDS = {
 }
 
 GROUPS = [
-    ("acquire", ["campaign", "poll", "fdsn", "plan-pull", "catalog"]),
+    ("acquire", ["campaign", "poll", "fdsn", "fdsn-noise", "plan-pull", "catalog"]),
     ("stations", ["station-select", "station-range", "station-loss"]),
     ("windows", ["cut-events", "cut-length"]),
     ("train", ["train"]),

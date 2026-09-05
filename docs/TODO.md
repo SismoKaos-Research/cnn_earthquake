@@ -134,7 +134,7 @@ record) and thresholds must come from measured background. Scored against
 *every* catalogued event the AUC is 0.675 rather than 0.9403 — that gap measures
 the catalogue's reach, not the model. And the 6 s arm's whole background spans
 0.8019–0.9031, so a small seasonal drift would move its alarm rate by an order
-of magnitude; §2.6 is the response to why.
+of magnitude; §2.7 is the response to why.
 
 Recall falls with magnitude above M2.5 (0.844 at M2.0–2.5 down to 0.599 above
 M4.0) and that is distance, not size: the median distance of the M>4 band is
@@ -146,21 +146,52 @@ Partially addressed earlier by the GPD baseline work
 ([`experiment_gpd_baseline_2026-08-27.md`](experiment_gpd_baseline_2026-08-27.md)),
 which put this detector against four published pickers on our own windows.
 
-### 2.4 CNN-GRU waveform branch
+### 2.4 Full-repo correctness sweep (asked for 2026-09-06)
+
+**Requested explicitly: go through the whole repo and make sure everything is
+as solid as it can be.** Not a tidy-up -- an audit for silent wrongness. The
+bugs found on 2026-09-05/06 are the pattern to look for, and every one of them
+produced a plausible number rather than an error:
+
+- **A left join on a non-unique key.** `cmd_report` merged the SNR table into
+  the catalogue after computing per-event guards against it; DEMI's 269
+  duplicate ids grew the frame and desynced `best_prob`. It raised only because
+  the lengths happened to disagree.
+- **A statistic contaminated by its own positives.** The coincidence excess
+  counted catalogued earthquakes, which are detected at both stations by
+  construction, so it measured event density and read as a distance effect.
+- **A progress metric that lagged its quantity.** The FDSN ETA located progress
+  by the newest file's row, which trails badly when a third of rows produce
+  output -- reporting 61% availability against a true 36%, for hours.
+- **An enumerated list standing in for a search.** `test_chaos_station.py`
+  found the catalogue from four absolute paths; a rename turned eight passing
+  tests into eight skips indistinguishable from "no data on this machine".
+- **A filename convention asserted rather than checked.** `cut_event_windows`
+  claimed to write the layout `seismic-cli` consumes and did not; every window
+  would have lost its magnitude label silently.
+
+Worth sweeping specifically: every `merge` for key uniqueness; every metric
+whose denominator is derived rather than counted; every `except` that swallows;
+every default that differs between a writer and its reader (`--channels` was
+`all` in the trainer and `2d+aux` in the profiler); anything comparing arms
+whose corpora are not provably identical. `sk models --spec` and the runlog
+records exist to make the last one checkable -- use them.
+
+### 2.5 CNN-GRU waveform branch
 
 Swap the BiLSTM in `ConvSeqBranch` for a BiGRU, re-run the branch-1d grid as a
 fourth arm (`--branch-1d cnn-gru`). Motivated: the 2026-08-19 grid put
 `cnn-lstm` (0.9896) above `cnn` (0.9843) with non-overlapping per-seed ranges,
 so recurrence is load-bearing here rather than decorative. Cheap.
 
-### 2.5 Cascade false-positive handling
+### 2.6 Cascade false-positive handling
 
 Stage 2 consumes `aux = (log_snr, log_distance)`, and `log_distance` needs a
 catalogued hypocentre a false positive does not have. Options: a `--channels 2d`
 stage 2, a waveform-derived distance estimate, or propagated uncertainty. See
 `src/detection/cascade_eval.py`'s module docstring.
 
-### 2.6 Retrain with continuous-background negatives
+### 2.7 Retrain with continuous-background negatives
 
 **Motivated by a measured failure, not a hunch.** On continuous MANT the 6 s
 detector scores a *median of 0.83 on noise* — 92% of a quiet station-day clears
@@ -201,7 +232,7 @@ logit, or `continuous_false_alarms.py report`, which sets the threshold from
 measured background. If a ratio change is all that is tried, expect it to move
 the operating point and nothing else. The amplitude coverage is the experiment.
 
-### 2.7 Housekeeping
+### 2.8 Housekeeping
 
 - The 3 s dataset overflows fp16 (max 1.21e6). Published results there are
   2B-only and unaffected, but any future `1d`/`all` run on it needs `asinh`.
