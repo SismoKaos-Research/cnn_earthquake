@@ -1227,9 +1227,13 @@ def cmd_coincidence(args):
         sys.exit("the two stations barely overlap; nothing to measure")
 
     # --- catalogue, at each station separately ----------------------------
+    # Keyed "a"/"b", not by station name: passing the same station twice is the
+    # obvious self-test, and a name-keyed dict silently collapses to one entry
+    # for it -- the background of one station overwrites the other's and the
+    # threshold table comes out empty.
     cats = {}
-    for name, tt, snr_csv in ((args.station_a, ta, args.snr_csv_a),
-                              (args.station_b, tb, args.snr_csv_b)):
+    for side, name, tt, snr_csv in (("a", args.station_a, ta, args.snr_csv_a),
+                                    ("b", args.station_b, tb, args.snr_csv_b)):
         args.station = name
         cat, _ = predicted_arrivals(args)
         # `in_spans`, not a comprehension over `spans`: a gap-split archive has
@@ -1243,10 +1247,9 @@ def cmd_coincidence(args):
                             left_on="EventID", right_on="event_id", how="left")
         else:
             cat["snr"] = np.nan
-        cats[name] = cat
-    both = cats[args.station_a].merge(
-        cats[args.station_b][["EventID", "snr", "p_epoch"]], on="EventID",
-        suffixes=("_a", "_b"))
+        cats[side] = cat.drop_duplicates(subset="EventID")
+    both = cats["a"].merge(cats["b"][["EventID", "snr", "p_epoch"]],
+                           on="EventID", suffixes=("_a", "_b"))
     good = both[(both.snr_a >= args.snr_min) & (both.snr_b >= args.snr_min)]
     print(f"  {len(both):,} catalogued event(s) in that span; "
           f"{len(good):,} reach SNR {args.snr_min:g} at BOTH stations")
@@ -1257,10 +1260,11 @@ def cmd_coincidence(args):
 
     # --- background at each station ---------------------------------------
     bg = {}
-    for name, tt, pp in ((args.station_a, ta, pa), (args.station_b, tb, pb)):
+    for side, name, tt, pp in (("a", args.station_a, ta, pa),
+                               ("b", args.station_b, tb, pb)):
         args.station = name
-        explained, _ = background_and_guards(tt, pp, cats[name], args, win_s)
-        bg[name] = pp[~explained]
+        explained, _ = background_and_guards(tt, pp, cats[side], args, win_s)
+        bg[side] = pp[~explained]
 
     # --- the table ---------------------------------------------------------
     print(f"\n  Each station is thresholded to the SAME alarm budget, not the same")
@@ -1271,17 +1275,13 @@ def cmd_coincidence(args):
           f"{'recall':>9}")
     rows = []
     for target in (100.0, 30.0, 10.0, 3.0, 1.0, 0.1):
-        thr = {}
-        for name in (args.station_a, args.station_b):
-            want = target * days
-            if want >= len(bg[name]):
-                thr[name] = None
-                break
-            thr[name] = float(np.quantile(bg[name], 1.0 - want / len(bg[name])))
-        if any(v is None for v in thr.values()) or len(thr) < 2:
+        want = target * days
+        if any(want >= len(bg[s]) for s in ("a", "b")):
             continue
-        da_t, _ = declarations(ta, pa, thr[args.station_a], args.cluster_seconds)
-        db_t, _ = declarations(tb, pb, thr[args.station_b], args.cluster_seconds)
+        thr = {s: float(np.quantile(bg[s], 1.0 - want / len(bg[s])))
+               for s in ("a", "b")}
+        da_t, _ = declarations(ta, pa, thr["a"], args.cluster_seconds)
+        db_t, _ = declarations(tb, pb, thr["b"], args.cluster_seconds)
         ok = confirmed(da_t, db_t, w)
         n_a, n_b, n_2 = len(da_t), len(db_t), int(ok.sum())
         # Independent Poisson streams of rate ra, rb coincide within +/-w at
@@ -1301,21 +1301,21 @@ def cmd_coincidence(args):
         if len(good):
             fired_a = np.array([((pa[np.searchsorted(ta, c - win_s):
                                      np.searchsorted(ta, c + args.signal_post,
-                                                     side="right")] > thr[args.station_a]).any())
+                                                     side="right")] > thr["a"]).any())
                                 for c in good.p_epoch_a.values])
             fired_b = np.array([((pb[np.searchsorted(tb, c - win_s):
                                      np.searchsorted(tb, c + args.signal_post,
-                                                     side="right")] > thr[args.station_b]).any())
+                                                     side="right")] > thr["b"]).any())
                                 for c in good.p_epoch_b.values])
             rec = float((fired_a & fired_b).mean())
         excess = n_2 / days / indep if indep > 0 else np.nan
         rows.append({"budget_per_day": target,
-                     f"thr_{args.station_a}": thr[args.station_a],
-                     f"thr_{args.station_b}": thr[args.station_b],
+                     "station_a": args.station_a, "station_b": args.station_b,
+                     "thr_a": thr["a"], "thr_b": thr["b"],
                      "a_per_day": n_a / days, "b_per_day": n_b / days,
                      "both_per_day": n_2 / days, "independent_per_day": indep,
                      "excess_over_independent": excess, "recall_both": rec})
-        print(f"  {target:>11.4g}{thr[args.station_a]:>12.4f}{thr[args.station_b]:>12.4f}"
+        print(f"  {target:>11.4g}{thr['a']:>12.4f}{thr['b']:>12.4f}"
               f"{n_a / days:>9.2f}{n_b / days:>9.2f}{n_2 / days:>10.3f}"
               f"{indep:>10.4f}{excess:>8.1f}x"
               + (f"{rec:>9.3f}" if rec == rec else f"{'-':>9}"))
