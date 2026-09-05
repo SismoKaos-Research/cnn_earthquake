@@ -131,14 +131,8 @@ def _build_dual_channel(branch, p, shapes):
     seq_dim = _need(shapes, "seq_dim", "dual-channel")
     img_channels = _need(shapes, "img_channels", "dual-channel")
     if shapes.get("head") == "dual":
-        # The two-head variant fixes fusion="linear" and takes no branch1d;
-        # saying so beats silently dropping flags the caller passed.
-        if p["fusion"] != "linear" or branch != "lstm":
-            raise ValueError(
-                "head='dual' (DualChannelDualHeadNet) supports only "
-                "--fusion linear and --model-branch lstm; got "
-                f"--fusion {p['fusion']} --model-branch {branch}")
-        return DualChannelDualHeadNet(seq_dim, img_channels, **common)
+        return DualChannelDualHeadNet(seq_dim, img_channels, fusion=p["fusion"],
+                                      branch1d=branch, **common)
     return DualChannelNet(seq_dim, img_channels, fusion=p["fusion"],
                           branch1d=branch,
                           n_classes=shapes.get("n_classes", 1),
@@ -279,7 +273,8 @@ ARCHITECTURES = (
             Param("lstm_heads", int, 4,
                   "Attention heads in the 1D branch. Must divide hidden*2."),
         ),
-        notes="head='dual' builds DualChannelDualHeadNet (binary + magnitude).",
+        notes="shapes head='dual' builds DualChannelDualHeadNet, whose two heads "
+              "answer 'will it happen' and 'how big' from one trunk.",
     ),
     Architecture(
         key="se-resnet", family="image",

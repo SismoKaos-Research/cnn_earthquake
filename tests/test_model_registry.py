@@ -145,18 +145,17 @@ def test_dual_channel_matches_the_hand_built_detector():
         assert torch.allclose(hand(seq, img), built(seq, img))
 
 
-def test_dual_head_variant_and_its_refusals():
-    """head='dual' builds the two-head net and rejects flags it cannot honour."""
-    spec = ModelSpec(model="dual-channel", branch="lstm")
-    model = spec.build(seq_dim=3, img_channels=3, head="dual")
+@pytest.mark.parametrize("branch", ["lstm", "cnn", "cnn-lstm"])
+@pytest.mark.parametrize("fusion", ["linear", "gate"])
+def test_dual_head_variant_takes_every_trunk_option(branch, fusion):
+    """Two heads constrain nothing about the trunk they share."""
+    model = ModelSpec(model="dual-channel", branch=branch,
+                      params={"fusion": fusion}).build(
+        seq_dim=3, img_channels=3, head="dual")
     model.eval()
     with torch.no_grad():
         binary, mag = model(torch.randn(2, 600, 3), torch.randn(2, 3, 32, 32))
     assert binary.shape == mag.shape == (2,)
-
-    with pytest.raises(ValueError, match="head='dual'"):
-        ModelSpec(model="dual-channel", branch="cnn-lstm").build(
-            seq_dim=3, img_channels=3, head="dual")
 
 
 def test_missing_shape_names_itself():

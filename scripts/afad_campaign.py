@@ -158,7 +158,22 @@ def cmd_next(args):
         print("nothing pending — campaign complete")
         return 0
 
-    dev = _device_code(todo["station"])
+    try:
+        dev = _device_code(todo["station"])
+    except SystemExit as e:
+        # claim_next_pending has already written the claim. Exiting here left
+        # the row `claimed` with an address attached and nothing in flight, so
+        # the slot was never refilled and the poller waited for a link that was
+        # never requested -- BAKC and IRLI stalled two queue slots that way for
+        # hours, looking exactly like lost mail. A station TDVMS does not list
+        # will not become listed on a retry, so the row is retired rather than
+        # requeued.
+        update_chunk(args.ledger, todo["station"], todo["start"],
+                     state="failed", email=None, note=str(e))
+        print(f"[SKIP] {e}")
+        print("       marked failed and the slot released; it will not be retried")
+        return 1
+
     payload = {
         "start_time": datetime.fromisoformat(todo["start"]).strftime("%Y-%m-%d %H:%M:%S"),
         "end_time": datetime.fromisoformat(todo["end"]).strftime("%Y-%m-%d %H:%M:%S"),

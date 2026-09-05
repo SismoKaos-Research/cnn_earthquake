@@ -206,8 +206,15 @@ class DualChannelDualHeadNet(DualChannelTrunk):
     "how big" pair. Both outputs are squeezed to (B,)."""
 
     def __init__(self, seq_dim, img_channels, aux_dim=0, hidden=64, fusion_dim=128,
-                dropout=0.3, channels="all", lstm_layers=1, lstm_heads=4):
+                dropout=0.3, channels="all", lstm_layers=1, lstm_heads=4,
+                fusion="linear", branch1d="lstm"):
         """Initializes the trunk (see `DualChannelTrunk.__init__`) plus two heads.
+
+        `fusion` and `branch1d` were fixed at the trunk's defaults here until
+        the registry exposed them per task. Nothing about two heads constrains
+        either one -- they belong to the trunk, which is the same trunk the
+        single-head models use -- so the restriction was incidental. Both keep
+        the trunk's defaults, so existing checkpoints and callers are unaffected.
 
         Args:
             seq_dim: See `DualChannelTrunk.__init__`.
@@ -219,10 +226,13 @@ class DualChannelDualHeadNet(DualChannelTrunk):
             channels: See `DualChannelTrunk.__init__`.
             lstm_layers: See `DualChannelTrunk.__init__`.
             lstm_heads: See `DualChannelTrunk.__init__`.
+            fusion: See `DualChannelTrunk.__init__`.
+            branch1d: See `DualChannelTrunk.__init__`.
         """
         super().__init__(seq_dim, img_channels, aux_dim=aux_dim, hidden=hidden,
                          fusion_dim=fusion_dim, dropout=dropout, channels=channels,
-                         fusion="linear", lstm_layers=lstm_layers, lstm_heads=lstm_heads)
+                         fusion=fusion, lstm_layers=lstm_layers, lstm_heads=lstm_heads,
+                         branch1d=branch1d)
         self.trunk = nn.Sequential(
             nn.LayerNorm(self.fused_dim),
             nn.Dropout(dropout),
