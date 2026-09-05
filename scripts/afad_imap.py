@@ -26,6 +26,7 @@ import email
 import email.header
 import email.utils
 import imaplib
+import json
 import os
 import pathlib
 import re
@@ -53,6 +54,11 @@ def parse_args():
                         "default scans everything unread, which is right for a "
                         "dedicated mailbox and wrong for one with other mail in "
                         'it -- narrow it, e.g. \'(UNSEEN SUBJECT "TDVMS")\'.')
+    p.add_argument("--claim-unknown", action="store_true",
+                   help="act on links addressed to plus-addresses this ledger "
+                        "never submitted from. Off by default: several pollers "
+                        "share one mailbox, every one of them runs the same "
+                        "search, and each must leave the others' mail alone.")
     p.add_argument("--fail-log", default=DEFAULT_FAIL_LOG,
                    help="where dead links are recorded; give each station its own "
                         "when several pollers run side by side")
@@ -65,6 +71,35 @@ def parse_args():
     p.add_argument("--dry-run", action="store_true",
                    help="report what would happen; touches neither mail nor ledger")
     return p.parse_args()
+
+
+# uids already reported as belonging to another ledger. Only to keep the log
+# quiet -- the message is deliberately left unread, so it is seen every tick.
+_foreign = set()
+
+
+def ledger_addresses(path):
+    """Every plus-address this ledger has submitted from, lowercased.
+
+    An address absent here cannot name a slot this campaign is holding, so a
+    link delivered to it belongs to some other ledger -- or to none.
+    """
+    out = set()
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    addr = json.loads(line).get("email")
+                except (ValueError, AttributeError):
+                    continue
+                if addr:
+                    out.add(addr.strip().lower())
+    except FileNotFoundError:
+        pass
+    return out
 
 
 def failed_urls(path):
@@ -172,6 +207,24 @@ def handle(m, uid, args):
     msg = email.message_from_bytes(data[0][1])
     subj = str(email.header.make_header(email.header.decode_header(msg.get("Subject", ""))))
     to = recipient_of(msg)
+    # A mailbox can serve several ledgers at once -- plus-addressing is what
+    # keeps their TDVMS slots apart -- but every poller runs the same
+    # `(UNSEEN FROM ...)` search and therefore sees every message. Whichever
+    # ticks first would otherwise download a link addressed to another ledger,
+    # fail to match it, and consume the message; the ledger that owns it then
+    # waits forever for a link that has already been burned. That is not
+    # hypothetical: two of the depth probe's four requests were taken by the
+    # station poller on 2026-09-05 and recorded as permanent failures in its
+    # own log, while `depth.jsonl` still listed them as submitted.
+    #
+    # Returning None leaves the message unread, which is what lets the poller
+    # that does own the address pick it up on its next tick.
+    if to and not args.claim_unknown and to not in ledger_addresses(args.ledger):
+        if uid not in _foreign:
+            _foreign.add(uid)
+            log(f"uid {uid.decode()}: addressed to {to}, which {args.ledger} "
+                f"never submitted from — left unread for whoever owns it")
+        return None
     urls = links_in(msg)
     if not urls:
         body = "".join(
