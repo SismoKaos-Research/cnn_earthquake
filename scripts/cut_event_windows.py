@@ -10,11 +10,18 @@ catalogued event inside the record has a waveform whether or not anyone
 requested it, out to whatever distance the station can hear -- 500 km for MANT
 against 56 km for the event-window corpus.
 
-Windows are written as `event_<id>_raw.mseed` in the layout
+Windows are written as `event_<id>_raw.mseed` under
+`<out-dir>/<length>/<station>/{eq,noise}/`, the layout
 `seismic-cli generate-regression-dataset` already consumes, so the spectrogram
 encoding, the aux scalars and the split logic all come from the tested path
 rather than being reimplemented here. This script only decides *which samples*
 become a window, never how they are encoded.
+
+**The station goes in the path, not the filename.** An earlier version wrote
+`event_<id>_<station>_raw.mseed`, which reads as compatible and is not:
+`parse_event_id` is `^(?:noise_)?event_(.+?)_raw$` with a non-greedy capture, so
+that name yields the event id `627227_MANT`, matches no catalogue row, and every
+window loses its magnitude label without an error anywhere.
 
 **Noise windows come from the same record**, taken well before the P arrival of
 the event they accompany, so the noise class shares the station, the instrument
@@ -116,8 +123,11 @@ def main():
     dirs = {}
     for w in lengths:
         tag = f"{w:g}s"
-        eq = pathlib.Path(args.out_dir) / tag / "eq"
-        nz = pathlib.Path(args.out_dir) / tag / "noise"
+        # <length>/<station>/{eq,noise}: the station is what makes two cuts
+        # distinguishable, and it cannot live in the filename without breaking
+        # the consumer's event-id parse (see the module docstring).
+        eq = pathlib.Path(args.out_dir) / tag / args.station / "eq"
+        nz = pathlib.Path(args.out_dir) / tag / args.station / "noise"
         eq.mkdir(parents=True, exist_ok=True)
         nz.mkdir(parents=True, exist_ok=True)
         dirs[w] = (eq, nz)
@@ -154,7 +164,14 @@ def main():
 
         got = 0
         for ev in sub.itertuples():
-            tag = f"event_{int(ev.EventID)}_{args.station}"
+            # `event_<id>_raw`, exactly. seismic-cli's parse_event_id is
+            # `^(?:noise_)?event_(.+?)_raw$` and its capture is non-greedy, so
+            # an extra `_MANT` infix parses as the event id "627227_MANT",
+            # which matches no catalogue EventID -- every window would lose its
+            # magnitude label, silently, and the dataset would come out empty.
+            # The station belongs in the path (below), where it distinguishes
+            # two stations' cuts without breaking the consumer.
+            tag = f"event_{int(ev.EventID)}"
             # An event is kept only if EVERY requested length is clean, so the
             # length series covers identical events and a difference between
             # lengths cannot come from a difference in which events survived.
