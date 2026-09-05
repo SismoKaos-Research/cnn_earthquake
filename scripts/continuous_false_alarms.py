@@ -195,7 +195,14 @@ def parse_args():
                         "before the whole window exists, so the alarm time is the "
                         "window's END -- this is what converts a start time into "
                         "one.")
-    m.add_argument("--threshold", type=float, default=0.5)
+    m.add_argument("--threshold", type=float, required=True,
+                   help="take this from `report` -- the threshold that buys the "
+                        "alarm budget you intend to run at. The benchmark's 0.5 "
+                        "is not an operating point on continuous data.")
+    m.add_argument("--snr-csv", default=None,
+                   help="station_detection_range.py output; without it the "
+                        "timing is diluted by events the station never recorded")
+    m.add_argument("--snr-min", type=float, default=3.0)
     m.add_argument("--out", required=True)
 
     v = sub.add_parser("verify", help="check the preprocessing against real tensors")
@@ -1121,6 +1128,13 @@ def cmd_timing(args):
 
     cat, _ = predicted_arrivals(args)
     ev = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)].copy()
+    if args.snr_csv:
+        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
+        ev = ev.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        n_all = len(ev)
+        ev = ev[ev.snr >= args.snr_min].copy()
+        print(f"  {len(ev):,} of {n_all:,} events reach SNR {args.snr_min:g}; "
+              f"the rest leave no trace in the record and are excluded")
 
     first, best = [], []
     for a, b in zip(ev.p_epoch - args.guard_pre - args.window_seconds,
