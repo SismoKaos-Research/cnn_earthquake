@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-27
 **Script:** `src/detection/pretrained_picker_baseline.py`
-**Runner:** `scripts/run_picker_baseline.sh`
+**Runner:** `experiments/reproduce/run_picker_baseline.sh`
 **Tests:** `tests/test_pretrained_picker.py`
 
 ## Why

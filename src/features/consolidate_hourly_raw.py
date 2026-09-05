@@ -1,5 +1,6 @@
 """Consolidates per-hour .npy struct-array files (E/N/Z fields, produced by
-either the real 5Hz pipeline or scripts/gap_only_preprocess.py) into one
+either the real 5Hz pipeline or a gap-only preprocessing step whose script
+is not in this repo) into one
 pre-allocated, memory-mappable array plus a companion hours.npy timestamp
 file. Interpolates gaps ONCE here (same logic as raw_cnn_lstm_forecast.py's
 load_hourly_raw) instead of every training run redoing it from scratch.

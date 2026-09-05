@@ -170,9 +170,9 @@ defect `--match-negative-amplitude` exists to remove.
 
 ```bash
 cd $MC
-./scripts/run_ponly_matched.sh      # 1d, 2d  on matched
-./scripts/run_ponly_matched_fusion.sh
-./scripts/run_ponly_natural.sh      # 1d, 2d, all  on natural
+./experiments/reproduce/run_ponly_matched.sh      # 1d, 2d  on matched
+./experiments/reproduce/run_ponly_matched_fusion.sh
+./experiments/reproduce/run_ponly_natural.sh      # 1d, 2d, all  on natural
 ```
 
 Sequential by design — three concurrent runs OOM a 4 GB card.

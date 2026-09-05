@@ -165,12 +165,12 @@ The ground-motion experiment grid (`report.md` Section 13) has two
 one-command drivers:
 
 ```bash
-scripts/run_groundmotion_experiments.sh   # the A-F configuration grid
-scripts/run_groundmotion_disjoint.sh      # the station-disjoint G/H follow-up
+experiments/reproduce/run_groundmotion_experiments.sh   # the A-F configuration grid
+experiments/reproduce/run_groundmotion_disjoint.sh      # the station-disjoint G/H follow-up
 ```
 
 Both `cd` into `src/`, write their CSVs to `experiment_results/`, and default
 `PY` to this repo's own `.venv`; override with `PY=/path/to/python
-scripts/run_groundmotion_experiments.sh` to use a different interpreter.
+experiments/reproduce/run_groundmotion_experiments.sh` to use a different interpreter.
 `python src/groundmotion_summary.py` then collates every
 `experiment_results/groundmotion_cnn_*.csv` into one comparison table.

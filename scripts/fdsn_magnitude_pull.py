@@ -253,7 +253,14 @@ def cmd_fetch(args):
             if "No data" not in str(e):
                 print(f"  bulk failed ({type(e).__name__}), falling back", flush=True)
         for r, dest in chunk:
-            sel = (st.select(station=r.station) if st is not None else None)
+            # Trim to THIS row's window. A bulk response is one Stream for the
+            # whole batch, so selecting by station alone also picks up the same
+            # station's traces from other rows -- which silently wrote 112 s of
+            # mixed windows into files that asked for 60 s.
+            sel = None
+            if st is not None:
+                sel = st.select(station=r.station).slice(
+                    UTCDateTime(r.start), UTCDateTime(r.end))
             if sel is None or not len(sel):
                 try:
                     sel = client.get_waveforms(r.network, r.station, "*", "HH*",
@@ -261,10 +268,21 @@ def cmd_fetch(args):
                 except Exception:
                     miss += 1
                     continue
-            if len(sel) < 3:
+            sel = sel.copy()
+            sel.merge(method=1, fill_value=None)
+            sel = sel.split()
+            want = int(round((r.end - r.start) * 100)) - 1
+            keep = []
+            for comp in ("Z", "N", "E"):
+                cand = [x for x in sel if x.stats.channel[-1].upper() == comp
+                        and x.stats.npts >= want * 0.99]
+                if cand:
+                    keep.append(cand[0])
+            if len(keep) < 3:
                 miss += 1
                 continue
-            sel.write(str(dest), format="MSEED")
+            from obspy import Stream
+            Stream(keep).write(str(dest), format="MSEED")
             got += 1
         done = i + len(chunk)
         if done % (args.batch * 10) == 0 or done >= len(todo):

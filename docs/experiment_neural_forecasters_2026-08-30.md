@@ -9,7 +9,7 @@ Fixed seeds rather than the original's random draw: per-seed AUC spread on this
 data is ~0.17, far larger than any plausible catalogue effect, so an unpaired
 comparison would measure seed noise.
 
-**Reproduce:** `scripts/rerun_neural_forecasters.sh [stage ...]`
+**Reproduce:** `experiments/reproduce/rerun_neural_forecasters.sh [stage ...]`
 
 ---
 
@@ -126,7 +126,7 @@ it than anything in the forecasting results so far.
 
 ## 3. Follow-up: the feature models at an evaluable operating point
 
-Section 2 established that M>=4.5 / 30 d cannot be scored. `scripts/probe_forecast_horizons.py`
+Section 2 established that M>=4.5 / 30 d cannot be scored. `experiments/analyses/probe_forecast_horizons.py`
 was extended to sweep magnitude against horizon on label composition alone (no
 training), counting folds whose test positive rate lands in [0.05, 0.95]:
 

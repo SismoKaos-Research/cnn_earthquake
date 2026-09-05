@@ -55,7 +55,7 @@ Re-run the selection when the replacement catalogue lands:
 
 An earlier draft said AFAD data is ~290x cleaner than the KOERI archive, based
 on a single TU.ANDN day pulled via ORFEUS (0.008% gaps). **Seven real TDVMS
-chunks do not support that.** Measured with `scripts/afad_audit.py`:
+chunks do not support that.** Measured with `experiments/analyses/afad_audit.py`:
 
 | chunk (21 d) | gap E | gap N | gap Z |
 |---|---|---|---|

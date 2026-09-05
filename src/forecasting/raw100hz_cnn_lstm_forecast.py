@@ -1,5 +1,7 @@
 """Same setup as raw_cnn_lstm_forecast.py (KO station, M>=4.5 dense forecast
-target, walk-forward CV) but reads scripts/gap_only_preprocess.py's output
+target, walk-forward CV) but reads the gap-only preprocessing output (the producing script is not in
+this repo and could not be located in 2026-09; treat the input format as the
+contract, not that path)
 instead of the real pipeline's: gaps filled/masked, no bandpass filter, no
 5Hz decimation -- native rate (100Hz), 20x more samples per hour.
 

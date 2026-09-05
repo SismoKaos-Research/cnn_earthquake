@@ -27,7 +27,7 @@ Omori floors, not a majority-class bar.
 - **`gru_cnn.py`** — _(undocumented)_
 - **`gru_cnn_train.py`** — _(undocumented)_
 - **`next_event_regression.py`** — Regression to the next major event: predict days until the next M>=threshold AEGEAN event for each hour, using catalog features and optionally DWT wav.
-- **`raw100hz_cnn_lstm_forecast.py`** — Same setup as raw_cnn_lstm_forecast.py (KO station, M>=4.5 dense forecast target, walk-forward CV) but reads scripts/gap_only_preprocess.py's output i.
+- **`raw100hz_cnn_lstm_forecast.py`** — Same setup as raw_cnn_lstm_forecast.py (KO station, M>=4.5 dense forecast target, walk-forward CV) but reads gap-only preprocessing output (producing script not in this repo) i.
 - **`raw_cnn_lstm_forecast.py`** — Raw-waveform CNN-LSTM forecaster (or feature CSV loader for massive files).
 - **`waveform_lgbm_forecast.py`** — LightGBM on the DWT/spectral waveform features from `waveform_dwt_features.py` (Bhatia et al.
 

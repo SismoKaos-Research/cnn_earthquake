@@ -498,4 +498,4 @@ chaos features. It is not a 6-hour forecast of whether an M>=2.5 event occurs
 within 400 km — that remains below the persistence floor — but it is not noise
 either, and it is the thread worth pulling.
 
-**Reproduce:** `scripts/rerun_chaos_corrected.sh` (62 s, sequential).
+**Reproduce:** `experiments/reproduce/rerun_chaos_corrected.sh` (62 s, sequential).

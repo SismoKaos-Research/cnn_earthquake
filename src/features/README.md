@@ -8,7 +8,7 @@ turn raw archives into model-ready arrays. Nothing here trains a model.
 - **`build_offline_features.py`** — Offline feature builder for preprocessed Parquet waveforms.
 - **`catalog_feature_processor.py`** — Extracts rolling physical features from a seismic catalog.
 - **`catalog_feature_rfe.py`** — Recursive feature elimination over the 11 catalog features in `cnn_lstm_catalog_waveform_fusion.build_catalog_features`, using LightGBM gain-importanc.
-- **`consolidate_hourly_raw.py`** — Consolidates per-hour .npy struct-array files (E/N/Z fields, produced by either the real 5Hz pipeline or scripts/gap_only_preprocess.py) into one pre-.
+- **`consolidate_hourly_raw.py`** — Consolidates per-hour .npy struct-array files (E/N/Z fields, produced by either the real 5Hz pipeline or a gap-only preprocessing step whose script is not in this repo) into one pre-.
 - **`lgbm_cluster.py`** — Feature distillation and clustering on CNN-extracted feature vectors.
 - **`parquet_feature_rfe.py`** — Recursive Feature Elimination operating on pre-computed Parquet features.
 - **`parquet_to_memory.py`** — Converts a preprocessed Parquet time-series into a flat binary memmap.

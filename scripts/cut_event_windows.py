@@ -60,7 +60,12 @@ def parse_args():
     p.add_argument("--pre", type=float, default=2.0,
                    help="seconds before the predicted P (matches the corpus's "
                         "[P-2, P+4] geometry)")
-    p.add_argument("--window-seconds", type=float, default=6.0)
+    p.add_argument("--window-seconds", type=float, nargs="+", default=[6.0],
+                   help="one or more window lengths. All are cut in the SAME "
+                        "pass, because reading and decoding the archive costs "
+                        "minutes per chunk while cutting costs milliseconds -- "
+                        "a second pass would pay the whole read again for "
+                        "nothing. Each length gets its own eq/noise subtree.")
     p.add_argument("--noise-offset", type=float, default=300.0,
                    help="seconds before P to take the paired noise window")
     p.add_argument("--out-dir", required=True)
@@ -107,10 +112,15 @@ def write_mseed(arr, comps, t0, station, path, fs):
 def main():
     """Cuts event and paired-noise windows for every usable catalogued event."""
     args = parse_args()
-    eq_dir = pathlib.Path(args.out_dir) / "eq"
-    noise_dir = pathlib.Path(args.out_dir) / "noise"
-    eq_dir.mkdir(parents=True, exist_ok=True)
-    noise_dir.mkdir(parents=True, exist_ok=True)
+    lengths = sorted(args.window_seconds)
+    dirs = {}
+    for w in lengths:
+        tag = f"{w:g}s"
+        eq = pathlib.Path(args.out_dir) / tag / "eq"
+        nz = pathlib.Path(args.out_dir) / tag / "noise"
+        eq.mkdir(parents=True, exist_ok=True)
+        nz.mkdir(parents=True, exist_ok=True)
+        dirs[w] = (eq, nz)
 
     cat, (slat, slon) = predicted_arrivals(args)
     if args.snr_csv:
@@ -121,12 +131,11 @@ def main():
         print(f"[events] {len(cat):,} of {before:,} reach SNR {args.snr_min:g}")
     cat = cat.sort_values("p_epoch").reset_index(drop=True)
 
-    n = int(round(args.window_seconds * args.fs))
     zips = sorted(glob.glob(args.zips))
     if args.limit_chunks:
         zips = zips[:args.limit_chunks]
-    print(f"[cut] {len(zips)} chunk(s), {n}-sample windows at [P-{args.pre:g}, "
-          f"P+{args.window_seconds - args.pre:g}]")
+    print(f"[cut] {len(zips)} chunk(s), lengths " + ", ".join(
+        f"{w:g}s [P-{args.pre:g}, P+{w - args.pre:g}]" for w in lengths))
 
     kept = skipped = 0
     per_band = {}
@@ -145,28 +154,39 @@ def main():
 
         got = 0
         for ev in sub.itertuples():
-            w = cut(segs, comps, ev.p_epoch - args.pre, n, args.fs)
-            if w is None:
-                skipped += 1
-                continue
-            nz = cut(segs, comps, ev.p_epoch - args.noise_offset, n, args.fs)
-            if nz is None:
-                skipped += 1
-                continue
             tag = f"event_{int(ev.EventID)}_{args.station}"
-            write_mseed(w, comps, ev.p_epoch - args.pre, args.station,
-                        eq_dir / f"{tag}_raw.mseed", args.fs)
-            write_mseed(nz, comps, ev.p_epoch - args.noise_offset, args.station,
-                        noise_dir / f"noise_{tag}_raw.mseed", args.fs)
-            b = int(min(ev.Magnitude, 6.0) * 2) / 2.0
-            per_band[b] = per_band.get(b, 0) + 1
+            # An event is kept only if EVERY requested length is clean, so the
+            # length series covers identical events and a difference between
+            # lengths cannot come from a difference in which events survived.
+            cuts = {}
+            for w in lengths:
+                nw = int(round(w * args.fs))
+                a = cut(segs, comps, ev.p_epoch - args.pre, nw, args.fs)
+                b_ = cut(segs, comps, ev.p_epoch - args.noise_offset, nw, args.fs)
+                if a is None or b_ is None:
+                    cuts = None
+                    break
+                cuts[w] = (a, b_)
+            if cuts is None:
+                skipped += 1
+                continue
+            for w, (a, b_) in cuts.items():
+                eq, nzd = dirs[w]
+                write_mseed(a, comps, ev.p_epoch - args.pre, args.station,
+                            eq / f"{tag}_raw.mseed", args.fs)
+                write_mseed(b_, comps, ev.p_epoch - args.noise_offset, args.station,
+                            nzd / f"noise_{tag}_raw.mseed", args.fs)
+            band = int(min(ev.Magnitude, 6.0) * 2) / 2.0
+            per_band[band] = per_band.get(band, 0) + 1
             kept += 1
             got += 1
         print(f"[{zi}/{len(zips)}] {stem}: {got} window(s) "
               f"({len(sub)} events in span)", flush=True)
 
-    print(f"\n[cut] wrote {kept:,} event windows, skipped {skipped:,} "
-          f"(gap or edge)\n  -> {eq_dir}\n  -> {noise_dir}")
+    print(f"\n[cut] wrote {kept:,} event(s) x {len(lengths)} length(s), "
+          f"skipped {skipped:,} (gap or edge)")
+    for w in lengths:
+        print(f"  -> {dirs[w][0].parent}")
     if per_band:
         print("\n  magnitude distribution of what was cut")
         for b in sorted(per_band):

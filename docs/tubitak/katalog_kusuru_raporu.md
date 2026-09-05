@@ -222,4 +222,4 @@ depoda bir betiktir.
 
 *Kaynaklar: `docs/experiment_neural_forecasters_2026-08-30.md`,
 `docs/experiment_chaos_forecast_2026-08-27.md`,
-`scripts/fetch_afad_catalog.py`, `scripts/afad_audit.py`*
+`scripts/fetch_afad_catalog.py`, `experiments/analyses/afad_audit.py`*
