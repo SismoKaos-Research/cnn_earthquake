@@ -788,6 +788,25 @@ def predicted_arrivals(args):
     return cat.sort_values("p_epoch").reset_index(drop=True), (slat, slon)
 
 
+def load_snr(path):
+    """The measured-SNR table, one row per event.
+
+    `station_detection_range.py` can emit an event twice when it falls in two
+    overlapping chunks, and a LEFT JOIN on a non-unique key silently expands the
+    frame it is joined into. That is not hypothetical: DEMI's table has 269
+    duplicated ids against MANT's and GCAM's zero, and the expansion desynced
+    `best_prob` from the catalogue it was computed for -- which raised here, but
+    would have quietly shifted every recall denominator if the lengths had
+    happened to line up.
+
+    The larger SNR is kept. A duplicate is the same event seen from two chunks,
+    and the smaller reading is usually the one that fell near a chunk edge and
+    was measured on a truncated window.
+    """
+    snr = pd.read_csv(path)[["event_id", "snr"]]
+    return snr.sort_values("snr", ascending=False).drop_duplicates(subset="event_id")
+
+
 def background_and_guards(t, p, cat, args, win_s):
     """Splits scored windows into event guards and background.
 
@@ -933,8 +952,8 @@ def cmd_report(args):
 
     # Attach measured SNR so recall is asked only of events with a waveform.
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        cat = cat.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        cat = cat.merge(load_snr(args.snr_csv), left_on="EventID",
+                        right_on="event_id", how="left")
     else:
         cat["snr"] = np.nan
     best = np.array([p[i:j].max() if j > i else np.nan for i, j in idx])
@@ -1250,8 +1269,8 @@ def cmd_coincidence(args):
         # version be used here.
         cat = cat[in_spans(cat.p_epoch.values, spans)].copy()
         if snr_csv:
-            cat = cat.merge(pd.read_csv(snr_csv)[["event_id", "snr"]],
-                            left_on="EventID", right_on="event_id", how="left")
+            cat = cat.merge(load_snr(snr_csv), left_on="EventID",
+                            right_on="event_id", how="left")
         else:
             cat["snr"] = np.nan
         cats[side] = cat.drop_duplicates(subset="EventID")

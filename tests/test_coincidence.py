@@ -171,3 +171,37 @@ def test_in_spans_handles_a_gap_split_archive_quickly():
     # every t is either inside its span's first 50 s or in the gap after it
     expected = ((t % 100.0) <= 50.0)
     assert np.array_equal(m, expected)
+
+
+def test_load_snr_collapses_duplicate_events_keeping_the_best(tmp_path):
+    """A LEFT JOIN on a non-unique key silently expands the frame it joins into.
+
+    DEMI's SNR table carries 269 duplicated event ids where MANT's and GCAM's
+    carry none, so `cat.merge(snr, how="left")` grew the catalogue by 269 rows
+    after the per-event guards had already been computed against it. That raised
+    a length mismatch here; had the lengths happened to line up it would instead
+    have shifted every recall denominator without a word.
+    """
+    import pandas as pd
+    f = tmp_path / "range.csv"
+    pd.DataFrame({"event_id": [1, 2, 2, 3], "snr": [5.0, 1.2, 9.9, 4.0],
+                  "other": ["a", "b", "c", "d"]}).to_csv(f, index=False)
+    out = cfa.load_snr(str(f))
+    assert len(out) == 3, "duplicate event_id survived"
+    assert out.set_index("event_id").snr.to_dict() == {1: 5.0, 2: 9.9, 3: 4.0}, (
+        "the larger reading should win -- the smaller is usually a chunk-edge "
+        "truncation of the same event")
+
+
+def test_merging_a_duplicated_table_would_have_grown_the_catalogue(tmp_path):
+    """Pins the mechanism, so the reason for load_snr is not lost to a tidy-up."""
+    import pandas as pd
+    cat = pd.DataFrame({"EventID": [1, 2, 3]})
+    raw = pd.DataFrame({"event_id": [1, 2, 2, 3], "snr": [5.0, 1.2, 9.9, 4.0]})
+    assert len(cat.merge(raw, left_on="EventID", right_on="event_id",
+                         how="left")) == 4, "the duplicate no longer expands"
+
+    f = tmp_path / "r.csv"
+    raw.to_csv(f, index=False)
+    assert len(cat.merge(cfa.load_snr(str(f)), left_on="EventID",
+                         right_on="event_id", how="left")) == 3
