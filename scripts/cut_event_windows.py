@@ -163,11 +163,22 @@ def main():
     cat["cut_epoch"] = cat.p_epoch
     if args.anchor_csv:
         a = pd.read_csv(args.anchor_csv)
-        a = a[["event_id", args.anchor_column]].dropna()
-        a = a.sort_values(args.anchor_column).drop_duplicates(subset="event_id")
+        # The id column is spelled both ways in this project: `falsealarm
+        # timing` writes `EventID` (it comes straight off the catalogue frame)
+        # and `station_detection_range` writes `event_id`. Accept either rather
+        # than making the caller know which tool produced the file.
+        idcol = next((c for c in ("EventID", "event_id") if c in a.columns), None)
+        if idcol is None:
+            sys.exit(f"{args.anchor_csv} has neither EventID nor event_id; "
+                     f"columns are {list(a.columns)}")
+        if args.anchor_column not in a.columns:
+            sys.exit(f"{args.anchor_csv} has no column {args.anchor_column!r}; "
+                     f"columns are {list(a.columns)}")
+        a = a[[idcol, args.anchor_column]].dropna()
+        a = a.sort_values(args.anchor_column).drop_duplicates(subset=idcol)
         before = len(cat)
-        cat = cat.merge(a, left_on="EventID", right_on="event_id",
-                        how="inner", suffixes=("", "_anchor"))
+        cat = cat.merge(a.rename(columns={idcol: "_anchor_id"}),
+                        left_on="EventID", right_on="_anchor_id", how="inner")
         lag = args.anchor_lag
         if lag is None:
             lag = float((cat[args.anchor_column] - cat.p_epoch).median())

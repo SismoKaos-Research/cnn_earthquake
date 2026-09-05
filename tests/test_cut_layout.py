@@ -81,3 +81,19 @@ def test_the_cutter_anchors_on_cut_epoch_not_p_epoch():
     assert 'cat["cut_epoch"] = cat.p_epoch' in src, (
         "cut_epoch must default to the predicted P, so runs without "
         "--anchor-csv are unchanged")
+
+
+def test_anchor_csv_accepts_both_spellings_of_the_id_column():
+    """`timing` writes EventID; `station_detection_range` writes event_id.
+
+    Hardcoding one of them is what killed the first alarm-anchored run, after
+    the archive read had already started: `KeyError: ['event_id'] not in index`.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "scripts" / "cut_event_windows.py").read_text()
+    assert 'next((c for c in ("EventID", "event_id") if c in a.columns), None)' in src
+    assert "has neither EventID nor event_id" in src, (
+        "a missing id column must say what the file does have, not raise KeyError")
+    assert "has no column" in src, (
+        "a missing anchor column must be reported before the archive read")
