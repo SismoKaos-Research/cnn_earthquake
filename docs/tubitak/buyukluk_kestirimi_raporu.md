@@ -12,7 +12,7 @@ Model, fizik tabanını (yerel büyüklük bağıntısının ridge uyarlaması) 
 
 Daha önemlisi, model belirgin bir **doygunluk** göstermektedir. Yanlılık M≤2 bandında +0,124 iken M3–4 bandında −0,22'ye düşmekte, büyüklük başına **−0,18** eğimle ilerlemektedir; yani küçük depremler olduğundan büyük, büyük depremler olduğundan küçük kestirilmektedir. Bu, erken uyarı bağlamında bilinen bir sorundur (Wang vd., 2023) ve eğitim kümesinin yalnızca %1,2'sinin M>4 olmasıyla tutarlıdır.
 
-Ayrıca M2,5–3,0 bandında model fizik tabanını neredeyse hiç geçememektedir (oran 0,949).
+Doygunluğun bantlamadan bağımsız ölçüsü sıkışma eğimidir: kestirim = 0,817 × gerçek + 0,395.
 
 **Anahtar sözcükler:** büyüklük kestirimi, erken uyarı, doygunluk, fizik tabanı, bölümleme protokolü
 
@@ -147,9 +147,15 @@ Yayımlanmış oranlar, sakatlanmış bir tabanla şişirilmişti. **Hareket ede
 
 **Model doygunlaşmaktadır.** Yanlılık M≤2'de +0,124, M3–4'te −0,22'dir; büyüklük başına eğim **−0,18** magnitüd birimidir. Küçük depremler olduğundan büyük, büyük depremler olduğundan küçük kestirilmektedir. Bu, ortalamaya gerileme davranışının klasik imzasıdır ve Wang vd. (2023) tarafından erken uyarıda merkezî bir güçlük olarak tanımlanan doygunlukla aynı yöndedir. Eğitim kümesinin yalnızca %1,2'sinin M>4 olması bu davranışın beklenen nedenidir.
 
-**M2,5–3,0 bandı bir boşluktur.** Bu bantta model fizik tabanını neredeyse hiç geçmemektedir (oran 0,949; bölümleme başına 1,477 / 0,667 / 1,142). Üç bölümlemenin ikisinde model tabandan **daha kötüdür**. Bu bant, dalga formunun genlik ve uzaklığın ötesinde bilgi taşımadığı bir geçiş bölgesi gibi davranmaktadır.
+**M2,5–3,0 bandındaki düşük oran bir model kusuru değil, bir ölçüm yanıltmasıdır.** Bu bantta modelin taban oranı 0,949'dur; ilk okumada model fizik tabanını geçemiyormuş gibi görünmektedir. Ancak aynı bantta *sabit ortalama* kestiricisinin hatası da 0,336'dır ve hem model (0,314) hem taban (0,331) bu değere yakındır. Bandın merkezi (2,75) veri kümesinin ortalamasına (2,429) yakın olduğundan, bu bantta **hiçbir kestirici ortalamayı söylemekten belirgin biçimde daha iyi olamaz**. Gerçek büyüklüğe göre bantlara ayırıp hata ölçmek, ortalamaya çeken her kestiriciyi ortalamaya yakın bantlarda kayırmaktadır. Bant bazlı taban oranları bu nedenle beceri ölçüsü olarak okunmamalıdır.
 
-M>4,0 bandındaki +0,022 yanlılık, bölümlemeler arasında kararsızdır (−0,488 / +0,197 / −0,265) ve yalnızca 204 satıra dayanmaktadır; bu bant için tek bir sayı bildirmek yanıltıcı olur.
+M>4,0 bandındaki +0,022 yanlılık da bölümlemeler arasında kararsızdır (−0,488 / +0,197 / −0,265) ve yalnızca 204 satıra dayanmaktadır; bu bant için tek bir sayı bildirmek yanıltıcı olur.
+
+**Doygunluğun yanıltmadan bağımsız ifadesi sıkışma eğimidir.** Kestirilen değer gerçek değere göre gerilediğinde:
+
+    kestirim = 0,817 × gerçek + 0,395
+
+Eğim 1,0 yerine **0,817**'dir. Bant bazlı bütün yanlılık değerleri bu tek olgunun sonucudur ve bu ifade bantlama yanıltmasından etkilenmemektedir.
 
 ### 4.4 Uzaklık ve SGO
 
@@ -188,7 +194,7 @@ SGO ekseninde hata beklendiği gibi artmaktadır (0,154'ten 0,306'ya), ancak fiz
 1. Model fizik tabanını her iki protokolde de geçmektedir: çifte ayrık 0,2023 ± 0,0051 (taban 0,3116), tespit ediciyle hizalı 0,2329 ± 0,0021 (taban 0,2940).
 2. Toplam değer sınama kümesinin büyüklük dağılımı tarafından belirlenmektedir: satırların %71,1'i M≤2,5'tir ve bu bandın hatası (0,1430), M>3 bandının hatasının (0,4085) üçte biridir.
 3. Model doygunlaşmaktadır: yanlılık büyüklük başına −0,18 magnitüd birimi eğimle ilerlemektedir. Eğitim kümesinin %1,2'sinin M>4 olması beklenen nedendir.
-4. M2,5–3,0 bandında model fizik tabanını geçmemektedir (oran 0,949; üç bölümlemenin ikisinde tabandan kötü).
+4. Sıkışma eğimi 0,817'dir (1,0 sıkışmasız olurdu). Gerçek büyüklüğe göre bantlanmış taban oranları, ortalamaya yakın bantlarda her kestiriciyi kayırdığından beceri ölçüsü olarak kullanılmamalıdır.
 5. Bölümleme değişkenliği tohum değişkenliğinin 2,4 katıdır; tek bölümlemeli sonuçlar bildirilmemelidir.
 6. Yeniden yapımda oranın kötüleşmesi tabanın güçlenmesinden kaynaklanmıştır; hareket eden oranlarda pay ve payda ayrı ayrı denetlenmelidir.
 

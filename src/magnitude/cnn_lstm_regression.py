@@ -317,6 +317,16 @@ def parse_args():
     p.add_argument("--detector-manifest", default=None,
                   help="Path to the detector dataset's manifest.csv. Required for "
                        "--split-by detector.")
+    p.add_argument("--oversample-alpha", type=float, default=0.0,
+                   help="TT-SAM magnitude oversampling (Chen et al. 2026 3.2.1): "
+                        "rows with M>=--oversample-min are repeated "
+                        "int(alpha**(M-1) - 1) extra times during TRAINING only, "
+                        "so larger events are seen more often. 0.0 (default) "
+                        "disables it and reproduces every published number here. "
+                        "1.25 is the published factor. Val and test are never "
+                        "resampled -- doing so would change what the number means.")
+    p.add_argument("--oversample-min", type=float, default=4.0,
+                   help="magnitude at or above which oversampling applies")
     p.add_argument("--seed-split", type=int, default=42,
                   help="Seed for the station partition (--split-by station/both). "
                        "Independent of --seed (model init/shuffle).")
@@ -366,9 +376,46 @@ def main():
             raise ValueError(f"Split '{split}' is empty in the manifest.")
         parts[split] = sub
 
-    train_ds = DualMagnitudeDataset(parts["train"], root)
-    stats = train_ds.aux_stats()
-    val_ds = DualMagnitudeDataset(parts["val"], root, aux_stats=stats)
+    # Oversampling is applied to the TRAIN rows only, and the aux statistics are
+    # fitted BEFORE replication -- fitting them after would let the duplicated
+    # large events shift the normalization, changing the input distribution
+    # rather than only the sampling frequency.
+    train_rows = parts["train"]
+    stats = DualMagnitudeDataset(train_rows, root).aux_stats()
+    if args.oversample_alpha > 1.0:
+        m = train_rows.magnitude.to_numpy()
+        reps = np.where(m >= args.oversample_min,
+                        (args.oversample_alpha ** (m - 1.0) - 1.0).astype(int), 0)
+        reps = np.clip(reps, 0, None)
+        extra = train_rows.loc[np.repeat(train_rows.index.to_numpy(), reps)]
+        before = len(train_rows)
+        train_rows = pd.concat([train_rows, extra], ignore_index=True)
+        big = (train_rows.magnitude >= args.oversample_min).mean()
+        print(f"[oversample] alpha={args.oversample_alpha} min M{args.oversample_min:g}: "
+              f"{before:,} -> {len(train_rows):,} train rows; "
+              f"M>={args.oversample_min:g} share "
+              f"{(parts['train'].magnitude >= args.oversample_min).mean():.3%} -> {big:.3%}")
+
+    train_ds = DualMagnitudeDataset(train_rows, root, aux_stats=stats)
+
+    # Validation is resampled the SAME way. Early stopping selects on val MAE,
+    # and an un-resampled val set is dominated by the small events oversampling
+    # exists to de-emphasise -- so leaving it alone makes the selection
+    # criterion fight the training objective and picks the checkpoint that is
+    # best at exactly what was being down-weighted. Measured: oversampling
+    # train only made the compression WORSE (slope 0.642 -> 0.507).
+    val_rows = parts["val"]
+    if args.oversample_alpha > 1.0:
+        mv = val_rows.magnitude.to_numpy()
+        rv = np.clip(np.where(mv >= args.oversample_min,
+                              (args.oversample_alpha ** (mv - 1.0) - 1.0).astype(int),
+                              0), 0, None)
+        val_rows = pd.concat([val_rows,
+                              val_rows.loc[np.repeat(val_rows.index.to_numpy(), rv)]],
+                             ignore_index=True)
+        print(f"[oversample] val {len(parts['val']):,} -> {len(val_rows):,} rows "
+              f"(model selection now matches the training objective)")
+    val_ds = DualMagnitudeDataset(val_rows, root, aux_stats=stats)
     test_ds = DualMagnitudeDataset(parts["test"], root, aux_stats=stats)
 
     sample_seq, sample_img, sample_aux, _ = train_ds[0]
