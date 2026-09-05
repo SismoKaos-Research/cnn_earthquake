@@ -54,6 +54,7 @@ COMMANDS = {
     "models":     ("models.py", "the model registry: architectures, branches, flags"),
     # reporting
     "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
+    "pdf":        ("md2pdf.py", "Markdown -> .pdf (run through uv; see its docstring)"),
     "figures":    ("make_report_figures.py", "report figures"),
 }
 
@@ -63,7 +64,7 @@ GROUPS = [
     ("windows", ["cut-events", "cut-length"]),
     ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
-    ("report", ["docx", "figures"]),
+    ("report", ["docx", "pdf", "figures"]),
     ("inspect", ["status", "models"]),
 ]
 
