@@ -87,6 +87,7 @@ from sklearn.metrics import (classification_report, confusion_matrix,
                              matthews_corrcoef, roc_auc_score)
 from torch.utils.data import DataLoader, Dataset
 
+from seismolib.runlog import RunLog
 from seismolib.metrics import (binary_report, majority_class_baseline,
                                print_report, safe_auc)
 from seismolib.model.dual_channel import DualChannelNet
@@ -552,6 +553,13 @@ def main():
     else:
         seeds = [int(s) for s in args.ensemble_seeds.split(",")]
     print(f"Device: {device} | training {len(seeds)} seed(s): {seeds}")
+    # Opened before training so an interrupted ensemble still records what it
+    # was attempting -- the seed list especially, which is otherwise only
+    # recoverable from checkpoint filenames.
+    runlog = RunLog("detection/cnn_lstm_classify", args.save_dir, vars(args))
+    runlog.note(seeds=seeds, n_train=len(train_ds), n_val=len(val_ds),
+                n_test=len(test_ds), seq_shape=list(seq_shape),
+                img_shape=list(img_shape))
 
     per_seed_probs, per_seed_preds, y_ref, n_params = [], [], None, None
     for seed in seeds:
@@ -621,6 +629,12 @@ def main():
 
     print("\nClassification Report (ensemble):")
     print(classification_report(y_ref, ensemble_preds, digits=4))
+
+    runlog.finish(metrics=dict(report, floor=best_floor, floor_name=best_floor_name,
+                               edge=edge, n_params=n_params),
+                  checkpoints=sorted(str(p) for p in
+                                     __import__("pathlib").Path(args.save_dir).glob("*.pth")))
+    print(f"\n  provenance -> {runlog.path}")
 
 
 if __name__ == "__main__":
