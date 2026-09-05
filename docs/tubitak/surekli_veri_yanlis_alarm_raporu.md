@@ -2,6 +2,15 @@
 
 Bu rapor, MANT istasyonuna ait 728 günlük kesintisiz sismik kayıt üzerinde hazırlanmıştır. Kayıt 30 Nisan 2024 – 9 Ağustos 2026 dönemini kapsamakta olup 36 arşiv parçasından oluşmaktadır. Projede geliştirilen kısa pencereli deprem/gürültü sınıflandırıcıları ile klasik bir eşik yöntemi, aynı pencerelerde ve aynı ön işlemeyle karşılaştırılmıştır. 6 saniyelik model için 10.487.211, 3,4 saniyelik modeller için 18.519.887 pencere puanlanmıştır.
 
+## Özet
+
+- **Sınama kümesinde belirlenen 0,5 eşiği sürekli veride kullanılamamaktadır.** Öngörü günde 257 yanlış alarmdı; ölçülen değer 12.599'dur. 6 saniyelik model sakin bir istasyon gününün %92,7'sini işaretlemektedir.
+- Nedeni ölçülmüştür: model, eğitim sırasında hiç görmediği bir **sessizlik bölgesinde** dışdeğerleme yapmaktadır ve sürekli arka plan tam olarak orada bulunmaktadır.
+- **Çalışma noktası ölçülen arka plandan türetilmelidir.** Günde 10 yanlış alarm bütçesinde 6 saniyelik model, kaydedilmiş depremlerin %74,1'ini bulmaktadır (Bölüm 6).
+- **AUC ile çalışma noktası ters sıralama vermektedir.** Klasik STA/LTA yöntemi AUC'de birinci, işletme bütçelerinde sonuncudur.
+- Tespit edilen olayların **%69,6'sı S dalgasından önce** bildirilmektedir; ancak bu bir uzaklık koşuluna bağlıdır ve 25 km içinde her iki model de çoğunlukla geç kalmaktadır.
+- Açıklanamayan alarmlar **günlük döngü** göstermektedir (gündüz/gece 1,7–2,1 kat), yani önemli bir bölümü kataloglanmamış deprem değil kültürel gürültüdür.
+
 ## 1. Sorunun tanımı
 
 Bu projedeki bütün tespit sonuçları **düzenlenmiş bir sınama kümesi** üzerinde ölçülmüştür: sınıflar dengelidir, pozitif pencereler varış zamanına sabitlenmiştir ve negatif pencereler bir gürültü havuzundan genliğe göre seçilmiştir. Böyle bir kümede ölçülen başarım, koşullu bir niceliği yanıtlamaktadır: *pencerede bir varış olduğu bilindiğinde model onu bulabiliyor mu?*
@@ -156,7 +165,48 @@ Toplam oranlar Çizelge 8'de verilmiştir. Burada dikkat çeken nokta, klasik y�
 
 50 km'nin ötesinde klasik yöntemin öncelik tutarlılığı belirgin biçimde yüksektir (%97–98). Ortanca öncelik süreleri benzer olduğuna göre (50–100 km bandında −6,3 s ve −5,8 s), fark dağılımın yayılımındadır: STA/LTA yalnızca keskin başlangıca tepki vermekte, sinir ağları ise zayıf olaylarda zaman zaman dalga formunun daha geç bölümlerine kilitlenmektedir. Bu, tespit başarımını etkilememekte ancak zamanlamayı dağıtmaktadır. **Öncelik süresi tutarlılığı açısından klasik yöntem daha güvenilirdir.**
 
-## 6. Değerlendirme
+### 5.6 Daha sık pencereleme öncelik sorununu çözmemektedir
+
+Bölüm 5.5'teki bildirim gecikmesinin ne kadarının **ızgara etkisinden**, ne kadarının modelin gerçek gecikmesinden kaynaklandığı ayrı bir deneyle ölçülmüştür. Katalog olaylarının çevresi 0,5 saniyelik adımla yeniden taranmıştır; olaylar kaydın %1'inden azını kapladığından bu tarama dakikalar sürmektedir.
+
+Aynı eşikte sonuç belirgindir: 6 saniyelik kolun ortanca bildirimi P+4,5 s'den **P+1,9 s**'ye, S'den önce bildirim oranı %69,6'dan **%90,7**'ye çıkmaktadır. Gecikmenin baskın bileşeni ızgara etkisidir.
+
+Ancak bu kazanç bedelsiz değildir. Örtüşen pencereler birim zamanda yaklaşık 12 kat daha fazla karar üretmekte, dolayısıyla aynı eşikte yanlış bildirim oranı günde 7,3'ten yaklaşık 137'ye çıkmaktadır. Bütçe sabit tutulduğunda eşik yükseltilmek zorundadır ve karşılaştırma Çizelge 9'daki gibi olmaktadır.
+
+| Yapılandırma | Eşik | Tespit oranı | S'den önce | Ortanca bildirim |
+|---|---|---|---|---|
+| 6s, ayrık pencere | 0,8569 | %74,1 | %69,6 | P+4,5 s |
+| 6s, sık pencere | 0,8999 | %38,9 | %88,2 | P+2,2 s |
+| stalta, sık pencere | 13,41 | %18,8 | **%97,4** | **P+1,4 s** |
+
+Çizelge 9. Sık pencerelemenin eşit yanlış bildirim bütçesinde (günde ~10) etkisi.
+
+İki sonuç çıkmaktadır. Birincisi, sık pencereleme sabit bütçede **duyarlılığı düşürmektedir**: eşik 0,857'den 0,900'e çıkmakta, bu da modelin en yüksek puanı olan 0,903'e çok yaklaşmaktadır. Bölüm 5.1'de belirtilen dar band sorunu burada doğrudan bağlayıcı hale gelmektedir.
+
+İkincisi ve daha önemlisi, **klasik yöntemin öncelik üstünlüğü sık pencerelemede de sürmektedir** (P+1,4 s'ye karşı P+2,2 s; %97,4'e karşı %88,2). Bunun nedeni yapısaldır: STA/LTA'nın karakteristik işlevi doğrudan dalga başlangıcına tepki vermekte ve bağlam gerektirmemektedir; sinir ağları ise eğitildikleri pencere geometrisi kadar varış sonrası sinyal beklemektedir. Öncelik süresini iyileştirmenin yolu tarama biçimini değiştirmek değil, **varış sonrası kısmı daha kısa olan bir pencereyle yeniden eğitmektir** — bu da tespit başarımından ödün vermek anlamına gelmektedir.
+
+Bu bölümün sayıları 6 parçalık bir alt kümeye (2.445 olay) dayanmaktadır ve eşik ayarı yalnızca 0,39 günlük temiz olay öncesi gürültüyle yapılmıştır; kuyruk kestirimi gürültülüdür.
+
+## 6. Çalışma noktası seçimi
+
+Bu bölüm, raporun işletmeye yönelik özetidir. Soru şudur: **günde kaç yanlış alarma katlanılabiliyorsa, karşılığında ne alınmaktadır?**
+
+| Bütçe (yanlış alarm/gün) | Eşik | Tespit oranı | S'den önce | Ortanca bildirim |
+|---|---|---|---|---|
+| 100 | 0,8350 | %86,4 | %76,3 | P+4,3 s |
+| **10** | **0,8569** | **%74,1** | **%69,6** | **P+4,5 s** |
+| 1 | 0,8950 | %31,6 | %76,8 | P+4,1 s |
+| 0,1 | 0,9014 | %6,4 | %91,7 | P+3,4 s |
+
+Çizelge 10. 6 saniyelik model için bütçe–başarım dengesi (SGO≥3, 13.056 olay).
+
+Çizelgenin okunuşu şöyledir. Günde 100 yanlış alarm — yaklaşık saatte dört — kabul edilebiliyorsa, kaydedilmiş depremlerin %86'sı bulunmaktadır. Bütçe günde 10'a indirildiğinde duyarlılık %74'e gerilemektedir. Günde 1 alarmda ise duyarlılık %32'ye düşmektedir: **bütçenin son bir mertebelik daralması duyarlılığın yarısından fazlasına mal olmaktadır.**
+
+Dört kolun aynı bütçelerdeki duyarlılıkları Çizelge 4'te verilmiştir. Seçim, bütçeye göre değişmektedir: günde 100 alarmda klasik yöntem, günde 10 ve 1 alarmda ise 6 saniyelik model önde gelmektedir.
+
+**Bu oranlar tek istasyon içindir.** İşletimdeki erken uyarı sistemleri en az iki istasyonun uyuşmasını şart koşmaktadır. Bağımsız istasyonlarda yanlış alarmların çakışma olasılığı çarpım kuralıyla düştüğünden, ağ düzeyinde bu bütçeler çok daha rahat karşılanabilmektedir; buradaki değerler bir ağ için **üst sınır** niteliğindedir.
+
+## 7. Değerlendirme
 
 Bulgular dört maddede özetlenebilir.
 
@@ -169,6 +219,8 @@ Birincisi, **düzenlenmiş sınama kümesinde belirlenen eşik sürekli veriye a
 Dördüncüsü, açıklanamayan alarmların günlük döngüsü, bunların önemli bir bölümünün kataloglanmamış deprem değil kültürel gürültü olduğunu göstermektedir.
 
 Beşincisi, S dalgasından önce bildirim yapabilme yeteneği bir uzaklık koşuluna bağlıdır ve bu koşul pencere boyunun kendisinden doğmaktadır. 25 km içinde her iki model de çoğunlukla geç kalmaktadır. Bu nedenle P-dalgası kolu bir erken uyarı bileşeni olarak değil, uzaklık tabanı bulunan bir faz tespiti bileşeni olarak değerlendirilmelidir.
+
+Altıncısı, öncelik süresi tarama sıklığıyla iyileştirilememektedir. Sık pencereleme mutlak gecikmeyi azaltmakta, ancak sabit bütçede duyarlılığı düşürmekte ve klasik yöntemin üstünlüğünü ortadan kaldırmamaktadır. Bu bir ayar sorunu değil, mimari bir sınırdır: karar için varış sonrası sinyal gerektiren bir model, doğrudan başlangıca tepki veren bir orana yetişememektedir.
 
 **Sınırlılıklar açıkça belirtilmelidir.** Sonuçlar tek istasyona (MANT) dayanmaktadır; istasyonlar arası değişkenlik ölçülmemiştir ve alan yazında bu değişkenliğin makine öğrenmesi tabanlı seçicilerde arttığına dair bulgular bulunmaktadır. Ölçüm tek istasyonlu ve ilişkilendirme (association) öncesidir; işletimdeki bütün erken uyarı sistemleri yanlış alarmları birden çok istasyonun uyuşmasını şart koşarak bastırmaktadır, dolayısıyla buradaki oranlar bir ağ için üst sınırdır. Gecikme ayrıştırması yapılmamıştır; yalnızca model terimi bilinmektedir, çünkü bir tespit ancak pencerenin tamamı gözlendikten sonra bildirilebilmektedir. Son olarak sinir ağı çıkışları kalibre edilmiş olasılık değildir ve bu çalışmada kalibre edilmemiştir.
 
