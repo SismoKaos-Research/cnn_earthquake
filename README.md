@@ -1,176 +1,272 @@
-# Earthquake Detection, Classification, and Forecasting from Seismic Waveforms
+# cnn_earthquake
 
-CNN/LSTM models for four related seismic ML tasks, all trained on real
-KOERI (KO network) waveform data: earthquake-vs-noise **detection**,
-short-window **magnitude classification/regression**, catalog-based event
-**forecasting** ("will a M≥threshold event occur in this zone within N
-days?"), and **peak ground motion** prediction. The architecture is the
-dual-channel CNN+LSTM+attention design from Wang & Zhao (2025, *Applied Soft
-Computing* 172) — a 1D LSTM/self-attention branch over the raw or
-feature-derived waveform, a 2D CNN branch over a RAM-image or spectrogram
-encoding, fused and classified/regressed — adapted, corrected, and extended
-across all four tasks.
+CNN/LSTM models for four seismic ML targets, trained on real waveform data from
+the Turkish networks: **detection** (earthquake vs noise on a short window),
+**magnitude** (how big), **forecasting** (whether an event is coming, and when),
+and **ground motion** (how hard it will shake). The core architecture is the
+dual-channel CNN+LSTM+attention design of Wang & Zhao (2025, *Applied Soft
+Computing* 172) — a 1D branch over the raw waveform, a 2D branch over a
+spectrogram or recurrence-plot image, fused — adapted and extended across all
+four targets, and measured against non-neural floors throughout.
 
-**Start here:** [`docs/report.md`](docs/report.md) is the full technical writeup —
-architecture, every experiment, every defect found and fixed, and the
-reproduction commands for each result. [`docs/accuracy_summary.md`](docs/accuracy_summary.md)
-is a one-page table of every headline number. Both span all four tasks, which
-is why they sit in `docs/` rather than under any one of them.
+This is the model half of a two-repo pipeline. The companion repo
+(`Sismokaos`, locally `../Sismokaos` or `../data_downloader`) does FDSN
+downloading, windowing, and dataset generation; this one trains and evaluates.
 
-## Layout
+**Where to read what.** This file is the manual: how to install it, how to
+drive it, and what lives where. [`docs/report.md`](docs/report.md) is the
+technical writeup — every experiment, every defect found, and reproduction
+commands. [`docs/accuracy_summary.md`](docs/accuracy_summary.md) is the
+one-page table of headline numbers. [`docs/TODO.md`](docs/TODO.md) is the only
+planning file.
 
-Scripts are grouped by the task they serve, with that task's reports beside
-them. Each directory has its own README indexing what is inside.
+---
 
-| Directory | | Contents |
-|---|---|---|
-| [`src/forecasting/`](src/forecasting/) | 18 | Catalog and raw-waveform forecasting, fusion, LOEO |
-| [`src/detection/`](src/detection/) | 12 | Earthquake-vs-noise classification, stacking, cross-corpus evaluation |
-| [`src/features/`](src/features/) | 9 | Feature engineering, RFE, dataset builders |
-| [`src/magnitude/`](src/magnitude/) | 5 | Magnitude regression and classification |
-| [`src/groundmotion/`](src/groundmotion/) | 3 | Peak ground motion |
-| [`src/seismolib/`](src/seismolib/) | — | Shared library: metrics, training, catalog, splits, waveform, baselines, models |
-| [`docs/`](docs/) | — | Cross-cutting write-ups and `experiment_results/` |
+## Install
 
-`seismolib` holds everything two families would otherwise each copy. Install it
-once and every script resolves it regardless of where it is run from:
+Requires **Python 3.12+**, managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv pip install -e .
-python3 src/detection/cnn_lstm_classify.py --help
-```
-
-This repo (on GitHub as `cnn_earthquake`) is the model/training half of a
-two-repo pipeline. The companion repo — referred to below as `Sismokaos`
-(locally `../Sismokaos` or `../data_downloader`, depending on checkout) —
-does the FDSN downloading, windowing, and RAM/spectrogram dataset generation
-that these scripts train on; see its own README for that side.
-
----
-
-## Headline findings
-
-(Full detail and caveats in `report.md`; this is the abstract's summary.)
-
-- The amplitude of the raw waveform is the single largest contributor to
-  detection performance measured in this project — the RAM transform is
-  provably scale-invariant, so an auxiliary amplitude scalar had to be added
-  alongside it (test AUC 0.836 → 0.923, architecture-matched comparison).
-- A correctly-parameterized STA/LTA baseline (AUC 0.82 at 6s) is beaten by
-  every tested CNN configuration; the library's own auto-derived defaults
-  silently score AUC 0.51 (random) on arrival-anchored windows.
-- A plain spectrogram CNN, no LSTM branch, no fusion, is the best detector
-  found (test AUC 0.9793) — every fusion mechanism tried underperforms or
-  only marginally beats this single-branch model.
-- Magnitude event-class (≥M2.5 vs. below) is predictable from a single
-  3-second window (79.78% accuracy, AUC 0.855).
-- On three-class risk classification, a two-scalar gradient-boosted model
-  beats the CNN outright (82.83% vs. 73.64% accuracy) — the encoded window
-  isn't always the right tool.
-- On peak ground motion, a Conv1D-BiLSTM-attention model beats the strongest
-  scalar floor by 0.075 MAE_log, and the margin survives a doubly
-  station-and-event-disjoint split.
-- **Forecasting signal comes from the catalogue, not the seismogram** — the
-  project's original question, now bounded from both sides. Catalogue-derived
-  features beat a persistence floor: per-zone block-level AUC 0.692 (Aegean) and
-  0.618 (Central), the latter a zone previously diagnosed as unforecastable.
-  Waveform-derived features do not, across chaotic features and three sequence
-  architectures (LSTM 0.524, GRU 0.571, TCN 0.520 against a 0.582 floor).
-- The event catalogue is **AFAD's, not KOERI's** (the waveforms are KOERI), and
-  the copy used until 2026-08-30 was missing ~29% of events for the region —
-  nearly all of the February 2025 Santorini–Amorgos swarm. Rebuilding it moved
-  forecasting results in *both* directions: chaotic-feature results got worse as
-  the persistence floor rose, catalogue-feature results got better. Detection is
-  essentially unaffected (3 contaminated noise windows in 55,595).
-
----
-
-## Repository layout
-
-```
-src/                        Python source -- every training/eval script, no data or outputs
-├── model/                  Shared nn.Module building blocks and composed architectures
-│   ├── blocks.py             SEBlock, ResBlock, LSTMAttentionBranch, CNNBranch, GatedFusion
-│   ├── trunk2d.py            SETrunk2D -- shared SE-ResNet trunk (detection/classification/regression)
-│   ├── dual_channel.py       DualChannelTrunk/Net/DualHeadNet -- shared 1D+2D(+aux) fusion
-│   └── sequence.py           SequenceHeadNet -- shared LSTM+attention forecasting head
-├── metrics.py               Shared *_report()/print_report() accuracy reporting, used by every script
-├── training.py               Core detection training loop + ImprovedSeismicCNN
-│                              (checkpoint-compatible class name/path -- see its docstring
-│                              before renaming anything here)
-├── cnn_lstm*.py, cnn_ram_aux.py, cnn_regression.py, cnn_riskclass.py,
-│   cnn_magclass.py, cnn_groundmotion.py, cnn_run*.py, ...
-│                              One script per task/architecture variant (Sections 6-8, 13 of report.md)
-├── feature_lstm_forecast.py, raw_cnn_lstm_forecast.py,
-│   raw100hz_cnn_lstm_forecast.py, consolidate_hourly_raw.py
-│                              Catalog/continuous-waveform forecasting (Section 11), current work
-└── groundmotion_baselines.py, groundmotion_summary.py, lgbm_cluster.py, riskclass_scalar.py
-                               Non-neural floors/baselines each task is measured against
-
-scripts/                    Shell drivers that run several src/ scripts back to back
-                             (e.g. the full ground-motion experiment grid)
-
-experiment_results/          Checked-in result CSVs each script/driver writes, kept for the
-                             numbers report.md and the cheatsheets cite
-
-report.md, accuracy_summary.md, catalog_forecast_report.md,
-spectrogram_classifier_report.md, *_CHEATSHEET.md, report.docx
-                             Documentation (see "Start here" above)
-```
-
-**Not checked in** (gitignored — regenerate or point at your own copy):
-`dataset*/`, `data/`, `data-old/`, `raw/`, `trained_model*/`, `results/`.
-These hold downloaded waveforms, generated tensor datasets, and trained
-checkpoints — all either regenerable from `Sismokaos` or produced by running
-the scripts in `src/` yourself.
-
----
-
-## Installation
-
-Requires **Python 3.12+**. Managed with [uv](https://docs.astral.sh/uv/);
-`pyproject.toml`/`uv.lock` pin the exact dependency set (PyTorch,
-torchvision, ObsPy, scikit-learn, LightGBM, pandas, scipy).
-
-```bash
-git clone https://github.com/hogib/cnn_earthquake.git
+git clone git@github.com:SismoKaos-Research/cnn_earthquake.git
 cd cnn_earthquake
-uv sync                 # creates .venv/ and installs everything, incl. CUDA-enabled torch
+uv sync                  # creates .venv/, installs everything incl. CUDA torch
 source .venv/bin/activate
 ```
 
-A CUDA GPU is strongly recommended — several scripts (`raw_cnn_lstm_forecast.py`,
-`raw100hz_cnn_lstm_forecast.py`) train directly on continuous raw waveform and
-are RAM/VRAM-heavy at full-archive scale; see their own docstrings for
-`--batch-size`/`--max-days`/`--consolidated` knobs that trade memory for
-speed on smaller machines.
+`uv sync` installs the repo itself in editable mode, which is what puts `sk` on
+your path and lets `import seismolib` resolve from any directory. A CUDA GPU is
+strongly recommended: several forecasters train directly on continuous raw
+waveform and are VRAM-heavy at archive scale.
 
 ---
 
-## Running something
+## `sk` — the command line
 
-Every script in `src/` documents itself: a top-of-file comment block states
-what it does, its exact CLI invocation, and (where applicable) what else
-imports it, followed by Google-style docstrings on every function. Read the
-script you're about to run before running it — that's the authoritative,
-up-to-date reference, not this file.
+Everything runnable has one front door. `sk` on its own lists the commands
+grouped by what you are trying to do; each command keeps its own `--help`.
 
-For copy-pasteable, result-linked reproduction commands for every number in
-`report.md`, use its own **Appendix: Reproduction Instructions** — it walks
-through dataset generation (via the `Sismokaos`/`data_downloader` CLI) and
-training for every task in the order the report covers them, from the RAM
-detector through catalog forecasting and peak ground motion.
-
-The ground-motion experiment grid (`report.md` Section 13) has two
-one-command drivers:
-
-```bash
-experiments/reproduce/run_groundmotion_experiments.sh   # the A-F configuration grid
-experiments/reproduce/run_groundmotion_disjoint.sh      # the station-disjoint G/H follow-up
+```
+acquire     campaign poll fdsn plan-pull catalog
+stations    station-select station-range station-loss
+windows     cut-events cut-length
+train       train
+evaluate    falsealarm magprofile
+report      docx figures
+inspect     status models
 ```
 
-Both `cd` into `src/`, write their CSVs to `experiment_results/`, and default
-`PY` to this repo's own `.venv`; override with `PY=/path/to/python
-experiments/reproduce/run_groundmotion_experiments.sh` to use a different interpreter.
-`python src/groundmotion_summary.py` then collates every
-`experiment_results/groundmotion_cnn_*.csv` into one comparison table.
+Every command is exactly the underlying script, arguments untouched, so a
+command recorded in a report also runs as `python3 scripts/<tool>.py ...`. That
+is deliberate: results here are expected to be traceable to a command, and a
+front end that rewrote arguments would make the recorded command and the real
+one diverge.
+
+### Getting data
+
+Two sources, split by **network**, not by data type:
+
+| | network | served by | cost |
+|---|---|---|---|
+| `sk fdsn` | KO (KOERI, 163 stations, archive to 2012) | FDSN | 24 h in ~13 s |
+| `sk campaign` + `sk poll` | TU (AFAD) | TDVMS email queue | ~2 min per station-day |
+
+Use FDSN wherever the station is on KO — it is roughly a hundred times cheaper.
+TDVMS is for TU, whose value is that its stations are disjoint from the KO
+training corpus.
+
+```bash
+sk fdsn plan  --catalog catalogs/catalog_current.csv --out requests.csv
+sk fdsn fetch --requests requests.csv --out-dir raw/fdsn_magnitude --batch 40
+```
+
+The TDVMS side is a queue, not a download. `sk campaign` submits one window per
+plus-address (TDVMS keys its one-request-at-a-time limit on the literal address
+string, so `you+a1@x` and `you+a2@x` are separate slots), and `sk poll` watches
+the mailbox, pastes each link back, and refills the slot that just freed.
+
+```bash
+sk campaign --ledger mant.jsonl plan --station MANT --start 2024-05-01
+sk campaign --ledger mant.jsonl next --email you+a1@example.com
+sk poll --ledger mant.jsonl --out-dir afad_raw --search '(UNSEEN FROM "tdvms@afad.gov.tr")' --pump
+```
+
+Credentials come from the environment only (`AFAD_IMAP_HOST` / `_USER` /
+`_PASS`). Several pollers can share one mailbox: each leaves mail addressed to
+a slot its own ledger never submitted from unread, for the poller that owns it.
+
+### Training
+
+`sk train` is indexed by **what you are predicting**, not by architecture,
+because the trainers are named after their networks and that is the wrong axis
+to search along.
+
+```bash
+sk train                            # every task, grouped by what its label answers
+sk train --predicts forecast        # one group
+sk train detect --label             # what this task's label actually is
+sk train detect --help              # the trainer's own flags
+```
+
+Twenty-five tasks in four groups: **detect** (6), **magnitude** (4),
+**forecast** (14), **shaking** (1).
+
+Seven of them are wired to the model registry, so the architecture is a flag
+rather than a choice of script:
+
+```bash
+sk train detect            --dataset-dir ds --model-branch cnn-lstm
+sk train magnitude         --dataset-dir ds --model-branch cnn-lstm --fusion gate
+sk train forecast-features --features-csv f.npy --catalog-path c.csv --model tcn
+sk train groundmotion      --dataset-dir ds --model-branch cnn
+```
+
+`forecast-features` is the clearest case: one task, one set of labels and one
+split, three architectures (`sequence-head`, `gru`, `tcn`) selected by
+`--model`. Everything a registry-wired run resolves is written to `model.json`
+in the checkpoint directory, so evaluation reads the architecture back instead
+of having it retyped.
+
+### The model registry
+
+```bash
+sk models                        # every architecture, grouped by what it consumes
+sk models dual-channel           # one model's branches, flags and defaults
+sk models --spec trained_model_x # the spec saved beside those checkpoints
+```
+
+Eleven architectures in six families, where a family is the shape of the input:
+`dual` (1D waveform + 2D image + aux scalars), `image`, `sequence`,
+`window`, `hierarchical`, `fusion`. `--model` picks the architecture,
+`--model-branch` picks its variant — for `dual-channel` that is the 1D front
+end (`lstm`, `cnn`, `cnn-lstm`), and `--branch-1d` is still accepted as an
+alias so older recorded commands keep running.
+
+### Knowing what happened
+
+```bash
+sk status                  # what is running, how far along, did the last run work
+sk status --host vegs      # the box the jobs are actually on
+```
+
+Three sections: running jobs with the argument that tells them apart, recent
+runs from `runs/*.json` with their headline metric, and free disk. Every
+registry-wired trainer writes a run record through `seismolib.runlog` —
+argv, git commit **and whether the tree was dirty**, dataset identity, split,
+seeds, metrics, checkpoints. A run that crashes leaves a record saying
+`started` rather than no record at all.
+
+---
+
+## Layout
+
+```
+scripts/        17 command-line tools, all reachable as `sk <command>`
+src/            the trainers and the shared library
+experiments/    reproduce/ (the exact runners for published results)
+                analyses/  (one-off analysis scripts)
+tests/          the suite; `pytest -q` from the repo root
+docs/           report.md, accuracy_summary.md, TODO.md, experiment records,
+                tubitak/ (the Turkish deliverables)
+runs/           one JSON per training run (provenance)
+catalogs/       event and station catalogues
+```
+
+Not checked in (gitignored, regenerate or point at your own): `dataset*/`,
+`data/`, `raw/`, `trained_model*/`, `results/`, `.env*`.
+
+### `src/` — one package per target
+
+Each has its own README indexing what is inside.
+
+| | files | |
+|---|---|---|
+| [`src/detection/`](src/detection/) | 23 | event vs noise, stacking, cross-corpus and cross-station evaluation, published-picker baselines |
+| [`src/magnitude/`](src/magnitude/) | 6 | magnitude regression and classification, risk classes |
+| [`src/forecasting/`](src/forecasting/) | 26 | catalogue and raw-waveform forecasting, fusion, chaos features, LOEO |
+| [`src/groundmotion/`](src/groundmotion/) | 4 | peak ground acceleration and velocity |
+| [`src/features/`](src/features/) | 11 | feature engineering, RFE, dataset builders |
+| [`src/seismolib/`](src/seismolib/) | 14 | the shared library — everything two packages would otherwise each copy |
+
+The family packages are installed by name, so the handful of legitimate
+cross-family imports (`from detection.cnn_lstm_classify import ...`) resolve
+regardless of which directory a script was launched from.
+
+### `src/seismolib/` — the shared library
+
+| module | |
+|---|---|
+| `tasks.py` | what the repo can be trained to predict, and which module trains it |
+| `cli.py` | the `sk` dispatcher |
+| `training.py` | the detection training loop, presets, and `ImprovedSeismicCNN` |
+| `metrics.py` | the `*_report()` / `print_report()` accuracy reporting every script uses |
+| `baselines.py` | conditional floors — what a trivial rule scores on the same data |
+| `splits.py` | walk-forward chronological cross-validation and its diagnostics |
+| `catalog.py` | catalogue loading and hourly labelling |
+| `waveform.py` | hourly raw-waveform loading, and the 1D CNN encoders over it |
+| `arrivals.py` | cached iasp91 travel times on a distance/depth grid |
+| `checkpoints.py` | selecting the checkpoints of one training arm, and refusing to guess |
+| `runlog.py` | one JSON per run, so a number can be traced to what produced it |
+| `rust_io.py` | reading everything `sismokaos-cli` writes |
+| `logging.py` | stdout tee for long-running training scripts |
+| `data/` | the dataset classes |
+
+`checkpoints.py` earns its place: `run_ponly_natural.sh` writes three
+architectures into one `--save-dir`, so a bare `glob("*.pth")` averages over a
+mixture of models answering different questions. That has already cost two sets
+of checkpoints and one seed reported at 0.2480 — an inverted model read as a
+training outcome.
+
+### `src/seismolib/model/` — the networks
+
+| module | |
+|---|---|
+| `registry.py` | every architecture, its knobs, its variants, and the `--model` flags |
+| `blocks.py` | `SEBlock`, `ResBlock`, `LSTMAttentionBranch`, `ConvSeqBranch`, `CNNBranch`, `GatedFusion` |
+| `trunk2d.py` | `SETrunk2D` — the SE-ResNet trunk behind the image models |
+| `dual_channel.py` | `DualChannelTrunk` / `Net` / `DualHeadNet` — the 1D+2D+aux fusion |
+| `sequence.py` | `SequenceHeadNet` — LSTM+attention over a sequence, optional per-step encoder |
+| `recurrent.py` | `ForecastGRU` |
+| `tcn.py` | `ForecastTCN` and its dilated causal blocks |
+
+Some models still live in their trainers (`GroundMotionNet`,
+`CatalogWaveformFusionNet`, the hierarchical day/week nets). The registry
+imports those lazily, so listing the architectures never pulls a trainer's
+argparse in behind a model.
+
+---
+
+## Reproducing a published result
+
+`experiments/reproduce/` holds the exact runners, deliberately kept as scripts
+rather than as `sk` commands: their value is being the precise thing that was
+run. They default `PY` to this repo's `.venv`; override it to use another
+interpreter.
+
+```bash
+experiments/reproduce/run_ponly_natural.sh
+experiments/reproduce/run_groundmotion_experiments.sh
+```
+
+`docs/report.md`'s **Appendix: Reproduction Instructions** walks every number
+in the report from dataset generation through training.
+
+---
+
+## Reading the code
+
+Every module states in its first lines what it does, the exact invocation, and
+what else imports it — followed by Google-style docstrings. Where a design
+choice was forced by something that went wrong, the docstring says what went
+wrong. Those notes are the reason several traps are not still traps; read the
+file you are about to run.
+
+```bash
+pytest -q          # 414 passed, 3 skipped
+```
+
+The suite is mostly about drift rather than about correctness of the maths: it
+asserts every module imports, every `sk` command points at a file with a
+`main()`, every registered architecture builds and runs at the shape it
+advertises, registry defaults match each class's own constructor defaults, and
+every task the listing marks as taking `--model` has a parser that accepts it.
+Each of those has caught a real break.
