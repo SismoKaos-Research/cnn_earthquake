@@ -52,3 +52,32 @@ def test_the_cutter_builds_the_name_the_consumer_expects():
     assert 'args.out_dir) / tag / args.station / "eq"' in src, (
         "the station must stay in the path -- it is what keeps two stations' "
         "cuts apart now that it is out of the filename")
+
+
+# ---------------------------------------------------------------------------
+# Alarm anchoring
+# ---------------------------------------------------------------------------
+
+def test_the_cutter_anchors_on_cut_epoch_not_p_epoch():
+    """Windows must be cut relative to `cut_epoch`, which --anchor-csv sets.
+
+    Every magnitude figure in this project was measured on catalogue-anchored
+    windows -- the P arrival known exactly. A deployed cascade has an alarm
+    time instead, declared at the window's END and lagging P by a few seconds
+    with spread. Cutting from the detector's own alarm times is what prices
+    that assumption, and it only works if the cut and the write agree on the
+    anchor: an earlier version had one on `cut_epoch` and the other still on
+    `p_epoch`, which writes correct samples under a wrong start time.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "scripts" / "cut_event_windows.py").read_text()
+    assert "cut(segs, comps, ev.cut_epoch - args.pre" in src
+    assert "write_mseed(a, comps, ev.cut_epoch - args.pre" in src, (
+        "the cut and the written start time must use the same anchor")
+    assert "ev.p_epoch - args.noise_offset" in src, (
+        "the paired noise window stays on the true P -- it is a reference "
+        "window, not something a detector found")
+    assert 'cat["cut_epoch"] = cat.p_epoch' in src, (
+        "cut_epoch must default to the predicted P, so runs without "
+        "--anchor-csv are unchanged")

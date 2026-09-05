@@ -75,6 +75,24 @@ def parse_args():
                         "nothing. Each length gets its own eq/noise subtree.")
     p.add_argument("--noise-offset", type=float, default=300.0,
                    help="seconds before P to take the paired noise window")
+    p.add_argument("--anchor-csv", default=None,
+                   help="CSV with event_id and an anchor time column, used "
+                        "INSTEAD of the predicted P. `falsealarm timing` writes "
+                        "one: its `alarm_epoch` is when the detector actually "
+                        "fired. Every magnitude figure in this project so far "
+                        "was measured on catalogue-anchored windows, i.e. with "
+                        "the P arrival known -- which a deployed cascade does "
+                        "not have. Cutting from the detector's own alarm times "
+                        "is what prices that assumption.")
+    p.add_argument("--anchor-column", default="alarm_epoch",
+                   help="column in --anchor-csv holding the anchor epoch")
+    p.add_argument("--anchor-lag", type=float, default=None,
+                   help="seconds subtracted from the anchor before --pre is "
+                        "applied. Set it to the detector's MEDIAN lag after P "
+                        "so the median event lands exactly where training put "
+                        "it; what then remains is the jitter, which is the "
+                        "quantity being measured. Defaults to the median of "
+                        "(anchor - predicted P) over the file itself.")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--limit-chunks", type=int, default=None)
     return p.parse_args()
@@ -139,6 +157,29 @@ def main():
         before = len(cat)
         cat = cat[cat.snr >= args.snr_min]
         print(f"[events] {len(cat):,} of {before:,} reach SNR {args.snr_min:g}")
+
+    # The anchor. `cut_epoch` is what every window is cut relative to: normally
+    # the predicted P, or the detector's own alarm when --anchor-csv is given.
+    cat["cut_epoch"] = cat.p_epoch
+    if args.anchor_csv:
+        a = pd.read_csv(args.anchor_csv)
+        a = a[["event_id", args.anchor_column]].dropna()
+        a = a.sort_values(args.anchor_column).drop_duplicates(subset="event_id")
+        before = len(cat)
+        cat = cat.merge(a, left_on="EventID", right_on="event_id",
+                        how="inner", suffixes=("", "_anchor"))
+        lag = args.anchor_lag
+        if lag is None:
+            lag = float((cat[args.anchor_column] - cat.p_epoch).median())
+        cat["cut_epoch"] = cat[args.anchor_column] - lag
+        resid = (cat.cut_epoch - cat.p_epoch)
+        print(f"[anchor] {len(cat):,} of {before:,} event(s) have a "
+              f"{args.anchor_column}; lag {lag:.2f}s removed")
+        print(f"[anchor] residual offset from the true P after the lag: "
+              f"median {resid.median():+.2f}s, "
+              f"p10 {resid.quantile(0.1):+.2f}s, p90 {resid.quantile(0.9):+.2f}s")
+        print(f"[anchor] that spread IS the quantity being measured -- the "
+              f"median event lands where training put it and the rest do not")
     cat = cat.sort_values("p_epoch").reset_index(drop=True)
 
     zips = sorted(glob.glob(args.zips))
@@ -178,7 +219,7 @@ def main():
             cuts = {}
             for w in lengths:
                 nw = int(round(w * args.fs))
-                a = cut(segs, comps, ev.p_epoch - args.pre, nw, args.fs)
+                a = cut(segs, comps, ev.cut_epoch - args.pre, nw, args.fs)
                 b_ = cut(segs, comps, ev.p_epoch - args.noise_offset, nw, args.fs)
                 if a is None or b_ is None:
                     cuts = None
@@ -189,7 +230,7 @@ def main():
                 continue
             for w, (a, b_) in cuts.items():
                 eq, nzd = dirs[w]
-                write_mseed(a, comps, ev.p_epoch - args.pre, args.station,
+                write_mseed(a, comps, ev.cut_epoch - args.pre, args.station,
                             eq / f"{tag}_raw.mseed", args.fs)
                 write_mseed(b_, comps, ev.p_epoch - args.noise_offset, args.station,
                             nzd / f"noise_{tag}_raw.mseed", args.fs)
