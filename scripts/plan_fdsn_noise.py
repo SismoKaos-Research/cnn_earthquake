@@ -43,9 +43,14 @@ def main():
     print(f"[noise] {len(got):,} event windows exist across "
           f"{got.station.nunique()} stations")
 
-    rows = got.groupby("station", group_keys=False).apply(
-        lambda g: g.sample(min(len(g), args.per_station), random_state=42))
-    rows = rows.copy()
+    # Explicit concat rather than groupby.apply: pandas 3 stopped passing the
+    # grouping column into the applied frame, so `g.sample(...)` came back
+    # without `station` and the next line raised. Iterating the groups keeps
+    # every column and does not depend on that behaviour.
+    rows = pd.concat(
+        [g.sample(min(len(g), args.per_station), random_state=42)
+         for _, g in got.groupby("station")],
+        ignore_index=True)
     span = rows.end - rows.start
     rows["start"] = rows.start - args.offset
     rows["end"] = rows.start + span
