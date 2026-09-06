@@ -37,3 +37,43 @@ runs/
 
 # Ledger mutex files (seismolib ledger_lock) -- zero-byte, machine-local.
 *.jsonl.lock
+
+# ---------------------------------------------------------------------------
+# Measurement outputs. Regenerable from the archives and the commands recorded
+# in runs/ and docs/, and large: on vegs these came to ~630 MB across 60 files.
+# What a write-up cites belongs in docs/, not here.
+# ---------------------------------------------------------------------------
+
+# Continuous-scan scores: one .npz per chunk per arm, 264 files per station set.
+scores_*/
+
+# Per-event tables from `falsealarm report` / `timing` / `station-range`, and
+# the threshold and coincidence tables derived from them.
+*_events.csv
+*_thresholds.csv
+*_range_full.csv
+*_range.csv
+*_alarm_times.csv
+coinc_*.csv
+magprofile_*.csv
+
+# Station amplitude baselines (`falsealarm baseline`), one per station.
+*_baseline.json
+
+# FDSN pull plans, and the record of which rows the archive has nothing for.
+fdsn_pull_*.csv
+fdsn_noise_requests.csv
+fdsn_*misses.txt
+
+# TDVMS campaign ledgers and probe state. These hold plus-addressed emails, so
+# they are also the reason `.env*` is ignored above -- do not commit either.
+*.jsonl
+
+# Trained magnitude arms (trained_model*/ above covers the detector's).
+trained_magreg_*/
+
+# Waveform spot-checks written by `falsealarm verify`.
+verify_sample*/
+
+# Catalogues: rebuilt from AFAD's API in under 30 s by `sk catalog`, and 48 MB.
+catalogs/
