@@ -109,3 +109,25 @@ def taper_vector(n):
         t[:k] = w[:k]
         t[-k:] = w[k:]
     return t
+
+
+def reference_clean(x, fs, freqmin, freqmax):
+    """`seismic_cli.core.clean_and_filter_1d`, transcribed for one window.
+
+    Kept here so the equivalence check runs anywhere -- the real function lives
+    in the seismic_cli project, which is not on the machine that scans.
+    """
+    x = signal.detrend(x, type="linear")
+    x = signal.detrend(x, type="constant")
+    n = len(x)
+    taper_len = int(n * 0.05)
+    if taper_len > 0:
+        w = signal.windows.hann(taper_len * 2)
+        x[:taper_len] *= w[:taper_len]
+        x[-taper_len:] *= w[-taper_len:]
+    nyquist = fs / 2.0
+    actual_freqmax = freqmax if nyquist > freqmax else nyquist - 1.0
+    if actual_freqmax > freqmin:
+        b, a = signal.butter(4, [freqmin, actual_freqmax], btype="bandpass", fs=fs)
+        x = signal.filtfilt(b, a, x)
+    return x

@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from seismolib import continuous as C
+from seismolib.continuous.chunks import reference_clean
 
 
 class _Trace:
@@ -78,3 +79,22 @@ def test_clip_spans_keeps_the_window_grid():
 def test_clip_spans_without_a_restriction_is_the_identity():
     spans = [(0.0, [(0, 0)], 100_000)]
     assert C.clip_spans(spans, None, 100.0, 600, 600) is spans
+
+
+def test_the_vectorized_filter_equals_the_per_window_reference():
+    """`clean_block` must be `clean_and_filter_1d`, only given an axis.
+
+    This is the `verify` subcommand's first check, which until now only ran
+    when someone remembered to invoke it against a dataset directory that no
+    longer exists on either machine. The check itself needs no data at all: it
+    is scipy against scipy on random windows, and it is the one thing standing
+    between a scan and silently scoring windows the training pipeline would
+    never have produced.
+    """
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((64, 600)) * rng.uniform(1, 1e4, (64, 1))
+    got = C.clean_block(x.copy(), 100.0, 1.0, 45.0, C.taper_vector(600))
+    want = np.stack([reference_clean(x[i].copy(), 100.0, 1.0, 45.0)
+                     for i in range(64)])
+    err = np.abs(got - want).max() / np.abs(want).max()
+    assert err < 1e-12, f"max relative difference {err:.3e}"
