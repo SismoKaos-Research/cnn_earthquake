@@ -49,7 +49,7 @@ re-downloading from FDSN. Everything below is derived from them.
 Set once, used throughout:
 
 ```bash
-export DD=~/Projects/Sismokaos/data_downloader
+export DD=~/Projects/Sismokaos/seismic_cli
 export MC=~/Projects/Sismokaos/cnn_earthquake
 ```
 

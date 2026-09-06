@@ -28,7 +28,7 @@ may differ.
 
 Usage:
     python3 src/forecasting/sequence_variance_check.py \\
-        --parquet ~/Projects/sismokaos-cli/dataset_features_chaos_q1_5hz/\\
+        --parquet ~/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz/\\
 bodt_q1_chaos_5hz_features.parquet
 """
 import argparse

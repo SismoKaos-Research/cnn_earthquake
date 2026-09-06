@@ -19,7 +19,7 @@
 # 2010; it is therefore not span-matched to either arm here.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-DD=~/Projects/Sismokaos/data_downloader
+DD=~/Projects/Sismokaos/seismic_cli
 CATS=$DD/catalogs
 OLD=$CATS/archive_superseded_2026-08-30/data_large.csv
 NEW=$CATS/catalog_current.csv

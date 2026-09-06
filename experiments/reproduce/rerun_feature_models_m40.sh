@@ -14,7 +14,7 @@
 # 14 d matches catalog_mlp's horizon so the two families are comparable.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-CAT=~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv
+CAT=~/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv
 FEAT=~/Projects/Sismokaos/feature-extract/results/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy
 mkdir -p logs
 

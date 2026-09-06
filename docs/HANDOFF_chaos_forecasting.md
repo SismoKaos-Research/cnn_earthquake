@@ -51,7 +51,7 @@ A quarter batch (the first 181 of 723 days) was **stopped at 38% for the
 machine move**. It produced nothing — see the warning below. Re-run it there:
 
 ```bash
-cd ~/Projects/sismokaos-cli
+cd ~/Projects/Sismokaos/sismokaos-cli
 ./target/release/sismokaos-cli --config config_chaos_5hz.json \
     run --data-dir ./bodt_q1_chaos_5hz --out-dir ./dataset_features_chaos_q1_5hz
 ```
@@ -65,9 +65,9 @@ its links point at *this* machine's paths — **rebuild it on the new box**:
 
 ```bash
 A=~/Projects/Sismokaos/feature-extract/raw/BODT/aegean_bodt_2024_2026
-mkdir -p ~/Projects/sismokaos-cli/bodt_q1_chaos_5hz
+mkdir -p ~/Projects/Sismokaos/sismokaos-cli/bodt_q1_chaos_5hz
 ls $A | head -181 | while read f; do
-    ln -s $A/$f ~/Projects/sismokaos-cli/bodt_q1_chaos_5hz/$f
+    ln -s $A/$f ~/Projects/Sismokaos/sismokaos-cli/bodt_q1_chaos_5hz/$f
 done
 ```
 
@@ -297,7 +297,7 @@ changes `nz` and so needs care to stay exact.
 
 ```bash
 # Rust side: chaos features present in the binary
-cd ~/Projects/sismokaos-cli && git branch --show-current      # -> testing
+cd ~/Projects/Sismokaos/sismokaos-cli && git branch --show-current      # -> testing
 cargo build --release
 strings target/release/sismokaos-cli | grep -c Z_CORR_DIM     # -> >= 1
 cargo run --release --example chaos_bench                     # per-function timing

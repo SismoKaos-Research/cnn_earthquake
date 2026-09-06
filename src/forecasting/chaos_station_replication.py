@@ -21,9 +21,9 @@ whether the whole ranking agrees is the question that has an answer.
 
 Usage:
     python3 src/forecasting/chaos_station_replication.py \\
-        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv \\
-        --station BODT=~/Projects/sismokaos-cli/.../bodt_q1_chaos_5hz_features.parquet \\
-        --station DAT=~/Projects/sismokaos-cli/.../dat_q1_chaos_5hz_features.parquet
+        --catalog ~/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv \\
+        --station BODT=~/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz/bodt_q1_chaos_5hz_features.parquet \\
+        --station DAT=~/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz/dat_q1_chaos_5hz_features.parquet
 """
 
 import argparse

@@ -25,8 +25,8 @@ answer. The embargo drops the rows adjacent to each boundary.
 
 Usage:
     python3 src/forecasting/chaos_forecast.py \\
-        --parquet ~/Projects/sismokaos-cli/.../bodt_q1_chaos_5hz_features.parquet \\
-        --catalog ~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv
+        --parquet ~/Projects/Sismokaos/sismokaos-cli/.../bodt_q1_chaos_5hz_features.parquet \\
+        --catalog ~/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv
 """
 
 import argparse

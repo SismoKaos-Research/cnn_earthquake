@@ -28,8 +28,8 @@ noise record could not be normalised the way the model expects.
 
 Usage:
     python3 src/detection/stead_to_ponly_mseed.py \\
-        --stead-root ~/Projects/stead_data_process/raw \\
-        --out-root ~/Projects/Sismokaos/data_downloader/raw/data
+        --stead-root ~/Projects/Sismokaos/stead_data_process/raw \\
+        --out-root ~/Projects/Sismokaos/seismic_cli/raw/data
 """
 
 import argparse

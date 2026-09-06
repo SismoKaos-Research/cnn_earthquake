@@ -17,7 +17,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-CATS=~/Projects/Sismokaos/data_downloader/catalogs
+CATS=~/Projects/Sismokaos/seismic_cli/catalogs
 OLD=$CATS/archive_superseded_2026-08-30/data_large.csv
 NEW=$CATS/catalog_current.csv
 FE=~/Projects/Sismokaos/feature-extract/results

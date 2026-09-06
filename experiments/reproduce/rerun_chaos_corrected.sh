@@ -11,8 +11,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-CAT=~/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv
-CLI=~/Projects/sismokaos-cli/dataset_features_chaos_q1_5hz
+CAT=~/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv
+CLI=~/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz
 BODT=$CLI/bodt_q1_chaos_5hz_features.parquet
 DAT=$CLI/dat_q1_chaos_5hz_features.parquet
 mkdir -p logs
