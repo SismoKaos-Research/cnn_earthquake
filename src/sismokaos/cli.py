@@ -39,6 +39,7 @@ COMMANDS = {
     "station-select": ("sismokaos.stations.select_afad_stations", "rank stations by catalogue coverage"),
     "station-range":  ("sismokaos.stations.station_detection_range", "per-event SNR at one station"),
     "station-loss":   ("sismokaos.stations.station_catalog_loss", "what a station's catalogue misses"),
+    "distances":      ("sismokaos.stations.manifest_distances", "recompute a manifest's distance_km from station coordinates"),
     # windowing
     "cut-events": ("sismokaos.windows.cut_event_windows", "cut arrival-anchored windows from continuous record"),
     "cut-length": ("sismokaos.windows.cut_window_length", "re-cut existing windows to another length"),
@@ -59,7 +60,7 @@ COMMANDS = {
 
 GROUPS = [
     ("acquire", ["campaign", "poll", "fdsn", "fdsn-noise", "plan-pull", "catalog"]),
-    ("stations", ["station-select", "station-range", "station-loss"]),
+    ("stations", ["station-select", "station-range", "station-loss", "distances"]),
     ("windows", ["cut-events", "cut-length"]),
     ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
