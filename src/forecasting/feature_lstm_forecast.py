@@ -34,6 +34,7 @@ from seismolib.catalog import (days_since_prev_major, label_hours,
 from seismolib.logging import DualLogger
 from seismolib.metrics import (binary_report, print_report,  # noqa: F401
                                safe_auc)
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.model.sequence import SequenceHeadNet
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.training import seed_everything
@@ -79,8 +80,12 @@ def parse_args():
     p.add_argument("--horizon-days", type=float, default=30.0)
     p.add_argument("--horizons", type=str, default=None)
     p.add_argument("--seq-hours", type=int, default=168)
-    p.add_argument("--hidden", type=int, default=64)
-    p.add_argument("--dropout", type=float, default=0.3)
+    # The whole sequence family, not just the LSTM: all three take (B, T, F)
+    # per-step feature vectors and return one logit, so the training loop below
+    # is already generic over them. Until now this script could only build the
+    # LSTM, and comparing it against a GRU or a TCN meant a separate script
+    # with its own split logic.
+    add_model_args(p, family="sequence")
     p.add_argument("--epochs", type=int, default=60)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=1e-3)
@@ -107,7 +112,7 @@ def train_one_seed(args, seed, feature_cols, features, labels,
     val_ds = HourlySeqDataset(features, labels, args.seq_hours, val_idx, stats=train_ds.stats)
     test_ds = HourlySeqDataset(features, labels, args.seq_hours, test_idx, stats=train_ds.stats)
 
-    model = ForecastLSTM(len(feature_cols), hidden=args.hidden, dropout=args.dropout).to(device)
+    model = spec_from_args(args).build(feat_dim=len(feature_cols)).to(device)
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh)
     train_loader, val_loader, test_loader = dl(train_ds, True), dl(val_ds, False), dl(test_ds, False)

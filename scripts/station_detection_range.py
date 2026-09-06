@@ -24,7 +24,9 @@ import zipfile
 import numpy as np
 import pandas as pd
 from obspy import read, UTCDateTime
-from obspy.taup import TauPyModel
+
+from seismolib.arrivals import ArrivalTimes
+from seismolib.catalog import haversine_km as haversine
 
 EARTH_KM = 6371.0
 NOISE_WIN = (-60.0, -10.0)   # seconds relative to predicted P
@@ -46,11 +48,6 @@ def parse_args():
     return p.parse_args()
 
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def main():
@@ -66,25 +63,13 @@ def main():
     cat["dist"] = haversine(slat, slon, cat.Latitude.values, cat.Longitude.values)
     cat = cat[(cat.dist <= args.max_distance) & (cat.Magnitude >= args.min_magnitude)]
 
-    model = TauPyModel(model="iasp91")
-    # Travel time depends mostly on distance and depth; caching on a coarse grid
-    # avoids ~7,000 taup calls without materially changing the arrival estimate.
-    tt_cache = {}
+    taup = ArrivalTimes(grid_km=5.0)
 
     def p_travel(dist_km, depth_km):
-        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0))
-        if key not in tt_cache:
-            deg = key[0] * 5.0 / 111.195
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 5.0,
-                                             distance_in_degree=deg,
-                                             phase_list=["p", "P", "Pn", "Pg"])
-                tt_cache[key] = arr[0].time if arr else None
-            except Exception:
-                tt_cache[key] = None
-        return tt_cache[key]
+        return taup.travel(dist_km, depth_km)
 
     rows = []
+    sliced_away, last_slice_error = 0, None
     for z in sorted(glob.glob(args.zips)):
         with zipfile.ZipFile(z) as zf, tempfile.TemporaryDirectory() as tmp:
             zf.extractall(tmp)
@@ -115,7 +100,13 @@ def main():
             try:
                 noise = stream.slice(p_time + NOISE_WIN[0], p_time + NOISE_WIN[1])
                 sig = stream.slice(p_time + SIGNAL_WIN[0], p_time + SIGNAL_WIN[1])
-            except Exception:
+            except Exception as e:
+                # Counted, not merely skipped. This table's row count is the
+                # denominator of every "% of events reach SNR 3" figure in the
+                # reports, so events silently vanishing here would shift those
+                # percentages with nothing to show for it.
+                sliced_away += 1
+                last_slice_error = f"{type(e).__name__}: {e}"
                 continue
             # exactly one segment each, at full length: anything else means the
             # window straddles a gap or an edge, and says nothing about the
@@ -140,6 +131,13 @@ def main():
     df = pd.DataFrame(rows)
     df.to_csv(args.out, index=False)
     print(f"\n{len(df)} events measured -> {args.out}")
+    if sliced_away:
+        # This file's row count is the denominator of every "% of events reach
+        # SNR 3" figure in the reports, so events dropped here move those
+        # percentages. Saying how many, and why, is the difference between a
+        # measurement and a number.
+        print(f"[warn] {sliced_away:,} event(s) dropped by a slice error and are "
+              f"NOT in the table; last was {last_slice_error}")
     if len(df):
         print(f"median SNR {df.snr.median():.2f}   "
               f"fraction SNR>=3: {100*(df.snr>=3).mean():.1f}%")

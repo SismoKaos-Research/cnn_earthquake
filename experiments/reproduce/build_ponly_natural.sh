@@ -5,7 +5,7 @@
 # regime -- the one a station actually sees -- and the third column of the
 # transfer matrix alongside matched (amplitude-neutralised) and band (loud).
 set -u
-cd /home/hogib/Projects/Sismokaos/data_downloader
+cd /home/hogib/Projects/Sismokaos/seismic_cli
 .venv/bin/python -m seismic_cli.cli generate-spec-dual-dataset \
   --eq-dir raw/data/batched_waveforms/window_post_3.4s_ponly \
   --noise-dir raw/data/batched_noise_waveforms/noise_pre_3h \

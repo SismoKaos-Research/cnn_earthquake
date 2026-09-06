@@ -140,10 +140,16 @@ def load_waveforms(manifest, data_root, split, limit=None):
         by_file[r.file_path].append((idx, r))
 
     out, labels, kept = [], [], []
+    unreadable, last_read_error = 0, None
     for fpath, group in by_file.items():
         try:
             st = obspy.read(str(Path(data_root) / fpath))
-        except Exception:
+        except Exception as e:
+            # Counted. A baseline that silently skips files it cannot read is
+            # scored on a different set than the model it is compared against,
+            # and the comparison stops meaning anything.
+            unreadable += 1
+            last_read_error = f"{type(e).__name__}: {e}"
             continue
         traces = defaultdict(dict)
         for tr in st:
@@ -166,6 +172,10 @@ def load_waveforms(manifest, data_root, split, limit=None):
             out.append(np.stack(cut))
             labels.append(int(is_event))
             kept.append(idx)
+    if unreadable:
+        print(f"  [warn] {unreadable:,} file(s) could not be read and are excluded "
+              f"from BOTH the baseline and the comparison; last was {last_read_error}",
+              flush=True)
     return np.asarray(out), np.asarray(labels), np.asarray(kept)
 
 

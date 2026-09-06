@@ -4,7 +4,7 @@
 # Only --eq-dir/--noise-dir/--output-dir differ from build_ponly_variants.sh
 # and build_ponly_natural.sh.
 set -u
-cd /home/hogib/Projects/Sismokaos/data_downloader
+cd /home/hogib/Projects/Sismokaos/seismic_cli
 common=(--eq-dir raw/data/batched_waveforms/stead_ponly_3p4s
         --noise-dir raw/data/batched_noise_waveforms/stead_noise
         --window-seconds 3.4 --fs 100 --max --baseline

@@ -14,7 +14,9 @@
 # Sequential: 1d arms are small but the GPU is 3.68 GiB and norm_2d may still
 # be finishing when this starts.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 WAIT_PID=${1:-}
 if [[ -n "$WAIT_PID" ]]; then
@@ -22,7 +24,7 @@ if [[ -n "$WAIT_PID" ]]; then
   while kill -0 "$WAIT_PID" 2>/dev/null; do sleep 30; done
 fi
 
-DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s_baseline
+DATA=/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/dataset_specdual_6s_baseline
 SAVE=trained_model_ozgun_arch
 mkdir -p "$SAVE" logs
 

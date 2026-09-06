@@ -1,6 +1,6 @@
 # Sürekli Veri Üzerinde Kısa Pencereli Deprem Tespitinde Yanlış Alarm Oranları
 
-MANT istasyonuna ait 728 günlük kesintisiz kayıt üzerinde üç sinir ağı ve bir klasik eşik yönteminin karşılaştırılması
+MANT ve GCAM istasyonlarına ait sürekli kayıt üzerinde üç sinir ağı ve bir klasik eşik yönteminin karşılaştırılması; tek istasyon yanlış alarm oranları ve iki istasyon uyuşmasının bunlara etkisi
 
 ---
 
@@ -10,11 +10,11 @@ Kısa pencereli deprem/gürültü sınıflandırıcıları, dengeli sınıflarda
 
 Bu çalışmada, projede geliştirilen üç tespit edici ile klasik bir STA/LTA yöntemi, MANT istasyonuna ait 30 Nisan 2024 – 9 Ağustos 2026 arasındaki 728 günlük kesintisiz kayıt üzerinde, aynı pencerelerde ve aynı ön işlemeyle karşılaştırılmıştır. Toplam 10,5 milyon (6 saniyelik model) ve 18,5 milyon (3,4 saniyelik modeller) pencere puanlanmıştır.
 
-Dört ana bulgu elde edilmiştir. **(1)** Sınama kümesinde belirlenen 0,5 eşiği sürekli veriye aktarılamamaktadır: öngörülen günde 257 yanlış alarma karşılık ölçülen değer 12.599'dur, çünkü 6 saniyelik model sürekli gürültü üzerinde 0,80 ortanca puan vermektedir. **(2)** Nedeni, genlik madenciliğinin negatif sınıfa koyduğu taban ile fiziğin pozitif sınıfa koyduğu taban arasında kalan ve modelin hiç eğitim verisi görmediği bir **sessizlik bölgesidir**; sürekli arka plan tam olarak orada bulunmaktadır. **(3)** Olay düzeyinde AUC ile işletme çalışma noktası, dört tespit ediciyi **ters sırada** dizmektedir. **(4)** Açıklanamayan alarmlar günlük döngü göstermektedir (gündüz/gece 1,7–2,1 kat), bu da önemli bir bölümünün kataloglanmamış deprem değil kültürel gürültü olduğunu göstermektedir.
+Dört ana bulgu elde edilmiştir. **(1)** Sınama kümesinde belirlenen 0,5 eşiği sürekli veriye aktarılamamaktadır: öngörülen günde 257 yanlış alarma karşılık ölçülen değer 12.599'dur, çünkü 6 saniyelik model sürekli gürültü üzerinde 0,80 ortanca puan vermektedir. **(2)** Nedeni, genlik madenciliğinin negatif sınıfa koyduğu taban ile fiziğin pozitif sınıfa koyduğu taban arasında kalan ve modelin hiç eğitim verisi görmediği bir **sessizlik bölgesidir**; sürekli arka plan tam olarak orada bulunmaktadır. **(3)** Olay düzeyinde AUC ile işletme çalışma noktası, dört tespit ediciyi **ters sırada** dizmektedir. **(4)** Açıklanamayan alarmlar günlük döngü göstermektedir (gündüz/gece 1,7–2,1 kat), bu da önemli bir bölümünün kataloglanmamış deprem değil kültürel gürültü olduğunu göstermektedir. **(5)** Yanlış alarm oranı **istasyona özgüdür**: aynı model, aynı ön işlemeyle, MANT'ta 0,80 olan arka plan ortancasını GCAM'de 0,12 vermektedir. **(6)** İki istasyonun uyuşması şart koşulduğunda kazanç **istasyon uzaklığına bağlıdır**: 63 km aralıklı çiftte yanlış alarmlar bağımsızlık varsayımının öngördüğünün 29–58 katı örtüşmekte, 144 km aralıklı çiftte ise varsayım geçerli olmaktadır (1,1–2,2 kat). Uzak çift, **aynı duyarlılıkta on kat daha az** yanlış bildirim üretmektedir — 23 günde bir, 2,4 güne karşılık.
 
 Ayrıca P varışının S dalgasından önce bildirilebilme oranı uzaklığa göre ölçülmüş ve bu yeteneğin pencere boyunun dayattığı bir **başabaş uzaklığa** bağlı olduğu gösterilmiştir.
 
-**Anahtar sözcükler:** deprem tespiti, sürekli veri, yanlış alarm oranı, çalışma noktası, STA/LTA, derin öğrenme
+**Anahtar sözcükler:** deprem tespiti, sürekli veri, yanlış alarm oranı, çalışma noktası, ağ uyuşması, istasyonlar arası aktarım, STA/LTA, derin öğrenme
 
 ---
 
@@ -45,6 +45,42 @@ AFAD katalogunda istasyondan 500 km içinde ve ilgili dönemde 62.494 olay bulun
 Kalan olaylar için sinyal-gürültü oranı (SGO), iasp91 hız modeliyle kestirilen P varışı çevresinde ölçülmüştür (sinyal penceresi [−1, +12] s, gürültü penceresi [−60, −10] s). 47.522 olay için ölçüm yapılabilmiştir. **Ortanca SGO 1,39'dur ve olayların yalnızca %27'si SGO 3 eşiğini aşmaktadır.** Yani katalogdaki tipik deprem MANT'ın ham kaydında görünür bir iz bırakmamaktadır.
 
 Bu, değerlendirme için bağlayıcı bir kısıttır. Bütün katalog olaylarına karşı ölçüldüğünde olay düzeyinde AUC 0,67–0,73 çıkmaktadır; bu değer modelin değil, **katalogun erişiminin** ölçüsüdür. Bu nedenle bu çalışmadaki bütün duyarlılık değerleri, SGO≥3 koşulunu sağlayan **13.056 olay** üzerinde raporlanmaktadır.
+
+### 2.3 İkinci ve üçüncü istasyonlar (GCAM, DEMI)
+
+Ölçümlerin ikinci bir istasyonda yinelenebilmesi ve ağ uyuşmasının ölçülebilmesi
+için iki istasyon daha aynı yöntemle indirilmiş ve puanlanmıştır.
+
+| İstasyon | Konum | İlçe | Puanlanan gün | Ortanca SGO | SGO≥3 oranı |
+|---|---|---|---|---|---|
+| MANT | 38,4908 K / 28,5579 D | Kula, Manisa | 728,3 | 1,39 | %27,0 |
+| DEMI | 39,0428 K / 28,7162 D | Demirci, Manisa | 472,1 | **2,60** | **%46,7** |
+| GCAM | 37,7139 K / 27,2418 D | Kuşadası, Aydın | 172,8 | 1,06 | %11,7 |
+
+Çizelge 3b. Üç istasyonun kayıt süresi ve kaydedilebilirliği.
+
+GCAM 9 Aralık 2024'ten sonra kayıt üretmemektedir; aynı sayıda istek
+karşılığında MANT'ın 728 gününe karşılık 172,8 gün elde edilmiştir. Bu tek
+başına, bir kampanyaya girişmeden önce istasyon çalışma süresinin yoklanması
+gerektiğini göstermektedir. DEMI ise MANT'ın kaydının neredeyse tamamıyla
+örtüşmekte ve üç istasyon arasında en duyarlı olanıdır.
+
+İstasyon çiftleri arasındaki uzaklıklar ve aynı anda kayıtta oldukları süreler:
+
+| Çift | Uzaklık | Ortak süre | İki istasyonda birden SGO≥3 olay |
+|---|---|---|---|
+| MANT–DEMI | **63 km** | 400,0 gün | **4.645** |
+| MANT–GCAM | **144 km** | 159,0 gün | 132 |
+| DEMI–GCAM | **196 km** | 57,7 gün | 48 |
+
+Çizelge 3c. İstasyon çiftleri. Bölüm 4.9'daki bütün uyuşma ölçümleri yalnızca
+ortak sürede yapılmıştır; bir istasyonun kayıtta olmadığı bir aralıkta
+diğerinin alarmını "doğrulanmamış" saymak ölçüm değil eksik veri olurdu.
+
+Son sütun bu çalışmanın bağlayıcı kısıtıdır. Uyuşma kuralının duyarlılığı
+yalnızca iki istasyonda **birden** kaydedilmiş olaylar üzerinde
+değerlendirilebilir, ve bu sayı MANT–DEMI için 4.645 iken diğer iki çift için
+48 ile 132 arasındadır.
 
 ## 3. Yöntem
 
@@ -89,6 +125,41 @@ Karakteristik işlev pencere başına değil **sürekli parça üzerinde** hesap
 Sınama kümesinin 0,5 eşiği sürekli veride anlamsızdır (Bölüm 4.1). Bunun yerine kabul edilebilir **günlük yanlış alarm bütçesi** belirlenmekte ve o bütçeyi veren eşik, ölçülen arka plan dağılımının ilgili yüzdeliğinden okunmaktadır. Arka plan, hiçbir katalog olayının koruma aralığına ([P−10 s, P+60 s]) düşmeyen pencerelerden oluşmaktadır.
 
 Yanlış bildirimler sayılırken alarmlar 60 saniyelik pencerede kümelenmektedir; böylece on ardışık pencereye yayılan tek bir gürültü patlaması on değil bir yanlış bildirim saymaktadır.
+
+### 3.6 İki istasyon uyuşması
+
+Uyuşma kuralı şöyle tanımlanmıştır. Her istasyonun alarmları önce kümelenmekte
+(60 s'den yakın alarmlar tek bir bildirim sayılmakta, aksi hâlde on pencere
+süren tek bir gürültü patlaması on yanlış pozitif olarak sayılırdı), ardından
+bir istasyonun her bildirimi için diğerinin ±*w* saniye içinde bir bildirimi
+olup olmadığına bakılmaktadır.
+
+**Kataloglanmış olaylar her iki akıştan da çıkarılmaktadır.** Gerçek bir deprem
+iki istasyonda da tanım gereği görülmektedir; akışlarda bırakıldığında her biri
+garantili bir uyuşma üretmekte ve ölçülen oran, iki istasyonun gürültüsünün ne
+kadar örtüştüğünü değil, sürede kaç deprem olduğunu ölçmektedir. MANT–DEMI
+çiftinde bu fark belirleyicidir: ortak sürede günde 11,6 kataloglanmış olay
+SGO 3'ü aşmakta, ölçülen uyuşma ise günde 0,425'tir — yani olaylar tek başına
+ölçümün tamamını açıklayabilirdi. Bu nedenle bildirimler yalnızca hiçbir
+kataloglanmış olayın koruma penceresine düşmeyen pencerelerden sayılmaktadır.
+
+*w* keyfi bir ayar değildir. İki istasyonda P varışları arasındaki fark en büyük
+değerini olay ikisini birleştiren doğru üzerinde olduğunda alır ve bu değer
+**uzaklık / Vp**'dir: MANT–DEMI için 10,5 s, MANT–GCAM için 24,0 s, DEMI–GCAM
+için 32,6 s. Katalog olaylarında ölçülen |ΔP| farkları sırasıyla 0,0–11,2 s,
+0,9–23,0 s ve 1,2–27,7 s aralığındadır; seçilen pencereler fiziksel sınırı
+kapsamakta, ancak payları yoktur.
+
+**İki istasyon aynı eşiğe değil, aynı bütçeye ayarlanmaktadır.** Arka plan
+dağılımları birbirinden çok farklı olduğundan (Bölüm 4.8) ortak bir sayısal eşik
+iki istasyonda aynı anlama gelmemektedir.
+
+Ölçülen uyuşma oranı, **iki bağımsız akışın üreteceği oranla**
+karşılaştırılmaktadır. Oranları *r*_A ve *r*_B olan iki bağımsız Poisson akışı
+için, A'nın bir bildiriminin ±*w* içinde en az bir B bildirimi bulundurma
+olasılığı 1 − exp(−*r*_B·2*w*)'dir. (Sıkça kullanılan *r*_A·*r*_B·2*w* çarpımı
+çift sayısını verir; burada ölçülen nicelik "en az bir eşleşmesi olan A
+bildirimi" olduğundan doğru karşılaştırma üstel biçimdir.)
 
 ## 4. Bulgular
 
@@ -215,6 +286,119 @@ Bu bölümün sayıları 6 parçalık bir alt kümeye (2.445 olay) dayanmakta ve
 
 Günde 100 yanlış alarm — yaklaşık saatte dört — kabul edilebiliyorsa kaydedilmiş depremlerin %86'sı bulunmaktadır. Bütçe günde 10'a indirildiğinde duyarlılık %74'e, günde 1'e indirildiğinde %32'ye gerilemektedir: **bütçenin son bir mertebelik daralması duyarlılığın yarısından fazlasına mal olmaktadır.**
 
+### 4.8 Yanlış alarm oranı istasyona özgüdür
+
+Aynı model, aynı ön işleme ve aynı eşik türetme yöntemiyle üç istasyonda
+çalıştırıldığında arka plan dağılımları örtüşmemektedir:
+
+| | MANT (728,3 gün) | DEMI (472,0 gün) | GCAM (172,8 gün) |
+|---|---|---|---|
+| p50 | **0,8019** | **0,8358** | **0,1205** |
+| p90 | 0,8272 | 0,8378 | 0,3594 |
+| p99 | 0,8345 | 0,8395 | 0,7543 |
+| p99,9 | 0,8472 | 0,8644 | 0,8377 |
+| en büyük | 0,9031 | 0,9025 | 0,9022 |
+| 0,5 üzeri parça aralığı | ~%92,7 | %93,8–99,8 | **%0,44–17,4** |
+| σ_Z (uzun dönem) | 963,4 | **2130,4** | **362,9** |
+
+Çizelge 10. 6 saniyelik modelin arka plan puan dağılımı, üç istasyon.
+
+**Üç istasyondan ikisinde model kullanılamaz durumdadır, birinde değildir.**
+MANT ve DEMI'de sessiz kaydın neredeyse tamamı 0,5 eşiğini aşmakta (ortanca
+0,80 ve 0,84), GCAM'de ise ortanca pencere 0,12 puan almakta, yani model orada
+beklendiği gibi davranmaktadır. Fark ortancada 6,7 kattır ve parça bazında
+GCAM'in oranı %0,44 ile %17,4 arasında değişirken diğer ikisi hiçbir parçada
+%90'ın altına inmemektedir.
+
+Bu bulgu Bölüm 4.2'deki tanıyı iki bağımsız istasyonda desteklemektedir, ve
+sıralama σ ile **tek yönlüdür**: σ_Z 2130 olan DEMI en yüksek, 963 olan MANT
+ortada, 363 olan GCAM en düşük arka plan puanını vermektedir. Mekanizma bununla
+tutarlıdır — σ ender büyük genlikli olaylarca belirlendiğinden, σ'sı büyük olan
+istasyonda tipik pencere kendi σ'sının daha küçük bir kesridir, yani genlik
+ekseninde sessizlik boşluğunun daha derinine düşmektedir.
+
+**Bu bir tutarlılık gözlemidir, kanıt değildir.** İstasyonlar arası ham sayım
+değerleri cihaz duyarlılığına bağlıdır ve burada cihaz tepkisi giderilmemiştir;
+bağı kesinleştirmek için her istasyonun tipik pencere genliğinin kendi σ'suna
+oranının ölçülmesi gerekmektedir, ki bu ayrı bir arşiv taraması demektir.
+
+İşletme sonucu bundan bağımsız olarak geçerlidir: **bir istasyonda ölçülen
+yanlış alarm oranı başka bir istasyona aktarılamaz.** Eşik, her istasyon için
+kendi kaydından türetilmek zorundadır. Bu, önceki sürümde "tek istasyon"
+başlığıyla açık bir sınırlılık olarak bırakılmış olan sorunun yanıtıdır; yanıt,
+değişkenliğin küçük olmadığıdır.
+
+Kaydedilebilirlik de üç istasyonda farklıdır: SGO≥3 oranı DEMI'de %45,2,
+MANT'ta %27,0, GCAM'de %11,7'dir. Günde 10 alarm bütçesinde SGO≥3 olaylarının
+bulunma oranı sırasıyla 0,528, 0,741 ve 0,639'dur.
+
+### 4.9 Uyuşmanın kazancı istasyon uzaklığına bağlıdır
+
+Her istasyon **günde 10 alarm** bütçesine ayarlandığında, ortak kayıt sürelerinde
+ölçülen değerler (yalnızca kataloglanmamış bildirimler):
+
+| Çift | Uzaklık | Model | A/gün | B/gün | 2/2 uyuşma/gün | Bağımsız olsaydı | **Fazlalık** | Duyarlılık | Uyuşma sayısı |
+|---|---|---|---|---|---|---|---|---|---|
+| MANT–DEMI | 63 km | P-öncelikli | 7,53 | 8,10 | 0,425 | 0,0148 | **28,8×** | 0,369 | 170 |
+| MANT–DEMI | 63 km | 6 s | 6,94 | 7,33 | 0,709 | 0,0123 | **57,5×** | 0,563 | 284 |
+| MANT–GCAM | 144 km | P-öncelikli | 8,33 | 8,85 | **0,044** | 0,0408 | **1,1×** | 0,371 | 7 |
+| MANT–GCAM | 144 km | 6 s | 6,59 | 8,71 | **0,069** | 0,0318 | **2,2×** | 0,444 | 11 |
+| DEMI–GCAM | 196 km | P-öncelikli | 7,73 | 9,17 | 0,139 | 0,0534 | 2,6× | 0,125 | 8 |
+
+Çizelge 11. İki istasyon uyuşması, günde 10 alarm bütçesinde.
+
+**Birbirine yakın iki istasyonun yanlış alarmları örtüşmektedir; uzak olanlarınki
+örtüşmemektedir.** 63 km aralıklı çiftte ölçülen uyuşma, bağımsızlık
+varsayımının öngördüğünün 29–58 katıdır. 144 km aralıklı çiftte 1,1–2,2 kat,
+yani varsayım pratikte geçerlidir. İki tespit edici bu sonucu birbirinden
+bağımsız olarak vermektedir; dolayısıyla bulgu tek bir modelin özelliği
+değildir.
+
+İşletme sonucu doğrudandır: **uzak çift, aynı duyarlılıkta on kat daha az yanlış
+bildirim üretmektedir.** 144 km'de 23 günde bir, 63 km'de 2,4 günde bir yanlış
+bildirim. Bunu yalnızca ölçerek görmek mümkündür, çünkü aritmetik tersini
+söylemektedir: yakın çiftin uyuşma penceresi daha dardır (±10,5 s'ye karşı
+±24,0 s) ve rastlantısal uyuşmayı azaltması beklenir. Örtüşme bu avantajı
+tümüyle silmektedir.
+
+**Örneklem büyüklüğü konusunda açık olmak gerekir.** Yukarıdaki son sütun
+uyuşma sayısıdır ve üç çift eşit güvenilirlikte değildir:
+
+- MANT–DEMI, 170 ve 284 uyuşma üzerinde ölçülmüştür. Poisson belirsizliği ±13
+  ve ±17'dir; 29–58 kat fazlalık güvenle 1'in üzerindedir. **Bu bulgu sağlamdır.**
+- MANT–GCAM ve DEMI–GCAM ise 7, 11 ve 8 uyuşma üzerinde ölçülmüştür (±2,6–3,3).
+  Bu sayılarla 1 kat ile 3 kat ayırt edilemez. "144 km'de tam bağımsızlık"
+  **iddia edilememektedir**; 196 km'nin 144 km'den yüksek çıkması da gürültüdür.
+
+Buna karşılık **oran farkı örneklem etkisi değildir**: uzak çift yakın çift
+kadar örtüşseydi GCAM'in 159 gününde yaklaşık 68 uyuşma beklenirdi, 7 ölçülmüştür.
+
+**Fazlalık, eşik sıkılaştıkça büyümektedir** (MANT–DEMI, P-öncelikli): günde 100
+alarmda 3,3×, 30'da 9,7×, 10'da 28,8×, 3'te 85,8×. Gevşek eşiklerde neredeyse
+her pencere alarm verdiğinden uyuşma rastlantıya yakındır; eşik sıkıldıkça
+ayakta kalan uyuşmalar giderek daha çok gerçekten paylaşılan bir sinyalin izini
+taşımaktadır. İki olası açıklama vardır ve bu ölçümle ayırt edilememektedir:
+
+1. **Ortak kaynaklı gürültü.** 63 km aralıklı iki istasyon hava koşullarını,
+   bölgesel gürültü alanını ve Bölüm 4.4'te görülen kültürel etkinliği büyük
+   ölçüde paylaşmaktadır. Bunlar gerçek yanlış alarmlardır ve hiçbir ağ kuralı
+   temizleyemez.
+2. **Katalogda bulunmayan gerçek depremler.** 63 km aralıklı iki istasyonun
+   10 saniye içinde yüksek puanlı bir geçici sinyalde uyuşması, tam olarak
+   yakın bir gerçek depremin görünümüdür — ve DEMI üç istasyonun en duyarlısıdır.
+
+Bu nedenle günde 0,425 değeri **yanlış alarm için bir üst sınır**, kaçırılmış
+katalog olayları için bir alt sınırdır. Ortak sürede 170 uyuşan bildirim
+bulunmaktadır; bu elle incelenebilir bir listedir ve iki açıklamayı ayırmanın
+yolu budur.
+
+**Duyarlılık bedeli.** İki istasyon şart koşulduğunda SGO≥3 olaylarının bulunma
+oranı MANT–DEMI'de 0,369 (P-öncelikli) ve 0,563 (6 s) olmaktadır. Bu değerler
+tek istasyon duyarlılığıyla **doğrudan karşılaştırılamaz**: tek istasyon
+duyarlılığı MANT'ta 13.056 olay üzerinde, uyuşma duyarlılığı ise iki istasyonda
+birden SGO≥3 koşulunu sağlayan olaylar üzerinde ölçülmektedir (MANT–DEMI için
+4.645, diğer çiftler için 48–133).
+
 ## 5. Tartışma
 
 **Düzenlenmiş sınama kümesi bir çalışma noktası belirleyememektedir.** 6 saniyelik modelin 0,9896 AUC değeri geçerliliğini korumaktadır; aktarılamayan şey AUC değil, o küme üzerinde belirlenen eşiktir. Bu ayrım önemlidir, çünkü yayımlanmış başarım değerleri genellikle eşikle birlikte raporlanmakta ve eşik sessizce taşınmaktadır.
@@ -225,10 +409,28 @@ Günde 100 yanlış alarm — yaklaşık saatte dört — kabul edilebiliyorsa k
 
 **Öncelik süresi bir mimari sınırdır.** Varış sonrası bağlam gerektiren bir model, doğrudan başlangıca tepki veren bir orana yetişememektedir. İyileştirmenin yolu tarama biçimi değil, varış sonrası kısmı daha kısa olan bir pencereyle yeniden eğitmektir — bu da tespit başarımından ödün vermek anlamına gelmektedir.
 
+**Ağ uyuşmasının kazancı bir geometri sorusudur, aritmetik sorusu değil.**
+Yayımlanmış tartışmalarda 2/N uyuşmasının getirisi genellikle bağımsızlık
+varsayımı altında hesaplanmaktadır. Bu çalışmada varsayım 144 km'de geçerli,
+63 km'de ise 29–58 kat yanlış çıkmaktadır. Yani soru "2/N ne kadar kazandırır"
+değil, "**istasyonlar birbirinden ne kadar uzak**" sorusudur; ve aritmetik bu
+noktada yanıltıcıdır, çünkü yakın çiftin uyuşma penceresi daha dar olduğundan
+kâğıt üzerinde daha iyi görünmektedir.
+
+**Ölçüm iki yönlü bilgi vermektedir.** Uyuşan alarmların bir bölümü kataloglanmamış
+deprem ise, aynı ölçüm hem yanlış alarm oranına üst sınır koymakta hem de
+katalogun eksikliğine alt sınır koymaktadır. Bölüm 4.4'teki günlük döngü,
+MANT'ta tek istasyon alarmlarının önemli bir bölümünün kültürel olduğunu
+göstermişti; iki istasyon uyuşması bu ayrımı yapmanın ikinci ve daha doğrudan
+yoludur.
+
 ### 5.1 Sınırlılıklar
 
-- **Tek istasyon.** İstasyonlar arası değişkenlik ölçülmemiştir.
-- **İlişkilendirme öncesi.** İşletimdeki bütün erken uyarı sistemleri yanlış alarmları birden çok istasyonun uyuşmasını şart koşarak bastırmaktadır; buradaki oranlar bir ağ için **üst sınırdır**.
+- **Üç istasyon bir ağ değildir.** Bölüm 4.8 ve 4.9 ile önceki sürümdeki "tek istasyon" ve "ilişkilendirme öncesi" sınırlılıkları giderilmiştir; ancak 2/N kuralının N>2 için davranışı ölçülmemiştir.
+- **Uzaklık ekseninde yalnızca bir nokta sağlamdır.** MANT–DEMI 170 ve 284 uyuşma üzerinde ölçülmüştür; diğer iki çift 7–11 uyuşma üzerinde. Örtüşmenin hangi uzaklıkta kaybolduğu **belirlenmemiştir**, yalnızca 63 km'de güçlü ve 144 km'de zayıf olduğu gösterilmiştir. Bunu daraltmak için uzun süre eşzamanlı kayıt yapan daha çok istasyon çifti gerekmektedir; GCAM 9 Aralık 2024'te durduğundan bu veriyle daraltılamaz.
+- **Uzaklık, istasyon ve mevsimle karışmaktadır.** Üç çiftin ortak süreleri farklı takvim aralıklarını kapsamaktadır (400, 159 ve 58 gün), dolayısıyla "uzaklık" etkisi istasyonların kendi gürültü ortamlarından ve mevsimden tam olarak ayrıştırılmış değildir.
+- **Fazlalığın kaynağı ayrıştırılmamıştır.** MANT–DEMI'de ölçülen 29–58 katlık fazlalığın ne kadarının ortak gürültü, ne kadarının kataloglanmamış deprem olduğu belirlenmemiştir; 170 uyuşan bildirimin elle incelenmesi gerekmektedir.
+- **Uyuşma pencerelerinin payı yoktur.** Her çift için ±uzaklık/Vp fiziksel sınırdır ve ölçülen en büyük farklar bu sınırın hemen altındadır; istasyon çifti değiştiğinde yeniden hesaplanmalıdır.
 - **Gecikme ayrıştırması yapılmamıştır.** Yalnızca model terimi bilinmektedir; telemetri, tamponlama ve karar aktarımı dâhil değildir.
 - **Kalibre edilmemiş belirsizlik.** Sinir ağı çıkışları kalibre edilmiş olasılık değildir.
 - **Ayarlanmamış karşılaştırma tabanı.** STA/LTA için ders kitabı değerleri (0,5/10 s) kullanılmıştır; ayarlanmış bir klasik seçici daha iyi başarım gösterebilir.
@@ -241,6 +443,9 @@ Günde 100 yanlış alarm — yaklaşık saatte dört — kabul edilebiliyorsa k
 4. Açıklanamayan alarmların günlük döngüsü, önemli bir bölümünün kültürel gürültü olduğunu göstermektedir.
 5. S dalgasından önce bildirim yeteneği, pencere boyunun dayattığı bir başabaş uzaklığa bağlıdır (~38 km ve ~24 km); 25 km içinde her iki model de çoğunlukla geç kalmaktadır.
 6. Öncelik süresi tarama sıklığıyla iyileştirilememektedir; bu bir ayar sorunu değil mimari bir sınırdır.
+7. Yanlış alarm oranı istasyona özgüdür: aynı model MANT'ta 0,80, DEMI'de 0,84, GCAM'de 0,12 arka plan ortancası vermektedir ve sıralama istasyonun uzun dönem σ'suyla tek yönlüdür. Eşik her istasyon için kendi kaydından türetilmelidir.
+8. İki istasyonun uyuşmasının kazancı istasyon uzaklığına bağlıdır. 63 km aralıklı çiftte yanlış alarmlar bağımsızlığın öngördüğünün 29–58 katı örtüşmekte, 144 km'de varsayım geçerli olmaktadır. Uzak çift aynı duyarlılıkta on kat daha az yanlış bildirim vermektedir (23 günde bir, 2,4 güne karşılık). Bir ağ tasarlanırken istasyonların birbirine yakınlığı bir avantaj değil, maliyettir.
+9. Bu fazlalığın bir bölümü kataloglanmamış deprem olabilir; iki istasyonun 10 saniye içinde uyuşması gerçek bir yakın depremin görünümüdür. Dolayısıyla ölçülen uyuşma oranı yanlış alarm için bir **üst sınır**, katalog eksikliği için bir alt sınırdır.
 
 Bu çalışma, kısa pencereli sınıflandırıcıların sürekli veride kullanılamayacağını göstermemektedir. Gösterdiği şey, **düzenlenmiş bir sınama kümesinde belirlenen çalışma noktasının sürekli veriye taşınamayacağı** ve tespit edicilerin yalnızca toplulaştırılmış bir ölçütle karşılaştırılmasının yanıltıcı olabileceğidir.
 
@@ -254,4 +459,4 @@ Zhu, W., & Beroza, G. C. (2019). PhaseNet: A deep-neural-network-based seismic a
 
 ---
 
-*Ölçümler `scripts/continuous_false_alarms.py` ile yapılmıştır. Puan dosyaları ve eşik çizelgeleri `scores_mant/` ve `final_*.csv` altındadır.*
+*Ölçümler `scripts/continuous_false_alarms.py` ile yapılmıştır (`baseline`, `scan`, `report`, `timing`, `coincidence` alt komutları). Puan dosyaları `scores_mant/` ve `scores_gcam/`, eşik ve uyuşma çizelgeleri `final_*.csv`, `gcam_6s_*.csv` ve `coinc_*_coincidence.csv` altındadır.*

@@ -16,7 +16,9 @@
 # This dataset scanned CLEAN for fp16 (max 21.6), so asinh is a no-op here --
 # passed only to keep the pipeline identical to every other arm.
 set -u
-cd /home/hogib/Projects/model_cnn_lstm
+# Repo root from this script's own location, not an absolute path: the
+# checkout moves and a hardcoded `cd` then lands nowhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 WAIT_PID=${1:-}
 if [[ -n "$WAIT_PID" ]]; then
@@ -25,7 +27,7 @@ if [[ -n "$WAIT_PID" ]]; then
   echo "ozgun re-check finished at $(date -Is); starting normalised grid"
 fi
 
-DATA=/home/hogib/Projects/Sismokaos/data_downloader/raw/data/dataset_specdual_6s
+DATA=/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/dataset_specdual_6s
 SAVE=trained_model_norm_branch1d
 mkdir -p "$SAVE" logs
 

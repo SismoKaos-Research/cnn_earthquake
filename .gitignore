@@ -34,3 +34,6 @@ docs/tubitak/*.docx
 # Not tracked: they are machine-local evidence, and a shared repo would collide
 # on every parallel run. Copy the ones a write-up cites into docs/ instead.
 runs/
+
+# Ledger mutex files (seismolib ledger_lock) -- zero-byte, machine-local.
+*.jsonl.lock

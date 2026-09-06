@@ -35,6 +35,7 @@ COMMANDS = {
     "campaign":   ("afad_campaign.py", "TDVMS ledger: plan, submit, paste, status, mark, reset"),
     "poll":       ("afad_imap.py", "watch the mailbox, fetch links, refill freed queue slots"),
     "fdsn":       ("fdsn_magnitude_pull.py", "plan/fetch event windows from KOERI FDSN (KO network)"),
+    "fdsn-noise": ("plan_fdsn_noise.py", "plan noise windows for the stations an FDSN pull returned"),
     "plan-pull":  ("plan_pbefores_pull.py", "plan a TDVMS pull that can report before S"),
     "catalog":    ("fetch_afad_catalog.py", "rebuild the event catalogue from AFAD's API"),
     # stations
@@ -47,17 +48,25 @@ COMMANDS = {
     # evaluation
     "falsealarm": ("continuous_false_alarms.py", "false-alarm rate on continuous data"),
     "magprofile": ("magnitude_error_profile.py", "where a magnitude regressor's error lives"),
+    # training
+    "train":      ("train.py", "train a model against one of this repo's labels"),
+    # what is going on
+    "status":     ("status.py", "what is running, how far along, and did the last run work"),
+    "models":     ("models.py", "the model registry: architectures, branches, flags"),
     # reporting
     "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
+    "pdf":        ("md2pdf.py", "Markdown -> .pdf (run through uv; see its docstring)"),
     "figures":    ("make_report_figures.py", "report figures"),
 }
 
 GROUPS = [
-    ("acquire", ["campaign", "poll", "fdsn", "plan-pull", "catalog"]),
+    ("acquire", ["campaign", "poll", "fdsn", "fdsn-noise", "plan-pull", "catalog"]),
     ("stations", ["station-select", "station-range", "station-loss"]),
     ("windows", ["cut-events", "cut-length"]),
+    ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
-    ("report", ["docx", "figures"]),
+    ("report", ["docx", "pdf", "figures"]),
+    ("inspect", ["status", "models"]),
 ]
 
 

@@ -72,6 +72,7 @@ from seismolib.catalog import days_since_prev_major
 from seismolib.metrics import (binary_report, print_report, regression_report,
                                safe_auc, safe_mcc)
 from seismolib.model.dual_channel import DualChannelDualHeadNet
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.training import seed_everything
 
 AUX_FEATURES = ["log_duration_days", "log_rate", "log_rate_recent", "rate_accel",
@@ -351,16 +352,13 @@ def parse_args():
     p.add_argument("--dataset-dir", required=True,
                   help="Directory from `seismic-cli generate-catalog-forecast-dataset`.")
     p.add_argument("--save-dir", default="trained_model_cnnlstm_forecast")
-    p.add_argument("--channels", default="all",
-                  choices=["all", "1d", "2d", "aux", "1d+aux", "2d+aux"],
-                  help="Ablation switch: which branches to enable.")
+    # Gains --fusion and --model-branch, which this task never had: both belong
+    # to the shared trunk, and only the detection scripts ever exposed them.
+    add_model_args(p, family="dual")
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight-decay", type=float, default=1e-2)
-    p.add_argument("--hidden", type=int, default=64)
-    p.add_argument("--fusion-dim", type=int, default=128)
-    p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--patience", type=int, default=12)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-workers", type=int, default=2)
@@ -402,9 +400,12 @@ def main():
     print("=" * 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DualChannelForecastNet(train_ds.seq_dim, train_ds.img_shape[0], train_ds.aux_dim,
-                                   hidden=args.hidden, fusion_dim=args.fusion_dim,
-                                   dropout=args.dropout, channels=args.channels).to(device)
+    # head="dual" is what selects DualChannelDualHeadNet, the two-head trunk
+    # DualChannelForecastNet subclasses. Same network, built from the spec so
+    # the architecture can be recorded rather than reconstructed from flags.
+    spec = spec_from_args(args)
+    model = spec.build(seq_dim=train_ds.seq_dim, img_channels=train_ds.img_shape[0],
+                       aux_dim=train_ds.aux_dim, head="dual").to(device)
     print(f"Device: {device} | parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     dl = lambda ds, sh: DataLoader(ds, batch_size=args.batch_size, shuffle=sh,

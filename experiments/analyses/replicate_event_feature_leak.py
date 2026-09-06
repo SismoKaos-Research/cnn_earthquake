@@ -42,7 +42,7 @@ EVENT_COLS = ["Latitude", "Longitude", "Mesafe_Derecesi", "Deprem_Sayisi"]
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--parquet", default="/home/hogib/Projects/sismokaos-cli/"
+    p.add_argument("--parquet", default="/home/hogib/Projects/Sismokaos/sismokaos-cli/"
                    "dataset_features_chaos_q1_5hz/bodt_q1_chaos_5hz_features.parquet")
     p.add_argument("--catalog", default="/home/hogib/Projects/Sismokaos/"
                    "data_downloader/catalogs/catalog_current.csv")

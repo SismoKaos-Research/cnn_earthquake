@@ -82,6 +82,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from forecasting.cnn_lstm import LSTMAttentionBranch
 from groundmotion.groundmotion_baselines import TARGETS, load
 from seismolib.metrics import print_report, regression_report
+from seismolib.model.registry import add_model_args, spec_from_args
 from seismolib.training import seed_everything
 
 # ---------------------------------------------------------------------------
@@ -424,8 +425,7 @@ def train_one(args, data, n_aux, device, seed):
     val_loader = DataLoader(TensorDataset(*va), batch_size=512)
     test_loader = DataLoader(TensorDataset(*te), batch_size=512)
 
-    model = GroundMotionNet(arch=args.arch, n_aux=n_aux, width=args.width,
-                            hidden=args.hidden, dropout=args.dropout).to(device)
+    model = args.model_spec.build(aux_dim=n_aux).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     lossf = nn.L1Loss()                      # MAE in log space, the headline metric
@@ -531,7 +531,12 @@ def parse_args():
     p = argparse.ArgumentParser(description="Peak ground motion CNN vs the scalar floor.")
     p.add_argument("--dataset-dir", default="../../data_downloader/data/dataset_groundmotion_3s")
     p.add_argument("--target", default="pgv_fwd", choices=list(TARGETS))
-    p.add_argument("--arch", default="cnn_lstm", choices=["cnn", "cnn_lstm"])
+    # --arch is kept as an alias of --model-branch: `run_groundmotion_experiments.sh`
+    # passes `--arch cnn_lstm`, and groundmotion_summary.py reads an `arch`
+    # column out of the result CSVs, so both the flag and the underscored value
+    # have to survive. main() writes the underscored spelling back onto
+    # args.arch for exactly that reason.
+    add_model_args(p, models=["groundmotion"])
     p.add_argument("--input-norm", default="peak", choices=["peak", "none"],
                    help="peak: divide by the window's own peak and pass log(peak) as aux.")
     p.add_argument("--no-aux", action="store_true",
@@ -547,9 +552,6 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--lr", type=float, default=2e-3)
     p.add_argument("--weight-decay", type=float, default=1e-4)
-    p.add_argument("--width", type=int, default=32)
-    p.add_argument("--hidden", type=int, default=64)
-    p.add_argument("--dropout", type=float, default=0.2)
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--seed-split", type=int, default=42,
                    help="Seed for the station partition (--split-by station/both).")
@@ -561,6 +563,11 @@ def main():
     """Loads the dataset/baselines, trains the seed ensemble, and reports
     both metric spaces against the strongest floor."""
     args = parse_args()
+    # Resolved once: several report lines and the result CSV's `arch` column
+    # read args.arch, and the underscored spelling is what existing summaries
+    # already contain.
+    args.model_spec = spec_from_args(args)
+    args.arch = args.model_spec.branch.replace("-", "_")
     lin_col, log_col, unit, amp_col, degenerate = TARGETS[args.target]
 
     manifest = Path(args.dataset_dir) / "manifest.csv"
@@ -596,8 +603,7 @@ def main():
     floor, floor_preds = floor_on_same_rows(tr_df, te_df, log_col, amp_col)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    nparam = sum(p.numel() for p in
-                 GroundMotionNet(args.arch, n_aux, args.width, args.hidden).parameters())
+    nparam = sum(p.numel() for p in args.model_spec.build(aux_dim=n_aux).parameters())
     print(f"  device {device} | parameters {nparam:,}")
 
     rows, runs, preds = [], [], []

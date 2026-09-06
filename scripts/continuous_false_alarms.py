@@ -74,13 +74,14 @@ import numpy as np
 import pandas as pd
 import torch
 from obspy import read, UTCDateTime
-from obspy.taup import TauPyModel
 from scipy import signal
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet
+from seismolib.arrivals import ArrivalTimes, P_PHASES, S_PHASES
+from seismolib.catalog import haversine_km as haversine
 from seismolib.checkpoints import find_checkpoints
 
 EARTH_KM = 6371.0
@@ -181,6 +182,36 @@ def parse_args():
                         "Without clustering a single noise burst spanning ten "
                         "windows counts as ten false positives.")
     r.add_argument("--out-prefix", required=True)
+
+    c = sub.add_parser("coincidence",
+                       help="require two stations to agree, and price what that costs")
+    c.add_argument("--scores-a", required=True, help="glob of station A's .npz files")
+    c.add_argument("--station-a", required=True)
+    c.add_argument("--scores-b", required=True, help="glob of station B's .npz files")
+    c.add_argument("--station-b", required=True)
+    c.add_argument("--stations-csv", required=True)
+    c.add_argument("--catalog", required=True)
+    c.add_argument("--window-seconds", type=float, required=True,
+                   help="the arm's window length; must be the same arm at both "
+                        "stations or the two alarm streams are not comparable")
+    c.add_argument("--coincidence-seconds", type=float, default=None,
+                   help="how far apart two declarations may be and still count "
+                        "as one. Defaults to the separation divided by Vp, which "
+                        "is the largest P-arrival difference any event can "
+                        "produce at this pair; smaller loses real events on the "
+                        "line through both stations.")
+    c.add_argument("--vp", type=float, default=6.0,
+                   help="crustal Vp used for the default coincidence window")
+    c.add_argument("--snr-csv-a", default=None,
+                   help="station_detection_range.py output for A")
+    c.add_argument("--snr-csv-b", default=None, help="the same for B")
+    c.add_argument("--snr-min", type=float, default=3.0)
+    c.add_argument("--max-distance", type=float, default=500.0)
+    c.add_argument("--guard-pre", type=float, default=10.0)
+    c.add_argument("--guard-post", type=float, default=60.0)
+    c.add_argument("--signal-post", type=float, default=20.0)
+    c.add_argument("--cluster-seconds", type=float, default=60.0)
+    c.add_argument("--out-prefix", required=True)
 
     m = sub.add_parser("timing", help="per-event: when did it fire, relative to S")
     m.add_argument("--scores", required=True, help="glob of scan .npz files")
@@ -725,11 +756,6 @@ def cmd_scan(args):
 # report
 # ---------------------------------------------------------------------------
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def predicted_arrivals(args):
@@ -745,27 +771,12 @@ def predicted_arrivals(args):
     cat["dist"] = haversine(slat, slon, cat.Latitude.values, cat.Longitude.values)
     cat = cat[cat.dist <= args.max_distance].copy()
 
-    model = TauPyModel(model="iasp91")
-    cache = {}
+    taup = ArrivalTimes(grid_km=5.0)
 
     def travel(dist_km, depth_km, phases):
-        # Travel time depends mostly on distance and depth; caching on a coarse
-        # grid avoids one taup call per event without materially moving either
-        # arrival. The S phase is wanted as well as P: the question "did the
-        # detector fire before S got here" cannot be asked without it.
-        key = (round(dist_km / 5.0), round(max(depth_km, 0.0) / 5.0), phases)
-        if key not in cache:
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 5.0,
-                                             distance_in_degree=key[0] * 5.0 / 111.195,
-                                             phase_list=list(phases))
-                cache[key] = arr[0].time if arr else None
-            except Exception:
-                cache[key] = None
-        return cache[key]
+        return taup.travel(dist_km, depth_km, phases)
 
-    P = ("p", "P", "Pn", "Pg")
-    S = ("s", "S", "Sn", "Sg")
+    P, S = P_PHASES, S_PHASES
     depth = [d if pd.notna(d) else 10.0 for d in cat.Depth.values]
     cat["tt_p"] = [travel(d, z, P) for d, z in zip(cat.dist.values, depth)]
     cat["tt_s"] = [travel(d, z, S) for d, z in zip(cat.dist.values, depth)]
@@ -775,6 +786,25 @@ def predicted_arrivals(args):
     cat["s_epoch"] = origin + cat.tt_s
     cat["sp_seconds"] = cat.tt_s - cat.tt_p
     return cat.sort_values("p_epoch").reset_index(drop=True), (slat, slon)
+
+
+def load_snr(path):
+    """The measured-SNR table, one row per event.
+
+    `station_detection_range.py` can emit an event twice when it falls in two
+    overlapping chunks, and a LEFT JOIN on a non-unique key silently expands the
+    frame it is joined into. That is not hypothetical: DEMI's table has 269
+    duplicated ids against MANT's and GCAM's zero, and the expansion desynced
+    `best_prob` from the catalogue it was computed for -- which raised here, but
+    would have quietly shifted every recall denominator if the lengths had
+    happened to line up.
+
+    The larger SNR is kept. A duplicate is the same event seen from two chunks,
+    and the smaller reading is usually the one that fell near a chunk edge and
+    was measured on a truncated window.
+    """
+    snr = pd.read_csv(path)[["event_id", "snr"]]
+    return snr.sort_values("snr", ascending=False).drop_duplicates(subset="event_id")
 
 
 def background_and_guards(t, p, cat, args, win_s):
@@ -875,10 +905,17 @@ def cmd_report(args):
     background distribution -- pick the alarm budget, read off the threshold --
     with the 0.5 row kept only to show how far off it is.
 
-    **Recall is reported against events the station actually recorded.** Only
-    11.5% of catalogued events within 500 km of MANT reach SNR 3, and the median
-    is 1.10, i.e. no signal in the raw trace. Scoring a detector on events whose
-    waveform does not exist measures the catalogue's reach, not the model's.
+    **Recall is reported against events the station actually recorded.** Over the
+    full 728-day MANT record, 27.0% of the catalogued events within 500 km with a
+    measured SNR reach SNR 3, and the median is 1.39 -- the typical catalogued
+    earthquake leaves no visible trace. Scoring a detector on events whose
+    waveform does not exist measures the catalogue's reach, not the model's: the
+    same arm scores AUC 0.675 against every event and 0.9403 against the ones
+    with signal.
+
+    (An earlier draft of this docstring quoted 11.5% and a median of 1.10. Those
+    came from the first 195 days, when both the record and the SNR table were
+    partial, and are not what the finished run says.)
     """
     files = sorted(glob.glob(args.scores))
     if not files:
@@ -915,8 +952,8 @@ def cmd_report(args):
 
     # Attach measured SNR so recall is asked only of events with a waveform.
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        cat = cat.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        cat = cat.merge(load_snr(args.snr_csv), left_on="EventID",
+                        right_on="event_id", how="left")
     else:
         cat["snr"] = np.nan
     best = np.array([p[i:j].max() if j > i else np.nan for i, j in idx])
@@ -1069,6 +1106,269 @@ def check_filter_equivalence(win=600, fs=100.0, freqmin=1.0, freqmax=45.0, n=64)
         sys.exit("preprocessing does NOT match the training pipeline -- stop here")
 
 
+
+# ---------------------------------------------------------------------------
+# Two stations
+# ---------------------------------------------------------------------------
+
+def load_scores(pattern):
+    """Every scored window from one glob, sorted by time."""
+    files = sorted(glob.glob(pattern))
+    if not files:
+        sys.exit(f"no score files matched {pattern}")
+    t = np.concatenate([np.load(f)["t"] for f in files])
+    p = np.concatenate([np.load(f)["p"] for f in files])
+    order = np.argsort(t)
+    return t[order], p[order]
+
+
+def coverage_spans(t, step, slack=2.5):
+    """Intervals this station actually scored, from gaps in its window times.
+
+    A station's record is not one continuous run: the archive is gap-split, and
+    GCAM stops recording entirely in December 2024. Without this, every alarm at
+    the other station during an outage would count as unconfirmed and be scored
+    as a false alarm removed -- which reads as a spectacular coincidence gain
+    and is only missing data.
+    """
+    if not len(t):
+        return []
+    breaks = np.flatnonzero(np.diff(t) > slack * step)
+    starts = np.concatenate([[0], breaks + 1])
+    ends = np.concatenate([breaks, [len(t) - 1]])
+    return [(float(t[i]), float(t[j] + step)) for i, j in zip(starts, ends)]
+
+
+def intersect_spans(a, b):
+    """The intervals covered by both stations."""
+    out, i, j = [], 0, 0
+    while i < len(a) and j < len(b):
+        lo, hi = max(a[i][0], b[j][0]), min(a[i][1], b[j][1])
+        if hi > lo:
+            out.append((lo, hi))
+        if a[i][1] < b[j][1]:
+            i += 1
+        else:
+            j += 1
+    return out
+
+
+def in_spans(t, spans):
+    """Boolean mask: which of `t` fall inside any span."""
+    keep = np.zeros(len(t), dtype=bool)
+    for lo, hi in spans:
+        keep[np.searchsorted(t, lo):np.searchsorted(t, hi, side="right")] = True
+    return keep
+
+
+def declarations(t, p, thr, cluster_seconds):
+    """Alarms above `thr`, collapsed to one declaration per burst.
+
+    Returns the time and score of each burst's peak. Clustering is the same
+    rule `confusion` uses, and for the same reason: a noise burst spanning ten
+    windows is one declaration, not ten.
+    """
+    hit = np.flatnonzero(p > thr)
+    if not len(hit):
+        return np.empty(0), np.empty(0)
+    cuts = np.flatnonzero(np.diff(t[hit]) > cluster_seconds)
+    groups = np.split(hit, cuts + 1)
+    peak = [g[np.argmax(p[g])] for g in groups]
+    return t[peak], p[peak]
+
+
+def confirmed(ta, tb, window):
+    """Mask over A's declarations: does B declare within +/- `window`?
+
+    Both arrays are sorted, so this is two binary searches per declaration
+    rather than a cross product -- the alarm lists run to tens of thousands at
+    a loose threshold.
+    """
+    if not len(ta) or not len(tb):
+        return np.zeros(len(ta), dtype=bool)
+    lo = np.searchsorted(tb, ta - window, side="left")
+    hi = np.searchsorted(tb, ta + window, side="right")
+    return hi > lo
+
+
+def cmd_coincidence(args):
+    """What requiring two stations to agree costs, and what it buys.
+
+    Single-station continuous detection is dominated by false alarms: at the
+    thresholds this detector needs to keep any recall, MANT alone declares tens
+    of times a day. Requiring a second station to agree within the time an
+    event's P wave could plausibly take to cross the pair is the standard
+    network answer, and the reduction it delivers is usually quoted from an
+    independence assumption.
+
+    **That assumption is the thing worth measuring.** Two stations 130 km apart
+    share weather, share the regional noise field, and share whatever diurnal
+    cultural signal drives the day/night ratio already measured here. To the
+    extent their false alarms are common-mode, the reduction is smaller than
+    independence predicts -- and no amount of arithmetic can say by how much.
+    So this reports the measured joint rate against the independent prediction,
+    and their ratio.
+
+    Two things it refuses to do:
+
+    **It scores only the span both stations recorded.** Their coverage is
+    intersected first. Counting an unconfirmed alarm as suppressed while the
+    other station was simply off the air would read as a large gain and be
+    nothing but missing data.
+
+    **It asks recall only of events both stations actually recorded.** An event
+    below SNR at either station cannot be confirmed by a network rule, and
+    charging the rule for it measures the catalogue's reach, not the method.
+    """
+    ta_all, pa_all = load_scores(args.scores_a)
+    tb_all, pb_all = load_scores(args.scores_b)
+    win_s = args.window_seconds
+    step = float(np.median(np.diff(ta_all[:100000])))
+
+    st = pd.read_csv(args.stations_csv, encoding="utf-8-sig")
+    st.columns = [c.strip() for c in st.columns]
+    A = st[st.Code == args.station_a].iloc[0]
+    B = st[st.Code == args.station_b].iloc[0]
+    sep = float(haversine(float(A.Latitude), float(A.Longitude),
+                          np.array([float(B.Latitude)]), np.array([float(B.Longitude)]))[0])
+    w = args.coincidence_seconds
+    if w is None:
+        w = sep / args.vp
+    print(f"{'=' * 78}\nTWO-STATION COINCIDENCE  --  {args.station_a} + "
+          f"{args.station_b}  ({win_s:g}s windows)\n{'=' * 78}")
+    print(f"  separation {sep:.0f} km -> coincidence window +/-{w:.1f} s "
+          f"({'default: separation / Vp ' + format(args.vp, 'g') if args.coincidence_seconds is None else 'given'})",
+          flush=True)
+
+    # --- the span both stations recorded ----------------------------------
+    spans = intersect_spans(coverage_spans(ta_all, step), coverage_spans(tb_all, step))
+    joint_s = sum(hi - lo for lo, hi in spans)
+    days = joint_s / 86400.0
+    ka, kb = in_spans(ta_all, spans), in_spans(tb_all, spans)
+    ta, pa, tb, pb = ta_all[ka], pa_all[ka], tb_all[kb], pb_all[kb]
+    print(f"  {args.station_a}: {len(ta_all) * step / 86400:.1f} d scored, "
+          f"{args.station_b}: {len(tb_all) * step / 86400:.1f} d scored, "
+          f"both at once: {days:.1f} d in {len(spans)} span(s)")
+    if days < 1:
+        sys.exit("the two stations barely overlap; nothing to measure")
+
+    # --- catalogue, at each station separately ----------------------------
+    # Keyed "a"/"b", not by station name: passing the same station twice is the
+    # obvious self-test, and a name-keyed dict silently collapses to one entry
+    # for it -- the background of one station overwrites the other's and the
+    # threshold table comes out empty.
+    cats = {}
+    for side, name, tt, snr_csv in (("a", args.station_a, ta, args.snr_csv_a),
+                                    ("b", args.station_b, tb, args.snr_csv_b)):
+        args.station = name
+        cat, _ = predicted_arrivals(args)
+        # `in_spans`, not a comprehension over `spans`: a gap-split archive has
+        # tens of thousands of them (MANT's pnat scores have 43,215), and one
+        # Python-level pass per event over all of them is hours rather than
+        # seconds. p_epoch is sorted, which is what lets the searchsorted
+        # version be used here.
+        cat = cat[in_spans(cat.p_epoch.values, spans)].copy()
+        if snr_csv:
+            cat = cat.merge(load_snr(snr_csv), left_on="EventID",
+                            right_on="event_id", how="left")
+        else:
+            cat["snr"] = np.nan
+        cats[side] = cat.drop_duplicates(subset="EventID")
+    both = cats["a"].merge(cats["b"][["EventID", "snr", "p_epoch"]],
+                           on="EventID", suffixes=("_a", "_b"))
+    good = both[(both.snr_a >= args.snr_min) & (both.snr_b >= args.snr_min)]
+    print(f"  {len(both):,} catalogued event(s) in that span; "
+          f"{len(good):,} reach SNR {args.snr_min:g} at BOTH stations")
+    if len(good):
+        dp = (good.p_epoch_b - good.p_epoch_a).abs()
+        print(f"  their |P_A - P_B| spans {dp.min():.1f}..{dp.max():.1f} s "
+              f"(median {dp.median():.1f}) -- the window must cover this")
+
+    # --- background at each station ---------------------------------------
+    # The guard mask is kept, not just the background scores. Declarations have
+    # to be counted on UNEXPLAINED windows only: a catalogued earthquake is
+    # detected at both stations by construction, so leaving real events in the
+    # streams makes every one of them a guaranteed coincidence and the "excess"
+    # then measures how many events the span contains rather than how much the
+    # two stations' false alarms agree. On MANT+DEMI that is 11.6 catalogued
+    # events per day at SNR>=3 against a measured 3.97 coincidences per day --
+    # enough to account for all of them.
+    bg, unexplained = {}, {}
+    for side, name, tt, pp in (("a", args.station_a, ta, pa),
+                               ("b", args.station_b, tb, pb)):
+        args.station = name
+        explained, _ = background_and_guards(tt, pp, cats[side], args, win_s)
+        bg[side] = pp[~explained]
+        unexplained[side] = ~explained
+
+    # --- the table ---------------------------------------------------------
+    print(f"\n  Each station is thresholded to the SAME alarm budget, not the same")
+    print(f"  threshold: their backgrounds differ and a shared number would not")
+    print(f"  mean the same thing at both.\n")
+    print(f"  Alarm rates below count UNEXPLAINED declarations only -- windows")
+    print(f"  overlapping a catalogued event's guard are removed from both")
+    print(f"  streams first, since a real earthquake is seen at both stations by")
+    print(f"  construction and would otherwise be counted as agreement.\n")
+    print(f"  {'budget/day':>11}{'thr ' + args.station_a:>12}{'thr ' + args.station_b:>12}"
+          f"{'A/day':>9}{'B/day':>9}{'2of2/day':>10}{'if indep':>10}{'excess':>8}"
+          f"{'recall':>9}")
+    rows = []
+    for target in (100.0, 30.0, 10.0, 3.0, 1.0, 0.1):
+        want = target * days
+        if any(want >= len(bg[s]) for s in ("a", "b")):
+            continue
+        thr = {s: float(np.quantile(bg[s], 1.0 - want / len(bg[s])))
+               for s in ("a", "b")}
+        ua, ub = unexplained["a"], unexplained["b"]
+        da_t, _ = declarations(ta[ua], pa[ua], thr["a"], args.cluster_seconds)
+        db_t, _ = declarations(tb[ub], pb[ub], thr["b"], args.cluster_seconds)
+        ok = confirmed(da_t, db_t, w)
+        n_a, n_b, n_2 = len(da_t), len(db_t), int(ok.sum())
+        # Independent Poisson streams of rate ra, rb coincide within +/-w at
+        # rate ra * rb * 2w per unit time. This is the number the "1.78% ->
+        # 0.03%" style estimate assumes; the measured one is next to it.
+        ra, rb = n_a / joint_s, n_b / joint_s
+        # What two INDEPENDENT streams of these rates would produce. The
+        # measured quantity is "A declarations having at least one B within
+        # +/-w", so the prediction must be for that and not for the number of
+        # coincident pairs: a Poisson B stream puts 1 - exp(-rb*2w) of them in
+        # the window, which is below rb*2w whenever B is busy. The two agree to
+        # 0.25% at 10 alarms/day and diverge by 10% at 200, so the distinction
+        # only matters at the loose end of this table -- which is exactly where
+        # the reduction looks most impressive.
+        indep = ra * (1.0 - np.exp(-rb * 2 * w)) * 86400
+        rec = np.nan
+        if len(good):
+            fired_a = np.array([((pa[np.searchsorted(ta, c - win_s):
+                                     np.searchsorted(ta, c + args.signal_post,
+                                                     side="right")] > thr["a"]).any())
+                                for c in good.p_epoch_a.values])
+            fired_b = np.array([((pb[np.searchsorted(tb, c - win_s):
+                                     np.searchsorted(tb, c + args.signal_post,
+                                                     side="right")] > thr["b"]).any())
+                                for c in good.p_epoch_b.values])
+            rec = float((fired_a & fired_b).mean())
+        excess = n_2 / days / indep if indep > 0 else np.nan
+        rows.append({"budget_per_day": target,
+                     "station_a": args.station_a, "station_b": args.station_b,
+                     "thr_a": thr["a"], "thr_b": thr["b"],
+                     "a_per_day": n_a / days, "b_per_day": n_b / days,
+                     "both_per_day": n_2 / days, "independent_per_day": indep,
+                     "excess_over_independent": excess, "recall_both": rec})
+        print(f"  {target:>11.4g}{thr['a']:>12.4f}{thr['b']:>12.4f}"
+              f"{n_a / days:>9.2f}{n_b / days:>9.2f}{n_2 / days:>10.3f}"
+              f"{indep:>10.4f}{excess:>8.1f}x"
+              + (f"{rec:>9.3f}" if rec == rec else f"{'-':>9}"))
+
+    out = pathlib.Path(f"{args.out_prefix}_coincidence.csv")
+    pd.DataFrame(rows).to_csv(out, index=False)
+    print(f"\n  wrote {out}")
+    print(f"\n  `excess` is the measured two-station rate divided by what two")
+    print(f"  independent alarm streams of the same rates would produce. 1.0x")
+    print(f"  means the stations' false alarms are independent and the textbook")
+    print(f"  reduction holds; above 1.0x they share a cause and the network")
+    print(f"  rule buys less than the arithmetic promises.")
+
 def cmd_verify(args):
     """Reproduces the benchmark score through this file's own scoring path.
 
@@ -1129,8 +1429,12 @@ def cmd_timing(args):
     cat, _ = predicted_arrivals(args)
     ev = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)].copy()
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        ev = ev.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        # load_snr, not a raw read: a duplicated event_id expands `ev` on this
+        # join, and here that does not raise -- the loops below simply score the
+        # duplicated events twice, inflating the detection counts and the
+        # before-S fractions. DEMI's table carries 269 such ids.
+        ev = ev.merge(load_snr(args.snr_csv), left_on="EventID",
+                      right_on="event_id", how="left")
         n_all = len(ev)
         ev = ev[ev.snr >= args.snr_min].copy()
         print(f"  {len(ev):,} of {n_all:,} events reach SNR {args.snr_min:g}; "
@@ -1210,7 +1514,8 @@ def cmd_timing(args):
 def main():
     args = parse_args()
     {"baseline": cmd_baseline, "scan": cmd_scan, "report": cmd_report,
-     "timing": cmd_timing, "verify": cmd_verify}[args.cmd](args)
+     "timing": cmd_timing, "verify": cmd_verify,
+     "coincidence": cmd_coincidence}[args.cmd](args)
 
 
 if __name__ == "__main__":

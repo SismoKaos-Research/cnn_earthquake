@@ -9,8 +9,8 @@ def parse(path):
 # recompute directly instead of parsing: score both stations, split by component
 from forecasting.chaos_dataset import build
 import pandas as pd
-CAT="/home/hogib/Projects/Sismokaos/data_downloader/catalogs/catalog_current.csv"
-CLI="/home/hogib/Projects/sismokaos-cli/dataset_features_chaos_q1_5hz/"
+CAT="/home/hogib/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv"
+CLI="/home/hogib/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz/"
 from seismolib.metrics import safe_auc
 res={}
 for st,pq in (("BODT",CLI+"bodt_q1_chaos_5hz_features.parquet"),

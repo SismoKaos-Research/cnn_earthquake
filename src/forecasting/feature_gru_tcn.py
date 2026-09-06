@@ -33,97 +33,20 @@ from seismolib.logging import DualLogger
 from seismolib.metrics import binary_report, print_report, safe_auc
 from seismolib.splits import print_split_diagnostics, walk_forward_splits
 from seismolib.training import seed_everything
+# ForecastGRU, ForecastTCN and its two blocks used to be defined here. They
+# moved into the package so `seismolib.model.registry` can offer them as
+# `--model gru` and `--model tcn` without importing this trainer; re-exported
+# so existing `from forecasting.feature_gru_tcn import ForecastTCN` callers
+# keep working.
+from seismolib.model.recurrent import ForecastGRU  # noqa: F401
+from seismolib.model.tcn import (Chomp1d, ForecastTCN,  # noqa: F401
+                                 TemporalBlock)
 
 
 # load_hourly_features now comes from seismolib.catalog -- this file used to
 # carry a duplicate that shared the Zaman_Dk misreading fixed there.
 
 
-class ForecastGRU(nn.Module):
-    """GRU branch for sequence forecasting."""
-    def __init__(self, feat_dim, hidden=64, dropout=0.3):
-        super().__init__()
-        # Dropout set to 0 here because PyTorch GRU dropout only applies *between* 
-        # layers in a multi-layer stack. We use the head's dropout instead.
-        self.gru = nn.GRU(feat_dim, hidden, batch_first=True, dropout=0)
-        self.attn = nn.Linear(hidden, 1)
-        self.head = nn.Sequential(
-            nn.Linear(hidden, hidden // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden // 2, 1)
-        )
-
-    def forward(self, x):
-        out, _ = self.gru(x)
-        attn_weights = torch.softmax(self.attn(out), dim=1)
-        context = torch.sum(attn_weights * out, dim=1)
-        return self.head(context).squeeze(-1)
-
-
-class Chomp1d(nn.Module):
-    """Removes padding from the end of a sequence for causal 1D convolutions."""
-    def __init__(self, chomp_size):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x):
-        return x[:, :, :-self.chomp_size].contiguous()
-
-
-class TemporalBlock(nn.Module):
-    """A single residual block for the TCN."""
-    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.3):
-        super().__init__()
-        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp1 = Chomp1d(padding)
-        self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(dropout)
-
-        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp2 = Chomp1d(padding)
-        self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(dropout)
-
-        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
-                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
-        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        out = self.net(x)
-        res = x if self.downsample is None else self.downsample(x)
-        return self.relu(out + res)
-
-
-class ForecastTCN(nn.Module):
-    """Temporal Convolutional Network for sequence forecasting."""
-    def __init__(self, feat_dim, num_channels=[64, 64, 64], kernel_size=3, dropout=0.3):
-        super().__init__()
-        layers = []
-        num_levels = len(num_channels)
-        for i in range(num_levels):
-            dilation_size = 2 ** i
-            in_channels = feat_dim if i == 0 else num_channels[i - 1]
-            out_channels = num_channels[i]
-            layers.append(TemporalBlock(in_channels, out_channels, kernel_size, stride=1,
-                                        dilation=dilation_size, padding=(kernel_size - 1) * dilation_size,
-                                        dropout=dropout))
-        self.tcn = nn.Sequential(*layers)
-        self.head = nn.Sequential(
-            nn.Linear(num_channels[-1], num_channels[-1] // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(num_channels[-1] // 2, 1)
-        )
-
-    def forward(self, x):
-        x = x.transpose(1, 2)
-        out = self.tcn(x)
-        out = out[:, :, -1]
-        return self.head(out).squeeze(-1)
 
 
 def parse_args():

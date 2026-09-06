@@ -50,7 +50,7 @@ Set once, used throughout:
 
 ```bash
 export DD=~/Projects/Sismokaos/data_downloader
-export MC=~/Projects/model_cnn_lstm
+export MC=~/Projects/Sismokaos/cnn_earthquake
 ```
 
 ---

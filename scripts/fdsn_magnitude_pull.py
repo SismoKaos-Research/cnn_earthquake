@@ -48,7 +48,9 @@ import numpy as np
 import pandas as pd
 from obspy import UTCDateTime
 from obspy.clients.fdsn import Client
-from obspy.taup import TauPyModel
+
+from seismolib.arrivals import ArrivalTimes
+from seismolib.catalog import haversine_km as haversine
 
 warnings.filterwarnings("ignore")
 
@@ -95,6 +97,12 @@ def parse_args():
     f.add_argument("--requests", required=True)
     f.add_argument("--url", default=KOERI)
     f.add_argument("--out-dir", required=True)
+    f.add_argument("--miss-log", default="fdsn_misses.txt",
+                   help="rows the archive returned nothing for. Skipped on the "
+                        "next run so a resume does not re-walk them.")
+    f.add_argument("--retry-misses", action="store_true",
+                   help="attempt the rows in --miss-log again, for when they "
+                        "failed because the archive was down rather than empty")
     f.add_argument("--batch", type=int, default=40,
                    help="windows per bulk call. Larger is faster but a single "
                         "bad row fails the whole call, so this trades speed "
@@ -106,11 +114,6 @@ def parse_args():
     return p.parse_args()
 
 
-def haversine(lat0, lon0, lat, lon):
-    p1, p2 = np.radians(lat0), np.radians(lat)
-    a = (np.sin((p2 - p1) / 2) ** 2
-         + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon - lon0) / 2) ** 2)
-    return 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
 
 
 def load_inventory(url, network, start, end):
@@ -153,20 +156,12 @@ def cmd_plan(args):
     cat = pd.concat(kept).sort_values("t").reset_index(drop=True)
     print(f"[plan] {len(cat):,} events after capping each 0.5-band at {args.per_band}")
 
-    model = TauPyModel(model="iasp91")
-    tt_cache = {}
+    # 10 km grid, the resolution this planner was written with; see
+    # seismolib.arrivals for why it is stated rather than defaulted.
+    taup = ArrivalTimes(grid_km=10.0)
 
     def p_travel(dist_km, depth_km):
-        key = (round(dist_km / 10.0), round(max(depth_km, 0.0) / 10.0))
-        if key not in tt_cache:
-            try:
-                arr = model.get_travel_times(source_depth_in_km=key[1] * 10.0,
-                                             distance_in_degree=key[0] * 10.0 / 111.195,
-                                             phase_list=["p", "P", "Pn", "Pg"])
-                tt_cache[key] = arr[0].time if arr else None
-            except Exception:
-                tt_cache[key] = None
-        return tt_cache[key]
+        return taup.travel(dist_km, depth_km)
 
     slat, slon = inv.lat.to_numpy(), inv.lon.to_numpy()
     s_start, s_end = inv.start.to_numpy(), inv.end.to_numpy()
@@ -231,19 +226,48 @@ def cmd_fetch(args):
     out.mkdir(parents=True, exist_ok=True)
     client = Client(args.url, timeout=300)
 
-    todo = []
+    # Rows the archive has already said it has nothing for. Without this the
+    # todo list is rebuilt in CSV ORDER on every restart, so a resumed fetch
+    # re-attempts every previous miss before reaching any new work: after one
+    # interrupted run that was ~8,500 rows and 2.6 hours of requests that
+    # cannot succeed. A miss is usually permanent -- KO.GELI in 2013 carries
+    # BH? at 50 Hz and no HH? at all, so this plan's channel set can never
+    # match it -- but --retry-misses exists for the case where the archive was
+    # simply down when they were tried.
+    misses = set()
+    miss_log = pathlib.Path(args.miss_log) if args.miss_log else None
+    if miss_log and miss_log.exists() and not args.retry_misses:
+        misses = {ln.strip() for ln in miss_log.read_text().splitlines() if ln.strip()}
+
+    todo, skipped = [], 0
     for r in req.itertuples():
-        dest = out / f"event_{r.event_id}_{r.station}_raw.mseed"
-        if not dest.exists():
-            todo.append((r, dest))
-    print(f"[fetch] {len(todo):,} to fetch, {len(req) - len(todo):,} already present")
+        # Station in the PATH, not the name. seismic-cli parses
+        # `^(?:noise_)?event_(.+?)_raw$` non-greedily, so `event_153534_TASB_raw`
+        # yields the event id "153534_TASB", matches no catalogue row, and the
+        # dataset build ends with "No labelled windows" after the whole encode.
+        # Flat files written before this are still honoured on resume, so an
+        # existing pull is not re-downloaded.
+        dest = out / str(r.station) / f"event_{r.event_id}_raw.mseed"
+        legacy = out / f"event_{r.event_id}_{r.station}_raw.mseed"
+        if dest.exists() or legacy.exists():
+            continue
+        key = f"{r.station}/{dest.name}"
+        if key in misses:
+            skipped += 1
+            continue
+        todo.append((r, dest, key))
+    print(f"[fetch] {len(todo):,} to fetch, "
+          f"{len(req) - len(todo) - skipped:,} already present, "
+          f"{skipped:,} known-empty skipped"
+          + (" (--retry-misses to try them again)" if skipped else ""))
+    miss_fh = open(miss_log, "a") if miss_log else None
 
     got = miss = 0
     t0 = time.time()
     for i in range(0, len(todo), args.batch):
         chunk = todo[i:i + args.batch]
         bulk = [(r.network, r.station, "*", "HH*",
-                 UTCDateTime(r.start), UTCDateTime(r.end)) for r, _ in chunk]
+                 UTCDateTime(r.start), UTCDateTime(r.end)) for r, _, _ in chunk]
         try:
             st = client.get_waveforms_bulk(bulk)
         except Exception as e:
@@ -252,7 +276,7 @@ def cmd_fetch(args):
             st = None
             if "No data" not in str(e):
                 print(f"  bulk failed ({type(e).__name__}), falling back", flush=True)
-        for r, dest in chunk:
+        for r, dest, key in chunk:
             # Trim to THIS row's window. A bulk response is one Stream for the
             # whole batch, so selecting by station alone also picks up the same
             # station's traces from other rows -- which silently wrote 112 s of
@@ -267,6 +291,8 @@ def cmd_fetch(args):
                                                UTCDateTime(r.start), UTCDateTime(r.end))
                 except Exception:
                     miss += 1
+                    if miss_fh:
+                        miss_fh.write(key + "\n"); miss_fh.flush()
                     continue
             sel = sel.copy()
             sel.merge(method=1, fill_value=None)
@@ -280,8 +306,11 @@ def cmd_fetch(args):
                     keep.append(cand[0])
             if len(keep) < 3:
                 miss += 1
+                if miss_fh:
+                    miss_fh.write(key + "\n"); miss_fh.flush()
                 continue
             from obspy import Stream
+            dest.parent.mkdir(parents=True, exist_ok=True)
             Stream(keep).write(str(dest), format="MSEED")
             got += 1
         done = i + len(chunk)

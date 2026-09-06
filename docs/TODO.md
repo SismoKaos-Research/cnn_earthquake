@@ -24,8 +24,36 @@ at 2024-12-18 and nothing but the requests themselves revealed that.
 
 **My recommendation: probe uptime before committing.** A handful of
 single-day requests spread across a candidate's span costs ~6 links and
-answers in one afternoon what GCAM took a full campaign to tell us. The
-stations worth probing are CGC and MTOP, the coincidence pair from §2.2.
+answers in one afternoon what GCAM took a full campaign to tell us.
+
+**Probed 2026-09-05. Both probes are done and the answer is encouraging.**
+
+*Station availability* (`scr.jsonl`, one day each at 2025-06-01): INCE, KZIL,
+PASA and UZP all returned data — four viable candidates for 117 MB of probe
+traffic. **BAKC and IRLI are not in the TDVMS station list at all**, which is a
+result in itself: the station catalogue this repo plans from contains stations
+TDVMS will not serve, so any plan built from it should be checked against
+`_device_code` before the requests are spent.
+
+*Archive depth at MANT* (`depth.jsonl`, one day per year): data returned for
+2012, 2019, 2021 and 2023; 2016-06-01 came back "no waveform at source".
+**MANT's archive reaches back to at least 2012**, roughly ten years earlier
+than the campaign has used, with at least one interior gap. That changes the
+scale of what a MANT campaign could pull, and is worth weighing before spending
+requests on a fourth station.
+
+Two bugs surfaced during the probes, both fixed:
+
+- Two pollers watching one mailbox ran the same `(UNSEEN FROM ...)` search and
+  each consumed the other's links. The station poller took `+dep3` and `+dep5`
+  and burned them as permanent failures while `depth.jsonl` waited for mail
+  that no longer existed. A poller now leaves mail addressed to a slot its own
+  ledger never submitted from unread.
+- `next` wrote its claim before looking the station's device code up, so an
+  unlistable station left the row `claimed` forever, holding a queue slot
+  against a request never made. That is what BAKC and IRLI actually did for
+  most of an afternoon, looking exactly like lost mail. The claim is now
+  released and the row retired.
 
 ---
 
@@ -56,44 +84,163 @@ apart, so there is now a genuine two-station **continuous** window to test
 coincidence on — no longer a subset of cut event windows. That is the setup
 §2.3's scan was built for, and it reuses the same scores.
 
+**In progress 2026-09-05.** GCAM is being scanned with the same three arms as
+MANT (`scores_gcam/`), which was the missing input — MANT had 36 chunks scored
+and GCAM had none. `sk falsealarm coincidence` then prices the rule.
+
+**The 1.78% → 0.03% figure above assumes the two stations' false alarms are
+independent, and that is the thing to measure rather than assume.** Two
+stations 130 km apart share weather, share the regional noise field, and share
+whatever drives the 1.7–2.1× day/night ratio §2.3 found. The tool therefore
+reports the measured 2-of-2 rate beside what two independent streams of the
+same rates would produce, and their ratio; the ratio is the result, and the
+reduction on its own is arithmetic.
+
+Two constraints it enforces, because every mistake available here removes false
+alarms faster than the method does. Only the span **both** stations recorded is
+scored — GCAM stops at 2024-12-18, and counting MANT alarms after that as
+suppressed would read as a near-total reduction and be nothing but missing
+data. And recall is asked only of events reaching SNR at both stations, since
+no network rule can confirm an event one station never recorded.
+
+First numbers from the scan already say the two stations are not
+interchangeable: on GCAM the 6 s arm puts **10.55%** of windows over 0.5,
+against MANT's 92.7%. Whatever amplitude hole §2.6 describes, MANT sits in it
+and GCAM does not.
+
 ### 2.3 Continuous-data / P-wave picking
 
-**In progress 2026-09-04**, `scripts/continuous_false_alarms.py` on 747 days of
-MANT, three arms (6 s, P-only mined, P-only natural). First 195 days:
+**Done.** `scripts/continuous_false_alarms.py` on the full 728 days of MANT,
+three arms (6 s, P-only mined, P-only natural). The table below is the finished
+run; the partial numbers that stood here (from the first 195 days: 6 s AUC
+0.872, recall 0.653, "10.7% reach SNR 3", median SNR 1.09) were superseded and
+are recorded only so they are not mistaken for the current ones if they
+resurface. `docs/tubitak/surekli_veri_yanlis_alarm_raporu.md` already carries
+the finished figures.
 
 | arm | event AUC, SNR>=3 | recall @ 10 alarms/day | background median |
 |---|---|---|---|
-| 6s | 0.872 | 0.653 | **0.797** |
-| ponly | 0.938 | 0.597 | 0.429 |
-| pnat | 0.937 | 0.585 | 0.301 |
+| 6s | 0.9403 | 0.741 | **0.8019** |
+
+At the 10 alarms/day operating point the 6 s arm reaches precision 0.645,
+recall 0.741, F1 0.690 on 13,056 events with signal — 7.31 false declarations
+per day. 27.0% of the 47,522 catalogued events with a measured SNR reach SNR 3;
+the median is 1.39, so the typical catalogued earthquake still leaves no visible
+trace at MANT.
 
 Three things that only continuous data could show. The benchmark's 0.5 threshold
-is meaningless here (12,891 alarms/day for the 6 s arm) and thresholds must come
-from measured background. Scored against *every* catalogued event the AUC is
-0.53–0.62, because only 10.7% of them reach SNR 3 at MANT and the median is 1.09
-— that number measures the catalogue's reach, not the model. And the 6 s arm's
-whole background spans 0.797–0.839, so a 0.016 seasonal drift would move its
-alarm rate by an order of magnitude; §2.6 is the response to why.
+is meaningless here (12,599 alarms/day for the 6 s arm, flagging 92.7% of quiet
+record) and thresholds must come from measured background. Scored against
+*every* catalogued event the AUC is 0.675 rather than 0.9403 — that gap measures
+the catalogue's reach, not the model. And the 6 s arm's whole background spans
+0.8019–0.9031, so a small seasonal drift would move its alarm rate by an order
+of magnitude; §2.7 is the response to why.
+
+Recall falls with magnitude above M2.5 (0.844 at M2.0–2.5 down to 0.599 above
+M4.0) and that is distance, not size: the median distance of the M>4 band is
+316 km against 88 km at M2.0–2.5. Worth stating explicitly in any write-up,
+since a naive reading of the band table says the detector is worse at large
+earthquakes.
 
 Partially addressed earlier by the GPD baseline work
 ([`experiment_gpd_baseline_2026-08-27.md`](experiment_gpd_baseline_2026-08-27.md)),
 which put this detector against four published pickers on our own windows.
 
-### 2.4 CNN-GRU waveform branch
+### 2.4 Full-repo correctness sweep (asked for 2026-09-06)
+
+**Requested explicitly: go through the whole repo and make sure everything is
+as solid as it can be.** Not a tidy-up -- an audit for silent wrongness. The
+bugs found on 2026-09-05/06 are the pattern to look for, and every one of them
+produced a plausible number rather than an error:
+
+- **A left join on a non-unique key.** `cmd_report` merged the SNR table into
+  the catalogue after computing per-event guards against it; DEMI's 269
+  duplicate ids grew the frame and desynced `best_prob`. It raised only because
+  the lengths happened to disagree.
+- **A statistic contaminated by its own positives.** The coincidence excess
+  counted catalogued earthquakes, which are detected at both stations by
+  construction, so it measured event density and read as a distance effect.
+- **A progress metric that lagged its quantity.** The FDSN ETA located progress
+  by the newest file's row, which trails badly when a third of rows produce
+  output -- reporting 61% availability against a true 36%, for hours.
+- **An enumerated list standing in for a search.** `test_chaos_station.py`
+  found the catalogue from four absolute paths; a rename turned eight passing
+  tests into eight skips indistinguishable from "no data on this machine".
+- **A filename convention asserted rather than checked.** `cut_event_windows`
+  claimed to write the layout `seismic-cli` consumes and did not; every window
+  would have lost its magnitude label silently.
+
+Worth sweeping specifically: every `merge` for key uniqueness; every metric
+whose denominator is derived rather than counted; every `except` that swallows;
+every default that differs between a writer and its reader (`--channels` was
+`all` in the trainer and `2d+aux` in the profiler); anything comparing arms
+whose corpora are not provably identical. `sk models --spec` and the runlog
+records exist to make the last one checkable -- use them.
+
+**Pass 1 done 2026-09-06.** Six hazard classes scanned mechanically, every
+hit read by hand. Fixed: the duplicate-key join in `cmd_timing` and
+`cut_event_windows` (the `cmd_report` variant was fixed the day before); two
+silent skips now counted and reported (`station_detection_range`, whose row
+count is the denominator of every "% reach SNR 3" figure, and
+`pretrained_picker_baseline`, which was scoring a baseline on a different file
+set than the model); and `fdsn_magnitude_pull`'s filename, the non-greedy trap
+that cost a full 13,150-window encode.
+
+Verified clear, with the evidence, so these need not be re-checked:
+
+- **Merge keys.** 13 sites: 4 are ObsPy `Stream.merge`, 4 join on keys proven
+  unique in the data (catalogue EventID 576,829/576,829; manifest `filename`
+  unique in three datasets), 3 go through `load_snr`, 2 were fixed.
+- **pandas 3.** No `groupby.apply` or `.transform` anywhere, so the
+  grouping-column change cannot bite. The one occurrence was written and fixed
+  the same night.
+- **Length-mismatched column assignment.** The only ndarray-to-column writes
+  derive from their own frame; `best_prob` was the exception and is fixed.
+- **Reader/writer geometry defaults.** `cascade_eval`'s `--reg-hidden 64` /
+  `--reg-fusion-dim 128` correctly track the magnitude trainer rather than the
+  detector's 48/96. The `--window-seconds` divergence is a name collision, not a
+  bug: it selects a preset in trainers and a download length in pull tools.
+- **Derived denominators.** `alarms/day` divides by scored time, which is the
+  right base -- you can only alarm while scoring.
+- **`arr[0].time` vs `min(times)`.** `seismolib.arrivals` takes the first
+  arrival; the two private caches take the minimum. Checked over 60
+  distance/depth/phase-order combinations: obspy returns arrivals time-sorted,
+  so the idioms and both phase orderings are equivalent.
+- No mutable-default mutation, one `assert` outside tests, no float equality on
+  measurements.
+
+**Still open, deliberately not done blind:**
+
+1. **Two private taup caches** (`s_arrival_ablation.py`,
+   `verify_ponly_windows.py`) that `seismolib.arrivals` exists to replace. They
+   are NOT drop-in: they grid distance at 0.001 deg (~0.11 km) and depth at 1 km
+   against the shared 5 km/5 km. Consolidating would move their numbers
+   slightly, so it needs a before/after check, not a rename.
+2. **`cascade_eval` hardcodes `channels="2d+aux"`** for the magnitude stage, so
+   it cannot score the `all` or `2d` models every current result uses. It should
+   read `model.json` the way `magprofile` now does.
+3. **`ForecastTCN(num_channels=[64,64,64])`** is a mutable default. Never
+   mutated, so harmless today; left alone because the class was moved
+   byte-identical and changing the signature breaks that guarantee.
+4. **Pass 2 not started:** `src/forecasting/` and `src/features/` were scanned
+   mechanically but not read. The forecasting family is where the retracted
+   results came from, so it deserves the closest reading.
+
+### 2.5 CNN-GRU waveform branch
 
 Swap the BiLSTM in `ConvSeqBranch` for a BiGRU, re-run the branch-1d grid as a
 fourth arm (`--branch-1d cnn-gru`). Motivated: the 2026-08-19 grid put
 `cnn-lstm` (0.9896) above `cnn` (0.9843) with non-overlapping per-seed ranges,
 so recurrence is load-bearing here rather than decorative. Cheap.
 
-### 2.5 Cascade false-positive handling
+### 2.6 Cascade false-positive handling
 
 Stage 2 consumes `aux = (log_snr, log_distance)`, and `log_distance` needs a
 catalogued hypocentre a false positive does not have. Options: a `--channels 2d`
 stage 2, a waveform-derived distance estimate, or propagated uncertainty. See
 `src/detection/cascade_eval.py`'s module docstring.
 
-### 2.6 Retrain with continuous-background negatives
+### 2.7 Retrain with continuous-background negatives
 
 **Motivated by a measured failure, not a hunch.** On continuous MANT the 6 s
 detector scores a *median of 0.83 on noise* — 92% of a quiet station-day clears
@@ -134,7 +281,7 @@ logit, or `continuous_false_alarms.py report`, which sets the threshold from
 measured background. If a ratio change is all that is tried, expect it to move
 the operating point and nothing else. The amplitude coverage is the experiment.
 
-### 2.7 Housekeeping
+### 2.8 Housekeeping
 
 - The 3 s dataset overflows fp16 (max 1.21e6). Published results there are
   2B-only and unaffected, but any future `1d`/`all` run on it needs `asinh`.

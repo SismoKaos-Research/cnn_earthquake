@@ -12,7 +12,7 @@
 #
 # Sequential: the mseed rebuild is I/O bound and wants the page cache to itself.
 set -u
-B=/home/hogib/Projects/Sismokaos/data_downloader
+B=/home/hogib/Projects/Sismokaos/seismic_cli
 S=src/detection/pretrained_picker_baseline.py
 mkdir -p logs
 

@@ -42,10 +42,10 @@ import pandas as pd
 import torch
 from sklearn.metrics import roc_auc_score
 
-MANIFEST = ("/home/hogib/Projects/Sismokaos/data_downloader/raw/data/"
+MANIFEST = ("/home/hogib/Projects/Sismokaos/seismic_cli/raw/data/"
             "dataset_stead_matched_6s/manifest.csv")
-CHUNKS = {"01_earthquake": "/home/hogib/Projects/stead_data_process/raw/earthquake/chunk2.hdf5",
-          "00_noise": "/home/hogib/Projects/stead_data_process/raw/noise/chunk1.hdf5"}
+CHUNKS = {"01_earthquake": "/home/hogib/Projects/Sismokaos/stead_data_process/raw/earthquake/chunk2.hdf5",
+          "00_noise": "/home/hogib/Projects/Sismokaos/stead_data_process/raw/noise/chunk1.hdf5"}
 WINDOW = 600  # samples this project's detector sees, at 100 Hz
 
 

@@ -10,11 +10,18 @@ catalogued event inside the record has a waveform whether or not anyone
 requested it, out to whatever distance the station can hear -- 500 km for MANT
 against 56 km for the event-window corpus.
 
-Windows are written as `event_<id>_raw.mseed` in the layout
+Windows are written as `event_<id>_raw.mseed` under
+`<out-dir>/<length>/<station>/{eq,noise}/`, the layout
 `seismic-cli generate-regression-dataset` already consumes, so the spectrogram
 encoding, the aux scalars and the split logic all come from the tested path
 rather than being reimplemented here. This script only decides *which samples*
 become a window, never how they are encoded.
+
+**The station goes in the path, not the filename.** An earlier version wrote
+`event_<id>_<station>_raw.mseed`, which reads as compatible and is not:
+`parse_event_id` is `^(?:noise_)?event_(.+?)_raw$` with a non-greedy capture, so
+that name yields the event id `627227_MANT`, matches no catalogue row, and every
+window loses its magnitude label without an error anywhere.
 
 **Noise windows come from the same record**, taken well before the P arrival of
 the event they accompany, so the noise class shares the station, the instrument
@@ -39,7 +46,7 @@ from obspy import UTCDateTime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from continuous_false_alarms import (component_segments, haversine,
+from continuous_false_alarms import (component_segments, haversine, load_snr,
                                      pick_components, predicted_arrivals,
                                      read_chunk)
 
@@ -68,6 +75,24 @@ def parse_args():
                         "nothing. Each length gets its own eq/noise subtree.")
     p.add_argument("--noise-offset", type=float, default=300.0,
                    help="seconds before P to take the paired noise window")
+    p.add_argument("--anchor-csv", default=None,
+                   help="CSV with event_id and an anchor time column, used "
+                        "INSTEAD of the predicted P. `falsealarm timing` writes "
+                        "one: its `alarm_epoch` is when the detector actually "
+                        "fired. Every magnitude figure in this project so far "
+                        "was measured on catalogue-anchored windows, i.e. with "
+                        "the P arrival known -- which a deployed cascade does "
+                        "not have. Cutting from the detector's own alarm times "
+                        "is what prices that assumption.")
+    p.add_argument("--anchor-column", default="alarm_epoch",
+                   help="column in --anchor-csv holding the anchor epoch")
+    p.add_argument("--anchor-lag", type=float, default=None,
+                   help="seconds subtracted from the anchor before --pre is "
+                        "applied. Set it to the detector's MEDIAN lag after P "
+                        "so the median event lands exactly where training put "
+                        "it; what then remains is the jitter, which is the "
+                        "quantity being measured. Defaults to the median of "
+                        "(anchor - predicted P) over the file itself.")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--limit-chunks", type=int, default=None)
     return p.parse_args()
@@ -116,19 +141,59 @@ def main():
     dirs = {}
     for w in lengths:
         tag = f"{w:g}s"
-        eq = pathlib.Path(args.out_dir) / tag / "eq"
-        nz = pathlib.Path(args.out_dir) / tag / "noise"
+        # <length>/<station>/{eq,noise}: the station is what makes two cuts
+        # distinguishable, and it cannot live in the filename without breaking
+        # the consumer's event-id parse (see the module docstring).
+        eq = pathlib.Path(args.out_dir) / tag / args.station / "eq"
+        nz = pathlib.Path(args.out_dir) / tag / args.station / "noise"
         eq.mkdir(parents=True, exist_ok=True)
         nz.mkdir(parents=True, exist_ok=True)
         dirs[w] = (eq, nz)
 
     cat, (slat, slon) = predicted_arrivals(args)
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        cat = cat.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        # load_snr, not a raw read: a duplicated event_id expands `cat`, so the
+        # same event is cut twice and its inclusion depends on which of its two
+        # SNR readings the join happened to put first. load_snr keeps the larger.
+        cat = cat.merge(load_snr(args.snr_csv), left_on="EventID",
+                        right_on="event_id", how="left")
         before = len(cat)
         cat = cat[cat.snr >= args.snr_min]
         print(f"[events] {len(cat):,} of {before:,} reach SNR {args.snr_min:g}")
+
+    # The anchor. `cut_epoch` is what every window is cut relative to: normally
+    # the predicted P, or the detector's own alarm when --anchor-csv is given.
+    cat["cut_epoch"] = cat.p_epoch
+    if args.anchor_csv:
+        a = pd.read_csv(args.anchor_csv)
+        # The id column is spelled both ways in this project: `falsealarm
+        # timing` writes `EventID` (it comes straight off the catalogue frame)
+        # and `station_detection_range` writes `event_id`. Accept either rather
+        # than making the caller know which tool produced the file.
+        idcol = next((c for c in ("EventID", "event_id") if c in a.columns), None)
+        if idcol is None:
+            sys.exit(f"{args.anchor_csv} has neither EventID nor event_id; "
+                     f"columns are {list(a.columns)}")
+        if args.anchor_column not in a.columns:
+            sys.exit(f"{args.anchor_csv} has no column {args.anchor_column!r}; "
+                     f"columns are {list(a.columns)}")
+        a = a[[idcol, args.anchor_column]].dropna()
+        a = a.sort_values(args.anchor_column).drop_duplicates(subset=idcol)
+        before = len(cat)
+        cat = cat.merge(a.rename(columns={idcol: "_anchor_id"}),
+                        left_on="EventID", right_on="_anchor_id", how="inner")
+        lag = args.anchor_lag
+        if lag is None:
+            lag = float((cat[args.anchor_column] - cat.p_epoch).median())
+        cat["cut_epoch"] = cat[args.anchor_column] - lag
+        resid = (cat.cut_epoch - cat.p_epoch)
+        print(f"[anchor] {len(cat):,} of {before:,} event(s) have a "
+              f"{args.anchor_column}; lag {lag:.2f}s removed")
+        print(f"[anchor] residual offset from the true P after the lag: "
+              f"median {resid.median():+.2f}s, "
+              f"p10 {resid.quantile(0.1):+.2f}s, p90 {resid.quantile(0.9):+.2f}s")
+        print(f"[anchor] that spread IS the quantity being measured -- the "
+              f"median event lands where training put it and the rest do not")
     cat = cat.sort_values("p_epoch").reset_index(drop=True)
 
     zips = sorted(glob.glob(args.zips))
@@ -154,14 +219,21 @@ def main():
 
         got = 0
         for ev in sub.itertuples():
-            tag = f"event_{int(ev.EventID)}_{args.station}"
+            # `event_<id>_raw`, exactly. seismic-cli's parse_event_id is
+            # `^(?:noise_)?event_(.+?)_raw$` and its capture is non-greedy, so
+            # an extra `_MANT` infix parses as the event id "627227_MANT",
+            # which matches no catalogue EventID -- every window would lose its
+            # magnitude label, silently, and the dataset would come out empty.
+            # The station belongs in the path (below), where it distinguishes
+            # two stations' cuts without breaking the consumer.
+            tag = f"event_{int(ev.EventID)}"
             # An event is kept only if EVERY requested length is clean, so the
             # length series covers identical events and a difference between
             # lengths cannot come from a difference in which events survived.
             cuts = {}
             for w in lengths:
                 nw = int(round(w * args.fs))
-                a = cut(segs, comps, ev.p_epoch - args.pre, nw, args.fs)
+                a = cut(segs, comps, ev.cut_epoch - args.pre, nw, args.fs)
                 b_ = cut(segs, comps, ev.p_epoch - args.noise_offset, nw, args.fs)
                 if a is None or b_ is None:
                     cuts = None
@@ -172,7 +244,7 @@ def main():
                 continue
             for w, (a, b_) in cuts.items():
                 eq, nzd = dirs[w]
-                write_mseed(a, comps, ev.p_epoch - args.pre, args.station,
+                write_mseed(a, comps, ev.cut_epoch - args.pre, args.station,
                             eq / f"{tag}_raw.mseed", args.fs)
                 write_mseed(b_, comps, ev.p_epoch - args.noise_offset, args.station,
                             nzd / f"noise_{tag}_raw.mseed", args.fs)

@@ -5,7 +5,7 @@
 #   wideband : band's lower edge removed only (the diagnostic)
 # Sequential -- each build wants all cores.
 set -u
-cd /home/hogib/Projects/Sismokaos/data_downloader
+cd /home/hogib/Projects/Sismokaos/seismic_cli
 common=(--eq-dir raw/data/batched_waveforms/window_post_3.4s_ponly
         --noise-dir raw/data/batched_noise_waveforms/noise_pre_3h
         --window-seconds 3.4 --fs 100 --max --baseline

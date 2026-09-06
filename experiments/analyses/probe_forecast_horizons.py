@@ -2,7 +2,7 @@
 import sys; sys.path.insert(0,"src")
 import numpy as np, pandas as pd
 from seismolib.catalog import load_hourly_features, load_aegean_events, label_hours
-C="/home/hogib/Projects/Sismokaos/data_downloader/catalogs/"
+C="/home/hogib/Projects/Sismokaos/seismic_cli/catalogs/"
 FE="/home/hogib/Projects/Sismokaos/feature-extract/results/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy"
 h=load_hourly_features(FE); idx=pd.DatetimeIndex(h.index)
 print(f"{len(idx)} hours, {idx.min():%Y-%m-%d} .. {idx.max():%Y-%m-%d}\n")

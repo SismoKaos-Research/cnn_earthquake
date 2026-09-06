@@ -254,3 +254,49 @@ class RawWaveformEncoder(nn.Module):
 
     def forward(self, x):
         return self.net(x).squeeze(-1)
+
+
+class NativeWaveformEncoder(nn.Module):
+    """1D CNN over one hour's native-rate (100Hz, unfiltered) raw waveform.
+
+    raw_cnn_lstm_forecast.py's RawWaveformEncoder reaches its pre-pool
+    resolution (18000 -> ~70) in 4 stride-4 blocks; naively reusing those
+    same strides on a 20x longer (100Hz) input would leave ~1400 samples
+    before pooling and cost ~20x the compute in the first conv layer alone.
+    Adds a stage and front-loads a bigger first stride (8 instead of 4) so
+    the input is cut down early, landing at a comparable ~75 pre-pool
+    resolution instead of paying for 20x the length all the way through."""
+
+    def __init__(self, out_dim=32, dropout=0.3):
+        """Initializes the 5-stage strided 1D CNN.
+
+        Args:
+            out_dim: Width of the embedding this encoder produces per hour.
+            dropout: Dropout used after each conv block.
+        """
+        super().__init__()
+
+        def block(cin, cout, k, s):
+            return nn.Sequential(nn.Conv1d(cin, cout, k, stride=s, padding=k // 2),
+                                 nn.BatchNorm1d(cout), nn.GELU(), nn.Dropout(dropout))
+
+        self.net = nn.Sequential(
+            block(3, 16, 15, 8),
+            block(16, 32, 9, 6),
+            block(32, 32, 5, 5),
+            block(32, 48, 5, 5),
+            block(48, out_dim, 3, 4),
+            nn.AdaptiveAvgPool1d(1),
+        )
+        self.out_dim = out_dim
+
+    def forward(self, x):
+        """Embeds one batch of hourly native-rate waveforms.
+
+        Args:
+            x: Input batch, shape (batch, 3, NATIVE_HOUR_SAMPLES).
+
+        Returns:
+            Tensor of shape (batch, out_dim).
+        """
+        return self.net(x).squeeze(-1)
