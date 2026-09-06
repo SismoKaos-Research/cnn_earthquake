@@ -249,13 +249,42 @@ def label_hours_rate_change(hourly_index: pd.DatetimeIndex, rate_times: np.ndarr
     return (fwd > bwd).astype(np.int64), fwd, bwd
 
 
-def label_hours(hourly_index: pd.DatetimeIndex, major_times: np.ndarray, horizon_days: float) -> np.ndarray:
-    """Labels each hour with whether a qualifying event occurs within the horizon."""
-    horizon = np.timedelta64(int(horizon_days), "D")
+def label_hours(hourly_index: pd.DatetimeIndex, major_times: np.ndarray,
+                horizon_days: float, feature_hours: float = 1.0) -> np.ndarray:
+    """Labels each hour with whether a qualifying event occurs within the horizon.
+
+    **The horizon starts when the features END, not when the hour starts.**
+    `hourly_index` holds hour STARTS and the features for hour H are aggregated
+    over [H, H+1h], so a horizon opening at H counts an event occurring inside
+    the very window the model is shown. That event is visible in the features
+    and labelled as future -- the model can read off the answer. It is one hour
+    of a 720-hour horizon, so it inflates rather than invents, but it is the
+    same window-end mistake `parse_hour_start` and the Zaman_Dk handling above
+    were written to avoid.
+
+    `feature_hours=0` restores the old behaviour, for reproducing a figure
+    published before this. Every forecasting number in the repo predates it.
+
+    Args:
+        hourly_index: Hour-start timestamps, one per sample.
+        major_times: Sorted qualifying event times.
+        horizon_days: How far ahead to look. Fractional days are honoured.
+        feature_hours: Length of the feature window opening at each index, i.e.
+            how far past the index the model can already see.
+
+    Returns:
+        Int array, 1 where a qualifying event falls in the horizon.
+    """
+    # timedelta64 with an int day count silently truncated: --horizon-days 0.5
+    # became a ZERO-day horizon and every label came out negative. Seconds keep
+    # sub-day horizons meaningful.
+    horizon = np.timedelta64(int(round(horizon_days * 86400)), "s")
+    offset = np.timedelta64(int(round(feature_hours * 3600)), "s")
     t = hourly_index.to_numpy()
     labels = np.zeros(len(t), dtype=np.int64)
     for i, ti in enumerate(t):
-        fut = major_times[(major_times > ti) & (major_times <= ti + horizon)]
+        start = ti + offset
+        fut = major_times[(major_times > start) & (major_times <= start + horizon)]
         labels[i] = int(len(fut) > 0)
     return labels
 

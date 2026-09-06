@@ -5,11 +5,14 @@ floor, or their numbers cannot be compared -- and comparing them is the whole
 point of running the screen first. So the preparation lives here rather than
 being written twice.
 
-**The label horizon is 6 HOURS, and that is a trap in this codebase.**
-`seismolib.catalog.label_hours` does `np.timedelta64(int(horizon_days), "D")`,
-so a 0.25-day horizon truncates to zero and every label comes back negative --
-silently, with a plausible-looking all-zero array. `count_events_in_window`
-takes fractional days correctly, so labels are built from that instead.
+**The label horizon is 6 HOURS.** `label_hours` used to truncate the horizon to
+whole days, so a 0.25-day horizon became zero and every label came back negative
+-- silently, as a plausible all-zero array -- and this module counted events
+itself to route around it. It no longer needs to: `label_hours` takes fractional
+days, and it also opens the horizon at the END of the feature window, which
+matters more here than the truncation did. Extraction emits 72 windows per hour
+collapsed to an hourly mean, so the features at t cover [t, t+1h]; counting an
+event inside that hour as future is one hour of a six-hour horizon.
 
 **Aggregation.** Extraction emits 72 windows per hour (200 s window, 50 s step).
 `sequence_variance_check.py` measured that collapsing them to hourly means
@@ -28,7 +31,8 @@ produced its largest apparent gains (+0.069/+0.047).
 import numpy as np
 import pandas as pd
 
-from seismolib.catalog import count_events_in_window, days_since_prev_major, haversine_km
+from seismolib.catalog import (count_events_in_window, days_since_prev_major,
+                               haversine_km, label_hours)
 
 # The features are single-station, so the label's origin is too. Default BODT,
 # overridable so a second station can be scored against its OWN local label --
@@ -237,10 +241,15 @@ def build(parquet_path, catalog_path, horizon_hours=HORIZON_HOURS, aggs=AGGS,
     events = load_events(catalog_path, station=station, bands=bands)
     idx = pd.DatetimeIndex(feats.index)
 
-    # (t, t + horizon] -- an event at exactly t is already observable, so
-    # counting it as future would let the label read its own input.
+    # (t + 1h, t + 1h + horizon]. Excluding only the exact instant t was not
+    # enough: extraction emits 72 windows per HOUR and they are collapsed to an
+    # hourly mean, so the features at t cover [t, t+1h] and an event inside that
+    # hour is both visible to the model and counted as its future. At a 6-hour
+    # horizon that is one hour in six -- 17% of the window, not a rounding
+    # detail. label_hours applies the offset and now takes fractional days, so
+    # the workaround this module was written around can go.
     horizon_days = horizon_hours / 24.0
-    labels = (count_events_in_window(idx, events, horizon_days, forward=True) > 0).astype(int)
+    labels = label_hours(idx, events, horizon_days)
     dsp = days_since_prev_major(idx, events)
 
     if lags:

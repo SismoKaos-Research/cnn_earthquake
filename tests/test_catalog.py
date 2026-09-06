@@ -108,10 +108,22 @@ def test_every_event_is_counted_exactly_once_across_the_two_windows():
     assert (fwd + back == 3).all()
 
 
-def test_label_hours_agrees_with_the_forward_count():
+def test_label_hours_is_the_forward_count_shifted_past_the_feature_window():
+    """They no longer agree, and that is the point.
+
+    `count_events_in_window(forward=True)` counts (t, t+w]. `label_hours` counts
+    (t+1h, t+1h+w], because the features at t cover [t, t+1h] and an event in
+    there is visible to the model. The two are the same quantity offset by one
+    hour, which is what this now pins -- an equality test would have quietly
+    reverted the fix.
+    """
     h = hours("2024-01-01", 48)
     ev = times("2024-01-01T12:00", "2024-01-02T06:00")
-    assert (label_hours(h, ev, 1) == (count_events_in_window(h, ev, 1.0, forward=True) > 0)).all()
+    shifted = h + pd.Timedelta(hours=1)
+    assert (label_hours(h, ev, 1)
+            == (count_events_in_window(shifted, ev, 1.0, forward=True) > 0)).all()
+    assert label_hours(h, times("2024-01-01T00:30"), 1)[0] == 0, (
+        "an event inside hour 0's own feature window must not label it positive")
 
 
 def test_days_since_prev_is_strictly_before_and_until_is_inclusive():

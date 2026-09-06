@@ -190,3 +190,47 @@ def test_auto_split_picks_station_disjoint_when_it_can():
     tr = set(out[out.split == "train"].station_key)
     te = set(out[out.split == "test"].station_key)
     assert not (tr & te), f"'both' left stations shared: {tr & te}"
+
+
+# --- forecasting labels ---------------------------------------------------
+
+def test_an_event_inside_the_feature_window_does_not_make_a_positive_label():
+    """The window-end trap: the model must not be shown its own answer.
+
+    Features for hour H are aggregated over [H, H+1h]. A horizon opening at H
+    counts an event occurring inside that window as a future positive -- so the
+    event is visible in the features AND is the thing being predicted.
+    """
+    import pandas as pd
+
+    from seismolib.catalog import label_hours
+
+    idx = pd.DatetimeIndex(["2026-01-01 00:00", "2026-01-01 01:00", "2026-01-01 02:00"])
+    inside = np.array([np.datetime64("2026-01-01T00:30")])   # inside hour 0's features
+
+    lab = label_hours(idx, inside, horizon_days=30.0)
+    assert lab[0] == 0, (
+        "an event at 00:30 is inside hour 00:00's own feature window; labelling "
+        "that hour positive shows the model the answer")
+    assert lab[1] == 0 and lab[2] == 0, "the event is in the past for later hours"
+
+    after = np.array([np.datetime64("2026-01-01T05:00")])
+    assert list(label_hours(idx, after, horizon_days=30.0)) == [1, 1, 1]
+
+    # the old behaviour is still reachable for reproducing published figures
+    assert label_hours(idx, inside, horizon_days=30.0, feature_hours=0)[0] == 1
+
+
+def test_sub_day_horizons_are_not_truncated_to_zero():
+    """`np.timedelta64(int(0.5), "D")` is ZERO days -- every label comes out 0."""
+    import pandas as pd
+
+    from seismolib.catalog import label_hours
+
+    idx = pd.DatetimeIndex(["2026-01-01 00:00"])
+    # event 3 h after the feature window closes
+    ev = np.array([np.datetime64("2026-01-01T04:00")])
+    assert label_hours(idx, ev, horizon_days=0.5)[0] == 1, (
+        "a 12-hour horizon must reach an event 3 hours out; if this is 0 the "
+        "float horizon was truncated to an integer number of days")
+    assert label_hours(idx, ev, horizon_days=0.05)[0] == 0, "1.2 h must not reach it"

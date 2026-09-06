@@ -37,7 +37,8 @@ import pandas as pd
 
 from forecasting.chaos_dataset import (ID_COLUMNS, RADIUS_KM, MIN_MAGNITUDE,
                                        load_events, persistence_scores)
-from seismolib.catalog import count_events_in_window, days_since_prev_major
+from seismolib.catalog import (count_events_in_window, days_since_prev_major,
+                               label_hours)
 from seismolib.metrics import safe_auc
 from seismolib.splits import walk_forward_splits
 
@@ -154,7 +155,10 @@ def main():
         feats = context_features(hourly, ctx)
         x = np.column_stack([feats.to_numpy(dtype=float), log1p_dsp])
         for hz in args.horizons:
-            y = (count_events_in_window(idx, events, hz / 24.0, forward=True) > 0).astype(int)
+            # label_hours, not a raw forward count: the features at each hour
+            # cover [t, t+1h], so a forward count from t counts an event the
+            # model can already see. Same fix as chaos_dataset.build.
+            y = label_hours(idx, events, hz / 24.0)
             pos = float(y.mean())
             usable = POS_RATE_RANGE[0] <= pos <= POS_RATE_RANGE[1]
             if not usable:

@@ -24,12 +24,22 @@ def times(*stamps):
     return np.array([np.datetime64(s) for s in stamps])
 
 
-def test_label_hours_would_silently_zero_a_six_hour_horizon():
-    """The trap this module exists to route around. If label_hours is ever
-    fixed to take fractional days, this test fails and the workaround can go."""
+def test_label_hours_now_handles_a_six_hour_horizon():
+    """The tripwire above fired, so the workaround went.
+
+    This test used to assert the BROKEN behaviour -- that a 0.25-day horizon
+    truncated to zero and produced an all-negative label array -- with a
+    docstring saying it should fail once label_hours was fixed. It was, so it
+    did. What it asserts now is the fixed behaviour, including the part that
+    matters more here: the horizon opens at the END of the feature window.
+    """
     h = hours("2024-01-01", 24)
-    ev = times("2024-01-01T03:00")
-    assert label_hours(h, ev, HORIZON_HOURS / 24.0).sum() == 0
+    # 03:00 is 3 h after hour 00:00's features close at 01:00, so within 6 h
+    assert label_hours(h, times("2024-01-01T03:00"), HORIZON_HOURS / 24.0)[0] == 1
+    # 00:30 is INSIDE hour 00:00's own feature window -- the model can see it
+    assert label_hours(h, times("2024-01-01T00:30"), HORIZON_HOURS / 24.0)[0] == 0
+    # 09:00 is beyond 01:00 + 6 h
+    assert label_hours(h, times("2024-01-01T09:00"), HORIZON_HOURS / 24.0)[0] == 0
 
 
 def test_count_events_in_window_handles_the_same_horizon_correctly():
