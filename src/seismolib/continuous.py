@@ -24,6 +24,7 @@ windows a catalogued event can excuse.
 stations.
 """
 import glob
+import math
 import pathlib
 import tempfile
 import zipfile
@@ -31,10 +32,15 @@ import zipfile
 import numpy as np
 import pandas as pd
 from obspy import UTCDateTime, read
-from scipy.signal import butter, sosfiltfilt
+from scipy import signal
 
 from seismolib.arrivals import P_PHASES, S_PHASES, ArrivalTimes
 from seismolib.catalog import haversine_km as haversine
+
+# Component roles, in the order the training encoder stacks them. Taking the
+# first three channels alphabetically would grab ['1','2','E'] at a station with
+# mixed sensor codes -- two horizontals and no vertical. See core._COMPONENT_ROLES.
+COMPONENT_ROLES = (("Z",), ("N", "1"), ("E", "2"))
 
 
 def read_chunk(zpath):
