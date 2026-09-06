@@ -18,13 +18,13 @@ baselines:
     # catalog only, the fast baseline
     python3 src/sismokaos/forecasting/gru_cnn_train.py \\
         --features combined_features_114d.parquet \\
-        --catalog-path ../Sismokaos/data_downloader/catalogs/catalog_current.csv
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 
     # add the waveform branch (needs a .f32 stream from sismokaos-cli)
     python3 src/sismokaos/forecasting/gru_cnn_train.py \\
         --features combined_features_114d.parquet \\
         --raw-f32 aegean_bodt_preprocessed.f32 \\
-        --catalog-path ../Sismokaos/data_downloader/catalogs/catalog_current.csv
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 
 Read `--help` there for horizon, sequence length, folds and seeds.
 

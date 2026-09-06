@@ -44,7 +44,7 @@ even without explicit windowing).
 Usage:
     python cnn_proximity_classify.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --consolidated --close-days 7 --cv-folds 2
 
 Not imported by anything else -- standalone script.

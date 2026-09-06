@@ -17,6 +17,9 @@ Timings are wall-clock on a Ryzen 5 5600H (12 threads) with a 4 GB GTX 1650.
 | `model_cnn_lstm` | `main` | `673e521` |
 | `data_downloader` (in `Sismokaos/`) | `main` | `b3980c5` |
 
+> The sibling checkout is named **`seismic_cli`** now, after the package inside it. Paths written `data_downloader/...` below are that same checkout; the GitHub remote still reads `hogib/data_downloader`.
+
+
 `b3980c5` is the commit that adds `--match-negative-amplitude`. Anything older
 cannot build the matched dataset.
 

@@ -22,7 +22,7 @@ catalog's first qualifying event have no previous event; they take
 `forecasting/cnn_lstm_catalog_waveform_fusion.py`.
 
     python3 src/sismokaos/features/build_catalog_span_features.py \\
-        --catalog-path ../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --start 2000-01-01 --end 2026-08-12 \\
         --out-path catalog_features_2000_2026.parquet
 

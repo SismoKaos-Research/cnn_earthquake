@@ -35,17 +35,17 @@ imbalanced):
     "it happened recently, predict another" is free.
 
 **Evaluation is block-level, not raw per-window**, via
-`data_downloader/seismic_cli/forecast.py`'s `build_blocks`: consecutive
+`seismic_cli/src/seismic_cli/forecast.py`'s `build_blocks`: consecutive
 windows overlap 11-46x (stride 8 of a 64-event window), so per-window AUC
 overstates confidence in its own value by up to ~7x in standard error. Block
-evaluation needs the sibling repo importable; pass --data-downloader-root if
+evaluation needs the sibling repo importable; pass --seismic-cli-root if
 it isn't at the default relative location, or block-level results are simply
 skipped and only per-window numbers are printed.
 
 Usage:
     python cnn_lstm_forecast.py \\
-        --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
-        --catalog-path ../../data_downloader/catalogs/catalog_current.csv
+        --dataset-dir ../seismic_cli/data/dataset_catalog_forecast \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 
 Also imported (not just run standalone): catalog_forecast_predict.py imports
 `AUX_FEATURES`, `DenseWindowDataset`, and `DualChannelForecastNet` from this
@@ -269,7 +269,7 @@ def report_row(name: str, y: np.ndarray, score: np.ndarray) -> dict:
 # ---------------------------------------------------------------------------
 
 def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: str,
-                   data_downloader_root: str, horizon_days: float, threshold: float) -> None:
+                   seismic_cli_root: str, horizon_days: float, threshold: float) -> None:
     """Re-scores the test predictions at the honest (block) sample size using
     `seismic_cli.forecast.build_blocks` -- the same partitioning
     `catalog_report.md` used, so this number is directly comparable to the
@@ -282,7 +282,7 @@ def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: st
         scores: Predicted positive-class probability, aligned with
             `test_rows`.
         catalog_path: Path to the earthquake catalog CSV.
-        data_downloader_root: Path to the sibling data_downloader repo
+        seismic_cli_root: Path to the sibling seismic_cli repo
             (must contain a `seismic_cli/` package to import from).
         horizon_days: Forecast horizon in days (block width).
         threshold: Minimum magnitude for a catalog event to qualify.
@@ -291,10 +291,10 @@ def try_block_eval(test_rows: pd.DataFrame, scores: np.ndarray, catalog_path: st
         None. Prints per-zone block-level AUC/accuracy, or a skip message if
         the sibling repo isn't importable or a zone has no usable blocks.
     """
-    root = Path(data_downloader_root).resolve()
+    root = Path(seismic_cli_root).resolve()
     if not (root / "seismic_cli").is_dir():
         print(f"\n[block-eval] skipped: {root} has no seismic_cli/ -- pass "
-             f"--data-downloader-root to enable.")
+             f"--seismic-cli-root to enable.")
         return
     sys.path.insert(0, str(root))
     try:
@@ -372,8 +372,12 @@ def parse_args():
     p.add_argument("--catalog-path", default=None,
                   help="Earthquake catalog CSV, for block-level evaluation. "
                        "Skipped if not given.")
-    p.add_argument("--data-downloader-root", default="../../data_downloader",
-                  help="Path to the sibling data_downloader repo, for block-level eval.")
+    # `--data-downloader-root` is kept as an alias: the sibling checkout was
+    # renamed to seismic_cli, but recorded commands in docs/ and
+    # experiments/reproduce/ still pass the old flag and must keep running.
+    p.add_argument("--seismic-cli-root", "--data-downloader-root",
+                  dest="seismic_cli_root", default="../seismic_cli",
+                  help="Path to the sibling seismic_cli repo, for block-level eval.")
     return p.parse_args()
 
 
@@ -507,7 +511,7 @@ def main():
         print("  numbers below for the honest sample size before trusting this).")
 
     if args.catalog_path:
-        try_block_eval(test_rows, st, args.catalog_path, args.data_downloader_root,
+        try_block_eval(test_rows, st, args.catalog_path, args.seismic_cli_root,
                        args.horizon_days, args.threshold)
     else:
         print("\n[block-eval] skipped: pass --catalog-path to enable "

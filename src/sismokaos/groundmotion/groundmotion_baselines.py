@@ -33,7 +33,7 @@ model claims.
 
 Usage:
     python groundmotion_baselines.py \\
-        --manifest ../../data_downloader/data/dataset_groundmotion_3s/manifest.csv
+        --manifest ../seismic_cli/data/dataset_groundmotion_3s/manifest.csv
 
 Also imported (not just run standalone): cnn_groundmotion.py imports
 `TARGETS` and `load` from this module, reusing the same target definitions

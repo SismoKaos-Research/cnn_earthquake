@@ -38,7 +38,7 @@ corpus's own 1-45 Hz bandpass first, which is what our models saw. Neither is
 Usage:
     python3 src/sismokaos/detection/pretrained_picker_baseline.py \\
         --dataset-dir .../dataset_specdual_ponly_3p4s_matched \\
-        --data-root .../data_downloader --weights original,scedc,stead
+        --data-root ../seismic_cli --weights original,scedc,stead
 """
 
 import argparse

@@ -52,7 +52,7 @@ def parse_args():
     p.add_argument("--stead-root", required=True,
                    help="Directory holding earthquake/chunk2.* and noise/chunk1.*")
     p.add_argument("--out-root", required=True,
-                   help="`raw/data` under the data_downloader checkout.")
+                   help="`raw/data` under the seismic_cli checkout.")
     p.add_argument("--event-chunk", default="earthquake/chunk2")
     p.add_argument("--noise-chunk", default="noise/chunk1")
     p.add_argument("--min-magnitude", type=float, default=2.0,

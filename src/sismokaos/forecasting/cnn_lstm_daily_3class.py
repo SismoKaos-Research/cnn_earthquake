@@ -28,7 +28,7 @@ Distinct from every other script in this "current work" family in two ways:
 Usage:
     python cnn_lstm_daily_3class.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --consolidated --chunk-days 30 --horizon-days 30 --cv-folds 2
 
 Not imported by anything else -- standalone script.

@@ -5,7 +5,7 @@ Bypasses all feature-extraction overhead to run rapid LightGBM subsets.
 Usage:
     python parquet_feature_rfe.py \
         --parquet-path combined_features_114d.parquet \
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \
         --horizon-days 14 --cv-folds 3
 """
 

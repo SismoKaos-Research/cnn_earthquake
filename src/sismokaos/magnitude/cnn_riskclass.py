@@ -3,7 +3,7 @@ Three-class risk classification (noise / low-risk / high-risk) from encoded
 seismic windows.
 
 Consumes a dataset built by `seismic-cli generate-riskclass-dataset`
-(`data_downloader/seismic_cli/riskclass.py`): encoded windows plus a
+(`seismic_cli/src/seismic_cli/riskclass.py`): encoded windows plus a
 manifest carrying, per window, `risk_class` (`00_noise`, `01_low_risk`,
 `02_high_risk`), the source magnitude (NaN for noise), and the same two
 physical predictors `cnn_magclass.py` uses -- log SNR against the station's

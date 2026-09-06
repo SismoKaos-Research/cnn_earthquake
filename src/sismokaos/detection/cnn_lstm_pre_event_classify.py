@@ -32,7 +32,7 @@ unchanged (this script imports it directly rather than redefining it).
 Usage:
     python cnn_lstm_pre_event_classify.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --consolidated --seq-hours 720 --cv-folds 2
 
 Not imported by anything else -- standalone script.

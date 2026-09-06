@@ -15,7 +15,7 @@ Hours whose next major event lies beyond --max-horizon-days are assigned
 Usage:
     python next_event_regression.py \
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \
         --consolidated --max-horizon-days 30 --cv-folds 3 --n-jobs 4
 """
 

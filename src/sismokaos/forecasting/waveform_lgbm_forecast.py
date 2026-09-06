@@ -17,7 +17,7 @@ this dataset's size -- same lesson as the 11-feature catalog overfit. Run
 Usage:
     python waveform_lgbm_forecast.py \\
         --data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --consolidated --horizon-days 14 --cv-folds 2 --n-jobs 6
 
 Not imported by anything else -- standalone script.

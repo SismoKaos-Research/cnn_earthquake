@@ -9,9 +9,9 @@ Computing* 172) — a 1D branch over the raw waveform, a 2D branch over a
 spectrogram or recurrence-plot image, fused — adapted and extended across all
 four targets, and measured against non-neural floors throughout.
 
-This is the model half of a two-repo pipeline. The companion repo
-(`Sismokaos`, locally `../Sismokaos` or `../data_downloader`) does FDSN
-downloading, windowing, and dataset generation; this one trains and evaluates.
+This is the model half of a two-repo pipeline. The companion repo,
+`seismic_cli` (a sibling checkout, `../seismic_cli`), does FDSN downloading,
+windowing, and dataset generation; this one trains and evaluates.
 
 **Where to read what.** This file is the manual: how to install it, how to
 drive it, and what lives where. [`docs/report.md`](docs/report.md) is the
@@ -46,20 +46,21 @@ Everything runnable has one front door. `sk` on its own lists the commands
 grouped by what you are trying to do; each command keeps its own `--help`.
 
 ```
-acquire     campaign poll fdsn plan-pull catalog
+acquire     campaign poll fdsn fdsn-noise plan-pull catalog
 stations    station-select station-range station-loss
 windows     cut-events cut-length
 train       train
 evaluate    falsealarm magprofile
-report      docx figures
-inspect     status models
+report      docx pdf figures
+inspect     status models results
 ```
 
-Every command is exactly the underlying script, arguments untouched, so a
-command recorded in a report also runs as `python3 scripts/<tool>.py ...`. That
-is deliberate: results here are expected to be traceable to a command, and a
-front end that rewrote arguments would make the recorded command and the real
-one diverge.
+Every command is exactly the underlying module's `main()`, arguments untouched,
+so a command recorded in a report also runs as
+`python -m sismokaos.<group>.<tool> ...`. That is deliberate: results here are
+expected to be traceable to a command, and a front end that rewrote arguments
+would make the recorded command and the real one diverge. A test fails if `sk`
+stops listing a tool, or lists one that does not import.
 
 ### Getting data
 

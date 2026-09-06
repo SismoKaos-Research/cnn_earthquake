@@ -23,7 +23,7 @@ Usage:
     python cnn_lstm_cross_station.py \\
         --train-data-root ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated \\
         --test-data-root ../../Sismokaos/feature-extract/data/aegean_dat_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --horizon-days 14
 
 Not imported by anything else -- standalone script.

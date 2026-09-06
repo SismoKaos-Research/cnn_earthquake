@@ -35,7 +35,7 @@ the selection metric has to see many unseen stations, which is exactly what
 GroupKFold over stations provides.
 
 Usage:
-    python riskclass_scalar.py --dataset-dir ../../data_downloader/data/dataset_riskclass_3s_v2
+    python riskclass_scalar.py --dataset-dir ../seismic_cli/data/dataset_riskclass_3s_v2
 
 Not imported by anything else -- standalone script.
 """

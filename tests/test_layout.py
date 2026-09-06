@@ -26,7 +26,7 @@ FILES = (sorted((ROOT / "src").rglob("*.py"))
 ALLOWED = {
     "src/sismokaos/forecasting/cnn_lstm_forecast.py":
         "imports `seismic_cli.forecast` from a SIBLING REPO whose location "
-        "comes from --data-downloader-root. That path is not knowable at "
+        "comes from --seismic-cli-root. That path is not knowable at "
         "install time and the import is guarded, skipping with a message "
         "rather than crashing when the sibling is absent.",
 }
@@ -151,3 +151,27 @@ def test_no_tool_module_is_left_unregistered():
                 on_disk.add(f"sismokaos.{group}.{p.stem}")
     assert not on_disk - registered, \
         f"{sorted(on_disk - registered)} are tools that `sk` does not list"
+
+
+def test_the_readme_lists_the_commands_sk_actually_has():
+    """The README's command block is a copy of `sk`'s listing, so it drifts.
+
+    It had: `fdsn-noise`, `pdf` and `results` were missing, three commands that
+    exist and work but that the manual did not mention. A reader's first look
+    at this repo is the README, and a front door that under-reports itself is
+    worse than no listing at all.
+    """
+    from sismokaos.cli import GROUPS
+
+    block = (ROOT / "README.md").read_text().split("```\nacquire", 1)[1].split("```", 1)[0]
+    documented = {}
+    for line in ("acquire" + block).strip().splitlines():
+        group, *names = line.split()
+        documented[group] = names
+
+    real = {group: names for group, names in GROUPS}
+    assert documented == real, (
+        "README command block is out of date:\n" +
+        "\n".join(f"  {g}: README {documented.get(g)} vs sk {real.get(g)}"
+                  for g in sorted(set(documented) | set(real))
+                  if documented.get(g) != real.get(g)))

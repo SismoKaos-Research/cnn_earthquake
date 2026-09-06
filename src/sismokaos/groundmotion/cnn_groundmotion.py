@@ -60,7 +60,7 @@ Protocol
   here exactly when a log-space model is scored in linear space.
 
 Usage:
-    python cnn_groundmotion.py --dataset-dir ../../data_downloader/data/dataset_groundmotion_3s
+    python cnn_groundmotion.py --dataset-dir ../seismic_cli/data/dataset_groundmotion_3s
     python cnn_groundmotion.py --target pga_fwd --arch cnn --no-aux
 
 Not imported by anything else -- standalone script.
@@ -529,7 +529,7 @@ def parse_args():
         argparse.Namespace with the script's CLI options.
     """
     p = argparse.ArgumentParser(description="Peak ground motion CNN vs the scalar floor.")
-    p.add_argument("--dataset-dir", default="../../data_downloader/data/dataset_groundmotion_3s")
+    p.add_argument("--dataset-dir", default="../seismic_cli/data/dataset_groundmotion_3s")
     p.add_argument("--target", default="pgv_fwd", choices=list(TARGETS))
     # --arch is kept as an alias of --model-branch: `run_groundmotion_experiments.sh`
     # passes `--arch cnn_lstm`, and groundmotion_summary.py reads an `arch`

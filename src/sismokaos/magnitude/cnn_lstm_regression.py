@@ -42,7 +42,7 @@ close margin here should be re-seeded before being treated as final, not
 read as an established result off one run.
 
 Usage:
-    python cnn_lstm_regression.py --dataset-dir ../../data_downloader/data/dataset_magclass_dual_3s
+    python cnn_lstm_regression.py --dataset-dir ../seismic_cli/data/dataset_magclass_dual_3s
 
 Not imported by anything else -- standalone script.
 """

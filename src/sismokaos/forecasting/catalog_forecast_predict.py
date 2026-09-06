@@ -10,7 +10,7 @@ not a fourth attempt at the thing that didn't work.
 
 Usage:
     python catalog_forecast_predict.py \\
-        --dataset-dir ../../data_downloader/data/dataset_catalog_forecast \\
+        --dataset-dir ../seismic_cli/data/dataset_catalog_forecast \\
         --model-path trained_model_cnnlstm_forecast_maghead/best_cnnlstm_forecast.pth
 
 Not imported by anything else -- standalone script.

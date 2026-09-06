@@ -16,7 +16,7 @@ result here is a fair apples-to-apples comparison against that script's.
 Usage:
     python raw100hz_cnn_lstm_forecast.py \\
         --data-root ../../Sismokaos-featureExtract/data/aegean_bodt_2024_2026_gaponly \\
-        --catalog-path ../../data_downloader/catalogs/catalog_current.csv
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 """
 
 import numpy as np

@@ -28,7 +28,7 @@ between train/val/test to prevent that overlap crossing the split boundary.
 Usage:
     python cnn_lstm_lstm_multiweek.py \\
         --data-roots ../../Sismokaos/feature-extract/data/aegean_bodt_2024_2026_consolidated,../../Sismokaos/feature-extract/data/aegean_dat_2024_2026_consolidated \\
-        --catalog-path ../../Sismokaos/data_downloader/catalogs/catalog_current.csv \\
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv \\
         --n-weeks 4 --horizon-days 7 --cv-folds 2
 
 Not imported by anything else -- standalone script.

@@ -6,14 +6,14 @@ Catalog-only baseline -- start here, it trains in minutes:
 
     python3 src/sismokaos/forecasting/gru_cnn_train.py \\
         --features combined_features_114d.parquet \\
-        --catalog-path ../Sismokaos/data_downloader/catalogs/catalog_current.csv
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 
 Add the waveform branch (needs a `.f32` stream from `sismokaos-cli preprocess`):
 
     python3 src/sismokaos/forecasting/gru_cnn_train.py \\
         --features combined_features_114d.parquet \\
         --raw-f32 aegean_bodt_preprocessed.f32 \\
-        --catalog-path ../Sismokaos/data_downloader/catalogs/catalog_current.csv
+        --catalog-path ../seismic_cli/catalogs/catalog_current.csv
 
 Useful knobs: `--horizon-days` (default 14), `--seq-len` (24), `--cv-folds`
 (2), `--ensemble-seeds 42,43,44`, `--epochs`, `--batch-size`.
