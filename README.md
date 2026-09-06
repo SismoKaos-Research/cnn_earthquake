@@ -13,8 +13,9 @@ This is the model half of a two-repo pipeline. The companion repo,
 `seismic_cli` (a sibling checkout, `../seismic_cli`), does FDSN downloading,
 windowing, and dataset generation; this one trains and evaluates.
 
-**Where to read what.** This file is the manual: how to install it, how to
-drive it, and what lives where. [`docs/report.md`](docs/report.md) is the
+**Where to read what.** This file is the overview: how to install it and what
+lives where. [`docs/MANUAL.md`](docs/MANUAL.md) is the operations manual — every
+command, every flag, worked examples, and the trap each step has actually hit. [`docs/report.md`](docs/report.md) is the
 technical writeup — every experiment, every defect found, and reproduction
 commands. [`docs/accuracy_summary.md`](docs/accuracy_summary.md) is the
 one-page table of headline numbers. [`docs/TODO.md`](docs/TODO.md) is the only
