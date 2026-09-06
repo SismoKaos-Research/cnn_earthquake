@@ -53,6 +53,7 @@ COMMANDS = {
     # what is going on
     "status":     ("status.py", "what is running, how far along, and did the last run work"),
     "models":     ("models.py", "the model registry: architectures, branches, flags"),
+    "results":    ("results.py", "what we have measured, on what, with which command"),
     # reporting
     "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
     "pdf":        ("md2pdf.py", "Markdown -> .pdf (run through uv; see its docstring)"),
@@ -66,7 +67,7 @@ GROUPS = [
     ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
     ("report", ["docx", "pdf", "figures"]),
-    ("inspect", ["status", "models"]),
+    ("inspect", ["status", "models", "results"]),
 ]
 
 

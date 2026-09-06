@@ -87,3 +87,51 @@ def test_cli_registry_matches_disk():
     assert not unregistered, (
         f"scripts/ holds {sorted(unregistered)} which `sk` does not expose -- "
         f"either register them in seismolib.cli or move them to experiments/")
+
+
+def test_runlog_tags_are_glob_safe():
+    """The run tag becomes a filename, so it cannot carry spaces or slashes.
+
+    Task names arrive from `sk train` as "sk train magnitude". A space there
+    produces `...sk train magnitude_pid123.json`, which breaks every glob that
+    reads these records back -- including `sk status`, whose whole job is to
+    read them.
+    """
+    import tempfile
+
+    from seismolib.runlog import RunLog
+
+    with tempfile.TemporaryDirectory() as d:
+        for task in ("sk train magnitude", "detection/cnn_lstm_classify",
+                     "weird: name*with?globs"):
+            log = RunLog(task, d, runs_dir=d)
+            name = log.path.name
+            assert " " not in name, f"{task!r} -> {name!r} has a space"
+            assert not (set("*?[]/\\:") & set(name)), f"{task!r} -> {name!r}"
+            assert log.path.exists()
+
+
+def test_runlog_never_overwrites_an_earlier_record():
+    """Two runs in one second in one process must not collide.
+
+    The tag is a per-second stamp plus the pid, so a seed loop or an ensemble
+    -- several trainings inside one process -- produced the same filename and
+    the second silently replaced the first. `sk results --best` then answers
+    from whichever record survived, which is a plausible number and the wrong
+    one. Caught exactly that way: two runs in, one out, and the reported best
+    MAE was the worse of the two.
+    """
+    import tempfile
+
+    from seismolib.runlog import RunLog
+
+    with tempfile.TemporaryDirectory() as d:
+        logs = [RunLog("sk train magnitude", d, runs_dir=d) for _ in range(4)]
+        paths = [l.path for l in logs]
+        assert len(set(paths)) == 4, f"collided: {[p.name for p in paths]}"
+        assert all(p.exists() for p in paths)
+        for i, l in enumerate(logs):
+            l.finish(metrics={"MAE": 0.1 + i / 100})
+        import json
+        maes = sorted(json.loads(p.read_text())["metrics"]["MAE"] for p in paths)
+        assert maes == pytest.approx([0.1, 0.11, 0.12, 0.13]), maes

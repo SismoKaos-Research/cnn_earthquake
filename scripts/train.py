@@ -25,6 +25,7 @@ import importlib
 import sys
 
 from seismolib.model.registry import REGISTRY, by_family
+from seismolib.runlog import RunLog
 from seismolib.tasks import PREDICTS, TASKS, by_prediction
 
 BOLD, DIM, OFF = "\033[1m", "\033[2m", "\033[0m"
@@ -79,6 +80,20 @@ def show_label(task):
     return 0
 
 
+def _save_dir(rest):
+    """Where the task writes, taken from its own `--save-dir` if it has one.
+
+    Recorded, not created. Tasks without the flag still get a record -- the
+    field just says so, which is more useful than refusing to keep one.
+    """
+    for flag in ("--save-dir", "--out-dir", "--out"):
+        if flag in rest:
+            i = rest.index(flag)
+            if i + 1 < len(rest):
+                return rest[i + 1]
+    return "(task has no --save-dir)"
+
+
 def main():
     """Lists the tasks, or dispatches to one trainer's `main()`."""
     argv = sys.argv[1:]
@@ -110,7 +125,19 @@ def main():
     if fn is None:
         print(f"sk train: {task.module} has no main()", file=sys.stderr)
         return 2
-    return fn() or 0
+
+    # Provenance is opened HERE rather than inside each trainer. Wiring 23
+    # trainers by hand is a mechanical edit to files that produce published
+    # numbers, which is how a typo gets into one; opening it around the
+    # dispatch costs nothing and covers every task at once. The trainer does
+    # not need to know: `seismolib.metrics.print_report` files its numbers into
+    # the ambient run, and `RunLog.__exit__` marks a crash as failed.
+    out_dir = _save_dir(argv[1:])
+    with RunLog(f"sk train {name}", out_dir, {"argv": argv[1:]}) as log:
+        log.note(task_key=name, module=task.module, predicts=task.predicts)
+        rc = fn() or 0
+        log.note(exit_code=rc)
+    return rc
 
 
 if __name__ == "__main__":

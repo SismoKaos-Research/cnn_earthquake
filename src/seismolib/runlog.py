@@ -30,11 +30,52 @@ an interrupted run is visible instead of invisible.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# The run this process is inside, if any. `sk train` opens one around every
+# task, so a trainer can record metrics without being told where to put them --
+# and without 23 trainers each needing an edit to a file that produces
+# published numbers. None when a script is run directly, and every entry point
+# below is a no-op then rather than an error.
+_CURRENT = None
+
+
+def current():
+    """The ambient RunLog, or None outside one."""
+    return _CURRENT
+
+
+def record(**kw):
+    """Adds fields to the ambient run. No-op when there is no run.
+
+    This is what lets `seismolib.metrics.print_report` file a trainer's headline
+    numbers automatically: everything that prints a report already calls it, so
+    the metrics land in the record without the trainer knowing a record exists.
+    """
+    if _CURRENT is not None:
+        _CURRENT.note(**kw)
+
+
+def record_metrics(name, report):
+    """Files one report block under `metrics`, keyed by its label.
+
+    Several trainers print more than one report (per seed, per fold, per
+    ablation arm), so they accumulate rather than overwrite -- a record that
+    kept only the last block would silently answer a different question than
+    the one asked.
+    """
+    if _CURRENT is None:
+        return
+    m = dict(_CURRENT.record.get("metrics") or {})
+    keep = {k: v for k, v in report.items()
+            if isinstance(v, (int, float, str, bool)) or v is None}
+    m[str(name)] = keep
+    _CURRENT.note(metrics=m)
 
 
 def _git(*args, default=None):
@@ -65,9 +106,25 @@ class RunLog:
         """
         self.started = time.time()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.tag = f"{stamp}_{task.replace('/', '.')}_pid{os.getpid()}"
+        # Any separator becomes a dot: task names now arrive as "sk train
+        # magnitude" from the dispatcher, and a space in the filename breaks
+        # every glob that reads these back.
+        safe = re.sub(r"[^A-Za-z0-9._-]+", ".", task).strip(".")
+        self.tag = f"{stamp}_{safe}_pid{os.getpid()}"
+        Path(runs_dir).mkdir(parents=True, exist_ok=True)
+
+        # The stamp is per-second and the pid is per-process, so two runs
+        # started in the same second by the same process collided and the
+        # second silently overwrote the first. That is not hypothetical: a
+        # seed loop or an ensemble runs several trainings in one process, and
+        # a lost record makes `sk results --best` answer from whatever
+        # survived -- a plausible number, quietly wrong. Suffix until free.
         self.path = Path(runs_dir) / f"{self.tag}.json"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        n = 2
+        while self.path.exists():
+            self.path = Path(runs_dir) / f"{self.tag}-{n}.json"
+            n += 1
+        self.tag = self.path.stem
 
         dirty = _git("status", "--porcelain", default="")
         self.record = {
@@ -105,6 +162,31 @@ class RunLog:
 
     def _flush(self):
         self.path.write_text(json.dumps(self.record, indent=2, default=str))
+
+    # -- ambient use ------------------------------------------------------
+    def __enter__(self):
+        """Makes this the ambient run for the duration of the block."""
+        global _CURRENT
+        self._previous = _CURRENT
+        _CURRENT = self
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        """Closes the record, marking it failed if the block raised.
+
+        A crashed run leaves `status: "failed"` and the exception, which is the
+        case where the record is most wanted and least likely to be written by
+        hand.
+        """
+        global _CURRENT
+        if self.record.get("status") == "started":
+            if exc_type is None:
+                self.finish()
+            else:
+                self.note(error=f"{exc_type.__name__}: {exc}")
+                self.finish(status="failed")
+        _CURRENT = self._previous
+        return False
 
 
 def _plain(v):

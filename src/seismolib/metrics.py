@@ -236,6 +236,13 @@ def print_report(name, report, digits=4):
             `regression_report`.
         digits: Decimal places used when printing float values.
     """
+    # File it in the ambient run before printing. Every trainer that reports a
+    # result already calls this, so the numbers reach `runs/*.json` without any
+    # of them being edited -- and a number that only ever existed in scrollback
+    # is exactly what has had to be re-derived every time one was questioned.
+    from seismolib import runlog
+    runlog.record_metrics(name, report)
+
     print(f"\n--- {name} ---")
     for key, value in report.items():
         if key in ("confusion_matrix", "labels"):
