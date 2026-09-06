@@ -5,7 +5,7 @@ window by window. Everything below is measured; the score files and threshold
 tables live on vegs (`scores_mant/`, `final_*.csv`), which are gitignored, so
 this file is the record.
 
-`scripts/continuous_false_alarms.py`, `--arm 6s:6.0:trained_model_branch1d_asinh:cnn-lstm`
+`src/sismokaos/continuous/cli.py`, `--arm 6s:6.0:trained_model_branch1d_asinh:cnn-lstm`
 `--arm pnat:3.4:trained_model_ponly_natural:cnn-lstm`
 `--arm ponly:3.4:trained_model_ponly_matched:cnn-lstm`
 `--arm stalta:6.0:stalta:0.5-10`.
@@ -149,20 +149,20 @@ this.
 ## Reproduce
 
 ```bash
-python3 scripts/continuous_false_alarms.py verify \
+sk falsealarm verify \
     --dataset-dir .../dataset_specdual_catalog_6s_matched_hard \
     --ckpt-dir trained_model_branch1d_asinh --branch-1d cnn-lstm
-python3 scripts/continuous_false_alarms.py baseline \
+sk falsealarm baseline \
     --zips 'afad_raw/MANT/*.zip' --out mant_baseline.json
-python3 scripts/continuous_false_alarms.py scan \
+sk falsealarm scan \
     --zips 'afad_raw/MANT/*.zip' --baseline-json mant_baseline.json \
     --arm 6s:6.0:trained_model_branch1d_asinh:cnn-lstm \
     --arm pnat:3.4:trained_model_ponly_natural:cnn-lstm \
     --arm stalta:6.0:stalta:0.5-10 --out-dir scores_mant
-python3 scripts/station_detection_range.py --zips 'afad_raw/MANT/*.zip' \
+sk station-range --zips 'afad_raw/MANT/*.zip' \
     --station MANT --stations-csv catalogs/istasyon_katalog.csv \
     --catalog catalogs/catalog_current.csv --out mant_range_full.csv
-python3 scripts/continuous_false_alarms.py report \
+sk falsealarm report \
     --scores 'scores_mant/6s/*.npz' --station MANT --window-seconds 6.0 \
     --stations-csv catalogs/istasyon_katalog.csv \
     --catalog catalogs/catalog_current.csv --snr-csv mant_range_full.csv \

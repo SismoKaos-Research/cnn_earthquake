@@ -20,15 +20,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (sorted((ROOT / "src").rglob("*.py"))
-         + sorted((ROOT / "scripts").glob("*.py"))
          + sorted((ROOT / "experiments").rglob("*.py")))
 
 # path -> why this one is not the anti-pattern.
 ALLOWED = {
-    "src/sismokaos/cli.py":
-        "sk dispatches to scripts/ by file path, so it puts that directory on "
-        "the path for the tool it is about to exec. It is the dispatcher, not "
-        "a tool reaching for a sibling.",
     "src/sismokaos/forecasting/cnn_lstm_forecast.py":
         "imports `seismic_cli.forecast` from a SIBLING REPO whose location "
         "comes from --data-downloader-root. That path is not knowable at "
@@ -64,7 +59,7 @@ def test_nothing_manipulates_sys_path(path):
 
 # --- recorded paths -------------------------------------------------------
 
-DOC_ROOTS = ("docs", "src", "scripts", "tests", "experiments")
+DOC_ROOTS = ("docs", "src", "tests", "experiments")
 PATH_RE = re.compile(
     r"(?<![\w/.-])(?:" + "|".join(DOC_ROOTS) + r")/[\w./-]+\.(?:py|sh|md)\b")
 
@@ -103,23 +98,56 @@ def test_every_recorded_path_still_resolves(path):
         f"Repoint them, or write the path so it is clearly not this repo's.")
 
 
-def test_sk_registers_every_script_and_groups_every_command():
-    """`sk` is the front door, so a tool it does not list is a tool nobody finds.
+def test_sk_registers_a_real_module_for_every_command():
+    """`sk` is the only front door, so a command that does not resolve is a
+    tool nobody can run.
 
-    Three ways this drifts, all silent: a new script nobody registers, a
-    registration left behind after the script is renamed (which fails only when
-    someone runs it), and a command in `COMMANDS` that no group prints, so it
-    exists but never appears in the listing.
+    It used to dispatch by file path, and the check here was that `scripts/`
+    and the registry held the same filenames. Dispatch is by import now, so
+    the question is the stronger one: does the module exist, does it import,
+    and does it expose the `main()` that `sk` is about to call. A command in
+    `COMMANDS` that no group prints is registered but invisible, which is its
+    own way of being unreachable.
     """
+    import importlib
+
     from sismokaos.cli import COMMANDS, GROUPS
 
-    registered = {v[0] for v in COMMANDS.values()}
-    on_disk = {p.name for p in (ROOT / "scripts").glob("*.py")}
     grouped = {n for _, names in GROUPS for n in names}
-
-    assert not on_disk - registered, \
-        f"scripts/ holds {sorted(on_disk - registered)}, which `sk` does not list"
-    assert not registered - on_disk, \
-        f"`sk` points at {sorted(registered - on_disk)}, which scripts/ does not have"
     assert not set(COMMANDS) - grouped, \
         f"{sorted(set(COMMANDS) - grouped)} are registered but in no GROUPS section"
+    assert not grouped - set(COMMANDS), \
+        f"{sorted(grouped - set(COMMANDS))} are listed in a group but not registered"
+
+    broken = []
+    for name, (modname, _) in sorted(COMMANDS.items()):
+        try:
+            mod = importlib.import_module(modname)
+        except ModuleNotFoundError as e:
+            if modname.endswith("md2docx") and e.name == "docx":
+                continue        # run through `uv run --with python-docx`
+            broken.append(f"sk {name} -> {modname}: {e}")
+            continue
+        if not callable(getattr(mod, "main", None)):
+            broken.append(f"sk {name} -> {modname} has no main()")
+    assert not broken, "\n".join(broken)
+
+
+def test_no_tool_module_is_left_unregistered():
+    """A tool in one of the command groups that `sk` does not list.
+
+    The groups exist to be run from the command line; a module that lands in
+    one without a registry entry is reachable only by someone who already
+    knows the module path, which is the discoverability problem `sk` exists to
+    solve.
+    """
+    from sismokaos.cli import COMMANDS
+
+    registered = {m for m, _ in COMMANDS.values()}
+    on_disk = set()
+    for group in ("acquisition", "stations", "windows", "reporting", "tooling"):
+        for p in (ROOT / "src" / "sismokaos" / group).glob("*.py"):
+            if p.name != "__init__.py":
+                on_disk.add(f"sismokaos.{group}.{p.stem}")
+    assert not on_disk - registered, \
+        f"{sorted(on_disk - registered)} are tools that `sk` does not list"

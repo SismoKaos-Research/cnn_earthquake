@@ -32,10 +32,10 @@ return nothing.
 Magnitude bands are still capped, because any uncapped catalogue selection is
 dominated by small events and would reproduce the imbalance this exists to fix.
 
-    python3 scripts/fdsn_magnitude_pull.py plan \\
+    sk fdsn plan \\
         --catalog catalogs/catalog_current.csv --per-band 800 \\
         --min-magnitude 3.0 --out requests.csv
-    python3 scripts/fdsn_magnitude_pull.py fetch \\
+    sk fdsn fetch \\
         --requests requests.csv --out-dir raw/fdsn_windows
 """
 import argparse

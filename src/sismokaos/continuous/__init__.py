@@ -1,6 +1,6 @@
 """Turning a continuous station archive into scored windows and alarms.
 
-Extracted from `scripts/continuous_false_alarms.py`, which had grown to 1,522
+Extracted from `src/sismokaos/continuous/cli.py`, which had grown to 1,522
 lines and was the most scientifically important tool in the repo while sitting
 in a directory that cannot be imported. `cut_event_windows.py` needed six of
 these functions and reached them with `sys.path.insert(__file__.parent)` -- a
@@ -30,7 +30,7 @@ import read_chunk` keeps working and no call site had to move.
 The command half is one module per subcommand -- `baseline`, `scan`, `report`,
 `coincidence`, `timing`, `verify` -- each owning both its argparse fragment and
 its body, so a flag and the code that reads it are no longer 560 lines apart.
-`cli` assembles them into the parser that `scripts/continuous_false_alarms.py`
+`cli` assembles them into the parser that `src/sismokaos/continuous/cli.py`
 has always presented. They are deliberately NOT imported here: `scan` pulls in
 torch and the detection package, and `from sismokaos.continuous import
 component_segments` should not pay for that.

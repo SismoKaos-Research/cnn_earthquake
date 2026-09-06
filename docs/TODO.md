@@ -66,7 +66,7 @@ GPD/STEAD results folded in, §6 forecasting added) and now version-controlled i
 `docs/tubitak/` with symlinks left on the Desktop.
 
 Remaining: the `.docx` renders are stale against their sources.
-`scripts/md2docx.py` regenerates them — `docs/report.docx` and
+`src/sismokaos/reporting/md2docx.py` regenerates them — `docs/report.docx` and
 `docs/tubitak/*.docx`. Not done automatically because the renders are the thing
 that actually goes to reviewers and should be regenerated deliberately.
 
@@ -110,7 +110,7 @@ and GCAM does not.
 
 ### 2.3 Continuous-data / P-wave picking
 
-**Done.** `scripts/continuous_false_alarms.py` on the full 728 days of MANT,
+**Done.** `src/sismokaos/continuous/cli.py` on the full 728 days of MANT,
 three arms (6 s, P-only mined, P-only natural). The table below is the finished
 run; the partial numbers that stood here (from the first 195 days: 6 s AUC
 0.872, recall 0.653, "10.7% reach SNR 3", median SNR 1.09) were superseded and
@@ -314,7 +314,7 @@ were all overtaken by the catalogue audit and the re-derivations that followed.
 
 Every local catalogue was AFAD's, not KOERI's, and the copy in use was missing
 ~29% of regional events including nearly all of the February 2025
-Santorini–Amorgos swarm. Rebuilt via `scripts/fetch_afad_catalog.py`
+Santorini–Amorgos swarm. Rebuilt via `src/sismokaos/acquisition/fetch_afad_catalog.py`
 (one request, <30 s). Moved results in **both** directions — chaos forecasting
 worse (the persistence floor rose faster than the model), per-zone forecasting
 better (AEGEAN +0.173, CENTRAL +0.222 at block level, CENTRAL no longer at

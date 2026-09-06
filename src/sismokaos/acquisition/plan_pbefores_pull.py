@@ -31,7 +31,7 @@ other's training stations -- the same trap `--split-by detector` exists to fix.
 selection is dominated by small events and reproduces the imbalance the pull is
 meant to fix.
 
-    python3 scripts/plan_pbefores_pull.py \\
+    sk plan-pull \\
         --catalog catalogs/catalog_current.csv \\
         --stations-csv catalogs/istasyon_katalog.csv \\
         --window-seconds 10 --min-magnitude 3.0 \\

@@ -1,7 +1,7 @@
 """Everything in `experiments/` at least parses.
 
-`tests/test_imports.py` covers `src/` and `tests/test_scripts_import.py` covers
-`scripts/`; `experiments/` was covered by nothing, which is why its hardcoded
+`tests/test_imports.py` covers `src/`, which is now every tool as well;
+`experiments/` was covered by nothing, which is why its hardcoded
 paths went stale unnoticed through two directory moves.
 
 Parse, not import. These are analysis one-offs that read specific data files and

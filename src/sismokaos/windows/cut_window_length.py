@@ -18,7 +18,7 @@ several short traces per component; `merge` then a length check means a window
 is written only when the component is genuinely continuous across it, rather
 than silently short or gap-filled.
 
-    python3 scripts/cut_window_length.py \\
+    sk cut-length \\
         --src .../window_post_60s --seconds 10 \\
         --out .../window_post_10s_catalog
 """

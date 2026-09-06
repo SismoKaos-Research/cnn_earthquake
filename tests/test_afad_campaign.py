@@ -10,23 +10,15 @@ That is not hypothetical either: BAKC and IRLI stalled two of the station
 probe's four queue slots this way, and from the outside it was indistinguishable
 from mail that never arrived.
 """
-import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "afad_campaign.py"
-
-
-def _module():
-    spec = importlib.util.spec_from_file_location("_afad_campaign", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-camp = _module()
+# An ordinary import now. These were loaded from a file path because the
+# tools lived in `scripts/`, which is not importable; that is the whole
+# reason the directory is gone.
+from sismokaos.acquisition import afad_campaign as camp
 
 
 class Args:

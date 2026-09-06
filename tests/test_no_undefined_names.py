@@ -1,7 +1,7 @@
 """No module may reference a name nothing in the file ever binds.
 
 This exists because of a bug the rest of the suite could not see. Moving the
-continuous-scan machinery out of `scripts/continuous_false_alarms.py` into
+continuous-scan machinery out of `src/sismokaos/continuous/cli.py` into
 `sismokaos.continuous` carried the function bodies over verbatim but not three
 things they depended on: `import math`, `from scipy import signal`, and the
 `COMPONENT_ROLES` constant. A function's globals are its *defining* module's,
@@ -27,7 +27,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (sorted((ROOT / "src").rglob("*.py"))
-         + sorted((ROOT / "scripts").glob("*.py"))
          + sorted((ROOT / "experiments").rglob("*.py"))
          + sorted((ROOT / "tests").glob("*.py")))
 BUILTINS = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__package__"}

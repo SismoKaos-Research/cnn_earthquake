@@ -8,7 +8,7 @@ lists, horizontal rules, and inline **bold** / *italic* / `code`. Every branch
 of the main loop must advance `i` -- an earlier version did not on the heading
 branch and hung.
 
-Usage: python3 scripts/md2docx.py in.md out.docx
+Usage: sk docx in.md out.docx
 """
 import re
 import sys

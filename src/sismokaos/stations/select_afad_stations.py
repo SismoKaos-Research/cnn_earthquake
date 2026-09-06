@@ -5,7 +5,7 @@ returns a different six stations than against AFAD's live catalogue, because
 that file is missing 96% of the February 2025 Aegean swarm. Re-run this
 whenever the catalogue changes and do not cache the answer.
 
-    python3 scripts/select_afad_stations.py \
+    sk station-select \
         --events ~/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv \
         --stations ~/Projects/Sismokaos/seismic_cli/catalogs/istasyon_katalog.csv \
         --radius 100 --top 8

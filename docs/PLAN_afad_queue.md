@@ -47,7 +47,7 @@ All candidates carry a broadband `H` device in TDVMS (387 of 390 TU stations
 do), so the `device_codes` payload field resolves to `"H"` for each.
 
 Re-run the selection when the replacement catalogue lands:
-`scripts/select_afad_stations.py`, which reads either catalogue layout.
+`src/sismokaos/stations/select_afad_stations.py`, which reads either catalogue layout.
 
 ---
 

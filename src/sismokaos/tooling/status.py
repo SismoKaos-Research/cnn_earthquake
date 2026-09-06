@@ -193,7 +193,7 @@ def show_disk(host, cwd):
 def main():
     """Prints running jobs, recent runs and free disk."""
     args = parse_args()
-    cwd = args.dir or str(Path(__file__).resolve().parents[1])
+    cwd = args.dir or str(Path(__file__).resolve().parents[3])
     where = args.host or os.uname().nodename
     print(f"\033[1m{where}\033[0m:{cwd}")
     show_running(args.host, args.all)

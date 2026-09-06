@@ -459,4 +459,4 @@ Zhu, W., & Beroza, G. C. (2019). PhaseNet: A deep-neural-network-based seismic a
 
 ---
 
-*Ölçümler `scripts/continuous_false_alarms.py` ile yapılmıştır (`baseline`, `scan`, `report`, `timing`, `coincidence` alt komutları). Puan dosyaları `scores_mant/` ve `scores_gcam/`, eşik ve uyuşma çizelgeleri `final_*.csv`, `gcam_6s_*.csv` ve `coinc_*_coincidence.csv` altındadır.*
+*Ölçümler `src/sismokaos/continuous/cli.py` ile yapılmıştır (`baseline`, `scan`, `report`, `timing`, `coincidence` alt komutları). Puan dosyaları `scores_mant/` ve `scores_gcam/`, eşik ve uyuşma çizelgeleri `final_*.csv`, `gcam_6s_*.csv` ve `coinc_*_coincidence.csv` altındadır.*

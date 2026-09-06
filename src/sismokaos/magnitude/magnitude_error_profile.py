@@ -20,7 +20,7 @@ from whichever split it is handed, so the test split must be given the train
 split's stats explicitly; letting it fit its own would leak test statistics into
 the input and quietly improve the number.
 
-    python3 scripts/magnitude_error_profile.py \\
+    sk magprofile \\
         --dataset-dir .../dataset_magreg_catalog_6s \\
         --ckpt trained_model_magreg_grid/best_..._both_seed42_split42_pid58288.pth \\
         --split-by both --seed-split 42 --out mag_profile_p42.csv

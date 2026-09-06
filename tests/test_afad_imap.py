@@ -15,23 +15,17 @@ set is read from the ledger, and `handle` returns None -- the value `poll`
 already treats as "do not mark seen" -- without running the campaign.
 """
 import email.message
-import importlib.util
 import json
-from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "afad_imap.py"
+# An ordinary import now. These were loaded from a file path because the
+# tools lived in `scripts/`, which is not importable; that is the whole
+# reason the directory is gone.
+from sismokaos.acquisition import afad_imap as _imap
 
 
-def _module():
-    spec = importlib.util.spec_from_file_location("_afad_imap", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-imap = _module()
+imap = _imap
 
 
 def write_ledger(path, rows):

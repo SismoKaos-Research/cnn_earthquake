@@ -1,63 +1,60 @@
-"""`sk` -- one entry point for the tools in `scripts/`.
+"""`sk` -- the front door to this repo's tools.
 
-Fifteen tools with fifteen invocation styles is why nobody remembers which one
-does what. This gives them one front door and a listing, without changing any of
-them: each tool keeps its own `main()` and its own `--help`, and still runs
-standalone as `python3 scripts/<tool>.py`.
+Twenty tools with twenty invocation styles is why nobody remembers which one
+does what. This gives them one entry point and a listing, grouped by what you
+are trying to do rather than by which family wrote them.
 
-**It dispatches by file path rather than by import.** The tools deliberately are
-not moved into the package, because `afad_imap.py` spawns `afad_campaign.py` as
-a subprocess by path to refill queue slots -- moving them under a live campaign
-would break a poller mid-run. Dispatch buys the discoverability now; relocating
-the files is a separate change for when nothing is in flight.
+**It dispatches by import.** It used to dispatch by file path, because the
+tools lived in `scripts/` -- a directory that cannot be imported, so the only
+way to reach one was to load it from its path. That is also why
+`cut_event_windows.py` had to `sys.path.insert` its own directory to borrow six
+functions from a sibling, and why the most scientifically important tool in the
+repo went untested for as long as it did. The tools are modules now:
 
-    sk                      # list the tools
+    sk                      # the listing
     sk fdsn plan --help     # a tool's own help, unchanged
     sk falsealarm scan --zips 'afad_raw/MANT/*.zip' ...
 
-Every command is exactly the underlying script, so anything a write-up records
-as `sk fdsn fetch ...` can also be run as `python3 scripts/fdsn_magnitude_pull.py
-fetch ...` and vice versa. That matters here: results in this repo are expected
-to be traceable to a command, and a front end that rewrote arguments would make
-the recorded command and the real one diverge.
+Every command is exactly the underlying module's `main()`, called with the
+arguments you typed. Nothing is rewritten in between. That matters here:
+results in this repo are expected to be traceable to a command, and a front end
+that reshaped arguments would make the recorded command and the real one
+diverge. Each tool also still runs standalone as
+`python -m sismokaos.<group>.<tool>`.
 """
-import importlib.util
+import importlib
 import sys
-from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "scripts"
-
-# name -> (script, one-line description). Grouped by what you are trying to do,
-# which is how the tools get looked for, rather than by which family wrote them.
+# name -> (module, one-line description). Grouped below by what you are trying
+# to do, which is how a tool actually gets looked for.
 COMMANDS = {
     # acquisition
-    "campaign":   ("afad_campaign.py", "TDVMS ledger: plan, submit, paste, status, mark, reset"),
-    "poll":       ("afad_imap.py", "watch the mailbox, fetch links, refill freed queue slots"),
-    "fdsn":       ("fdsn_magnitude_pull.py", "plan/fetch event windows from KOERI FDSN (KO network)"),
-    "fdsn-noise": ("plan_fdsn_noise.py", "plan noise windows for the stations an FDSN pull returned"),
-    "plan-pull":  ("plan_pbefores_pull.py", "plan a TDVMS pull that can report before S"),
-    "catalog":    ("fetch_afad_catalog.py", "rebuild the event catalogue from AFAD's API"),
+    "campaign":   ("sismokaos.acquisition.afad_campaign", "TDVMS ledger: plan, submit, pump, paste, status, mark, reset"),
+    "poll":       ("sismokaos.acquisition.afad_imap", "watch the mailbox, fetch links, refill freed queue slots"),
+    "fdsn":       ("sismokaos.acquisition.fdsn_magnitude_pull", "plan/fetch event windows from KOERI FDSN (KO network)"),
+    "fdsn-noise": ("sismokaos.acquisition.plan_fdsn_noise", "plan noise windows for the stations an FDSN pull returned"),
+    "plan-pull":  ("sismokaos.acquisition.plan_pbefores_pull", "plan a TDVMS pull that can report before S"),
+    "catalog":    ("sismokaos.acquisition.fetch_afad_catalog", "rebuild the event catalogue from AFAD's API"),
     # stations
-    "station-select": ("select_afad_stations.py", "rank stations by catalogue coverage"),
-    "station-range":  ("station_detection_range.py", "per-event SNR at one station"),
-    "station-loss":   ("station_catalog_loss.py", "what a station's catalogue misses"),
+    "station-select": ("sismokaos.stations.select_afad_stations", "rank stations by catalogue coverage"),
+    "station-range":  ("sismokaos.stations.station_detection_range", "per-event SNR at one station"),
+    "station-loss":   ("sismokaos.stations.station_catalog_loss", "what a station's catalogue misses"),
     # windowing
-    "cut-events": ("cut_event_windows.py", "cut arrival-anchored windows from continuous record"),
-    "cut-length": ("cut_window_length.py", "re-cut existing windows to another length"),
+    "cut-events": ("sismokaos.windows.cut_event_windows", "cut arrival-anchored windows from continuous record"),
+    "cut-length": ("sismokaos.windows.cut_window_length", "re-cut existing windows to another length"),
     # evaluation
-    "falsealarm": ("continuous_false_alarms.py", "false-alarm rate on continuous data"),
-    "magprofile": ("magnitude_error_profile.py", "where a magnitude regressor's error lives"),
+    "falsealarm": ("sismokaos.continuous.cli", "false-alarm rate on continuous data"),
+    "magprofile": ("sismokaos.magnitude.magnitude_error_profile", "where a magnitude regressor's error lives"),
     # training
-    "train":      ("train.py", "train a model against one of this repo's labels"),
+    "train":      ("sismokaos.tooling.train", "train a model against one of this repo's labels"),
     # what is going on
-    "status":     ("status.py", "what is running, how far along, and did the last run work"),
-    "models":     ("models.py", "the model registry: architectures, branches, flags"),
-    "results":    ("results.py", "what we have measured, on what, with which command"),
+    "status":     ("sismokaos.tooling.status", "what is running, how far along, and did the last run work"),
+    "models":     ("sismokaos.tooling.models", "the model registry: architectures, branches, flags"),
+    "results":    ("sismokaos.tooling.results", "what we have measured, on what, with which command"),
     # reporting
-    "docx":       ("md2docx.py", "Markdown -> .docx (no pandoc on this box)"),
-    "pdf":        ("md2pdf.py", "Markdown -> .pdf (run through uv; see its docstring)"),
-    "figures":    ("make_report_figures.py", "report figures"),
+    "docx":       ("sismokaos.reporting.md2docx", "Markdown -> .docx (no pandoc on this box)"),
+    "pdf":        ("sismokaos.reporting.md2pdf", "Markdown -> .pdf (run through uv; see its docstring)"),
+    "figures":    ("sismokaos.reporting.make_report_figures", "report figures"),
 }
 
 GROUPS = [
@@ -78,8 +75,7 @@ def usage():
     for group, names in GROUPS:
         print(f"  {group}")
         for n in names:
-            script, desc = COMMANDS[n]
-            print(f"    {n:<16} {desc}")
+            print(f"    {n:<16} {COMMANDS[n][1]}")
         print()
     print("Reproduction runners for published results live in experiments/reproduce/;")
     print("they are deliberately not commands here -- their value is being the exact")
@@ -87,7 +83,7 @@ def usage():
 
 
 def main():
-    """Dispatches to one script's `main()`, leaving its arguments untouched."""
+    """Dispatches to one tool's `main()`, leaving its arguments untouched."""
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         usage()
         return 0
@@ -99,22 +95,13 @@ def main():
         print("run `sk` for the list", file=sys.stderr)
         return 2
 
-    script = SCRIPTS / COMMANDS[name][0]
-    if not script.exists():
-        print(f"sk: {script} is missing -- the tool moved without updating "
-              f"sismokaos/cli.py", file=sys.stderr)
-        return 2
-
     # Rewrite argv so the tool sees exactly what it would standalone, including
     # a prog name that matches what a user would type back.
     sys.argv = [f"sk {name}"] + sys.argv[2:]
-    sys.path.insert(0, str(SCRIPTS))
-    spec = importlib.util.spec_from_file_location(f"_sk_{name}", script)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = importlib.import_module(COMMANDS[name][0])
     fn = getattr(mod, "main", None)
     if fn is None:
-        print(f"sk: {script.name} has no main()", file=sys.stderr)
+        print(f"sk: {COMMANDS[name][0]} has no main()", file=sys.stderr)
         return 2
     return fn() or 0
 

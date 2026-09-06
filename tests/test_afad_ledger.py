@@ -7,16 +7,14 @@ That erased a live submission, put its window back to pending, and handed the
 same window to the other address: a duplicate that wastes a queue slot and, in
 one case, 825 MB of re-downloaded data.
 """
-import importlib.util
 import json
-import pathlib
 
 import pytest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "afad_campaign", pathlib.Path(__file__).resolve().parents[1] / "scripts/afad_campaign.py")
-m = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(m)
+# An ordinary import now. These were loaded from a file path because the
+# tools lived in `scripts/`, which is not importable; that is the whole
+# reason the directory is gone.
+from sismokaos.acquisition import afad_campaign as m
 
 
 @pytest.fixture

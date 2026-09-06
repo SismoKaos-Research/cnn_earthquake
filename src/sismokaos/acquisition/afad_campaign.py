@@ -9,10 +9,10 @@ Deliberately NOT automated end-to-end: requests are submitted one at a time and
 links are pasted back in. That keeps the same human-in-the-loop shape as
 `sismokaos/download/afad.py`, which documents why.
 
-    python3 scripts/afad_campaign.py plan   --station MANT --chunk-days 21
-    python3 scripts/afad_campaign.py next   --email you@example.com
-    python3 scripts/afad_campaign.py paste  --url https://tdvms.afad.gov.tr/files/....zip
-    python3 scripts/afad_campaign.py status
+    sk campaign plan   --station MANT --chunk-days 21
+    sk campaign next   --email you@example.com
+    sk campaign paste  --url https://tdvms.afad.gov.tr/files/....zip
+    sk campaign status
 
 `plan` is idempotent; re-running it never duplicates or re-requests a chunk.
 """
@@ -24,6 +24,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 
@@ -492,6 +493,26 @@ def _print_turnaround(rows):
         print(f"              ({len(rows) - len(laps)} chunk(s) predate the stamps)")
 
 
+def cmd_pump(args):
+    """Fills every free queue slot, then prints where the ledger stands.
+
+    This was `sk campaign pump`, a loop over `next` and then `status`. It
+    is here because the loop is the operation: TDVMS allows two requests in
+    flight per address, and a slot that sits empty is throughput thrown away.
+
+    Submission must not be chained onto a monitor or a foreground command. A
+    15-minute monitor timeout once killed the refill before it ran, and the
+    campaign sat idle with zero requests in flight, waiting for mail that was
+    never coming. Safe to re-run: `next` refuses to double-claim, so an
+    address that is already busy is a no-op.
+    """
+    for email in args.email:
+        print(f"=== {email}  {time.strftime('%H:%M:%S')} ===", flush=True)
+        one = argparse.Namespace(**{**vars(args), "email": email})
+        cmd_next(one)
+    return cmd_status(args)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -529,6 +550,15 @@ def main():
     mk.add_argument("--note", default=None)
 
     st = sub.add_parser("status"); st.set_defaults(fn=cmd_status)
+
+    pu = sub.add_parser("pump", help="submit for every free address, then status")
+    pu.set_defaults(fn=cmd_pump)
+    pu.add_argument("--email", action="append", required=True,
+                    help="repeatable; one submission attempt per address")
+    pu.add_argument("--timeout", type=int, default=180,
+                    help="seconds to wait for TDVMS to answer a submission")
+    pu.add_argument("--force", action="store_true",
+                    help="submit even if this address already has one in flight")
 
     args = p.parse_args()
     sys.exit(args.fn(args) or 0)

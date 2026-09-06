@@ -15,8 +15,8 @@ is refilled -- refilling blindly would draw a `111` from every busy address.
     export AFAD_IMAP_USER=you@gmail.com
     export AFAD_IMAP_PASS='<app password, not the account password>'
 
-    python3 scripts/afad_imap.py --interval 60 --pump
-    python3 scripts/afad_imap.py --once --dry-run    # see what it would do
+    sk poll --interval 60 --pump
+    sk poll --once --dry-run    # see what it would do
 
 Credentials come from the environment only; nothing is written to disk but the
 failure log.
@@ -35,7 +35,11 @@ import sys
 import time
 from datetime import datetime, timezone
 
-CAMPAIGN = pathlib.Path(__file__).resolve().parent / "afad_campaign.py"
+# Spawned as a module, not as a file path. The poller refills queue slots by
+# running the campaign tool, and `-m` keeps that working wherever the package
+# is installed -- a path relative to __file__ broke the moment the tools moved
+# out of scripts/, which is exactly when a live campaign must not notice.
+CAMPAIGN = ["-m", "sismokaos.acquisition.afad_campaign"]
 LINK_RE = re.compile(r'https?://tdvms\.afad\.gov\.tr/[^\s"\'<>\\]+\.zip')
 # TDVMS's third way of saying "nothing here": an email with no link at all.
 # "...talep ettiğiniz istasyon/istasyonlara ait veri bulunmamaktadır"
@@ -237,14 +241,14 @@ def handle(m, uid, args):
             # for a link that is never coming.
             log(f"uid {uid.decode()}: NO DATA at source, to {to or 'unknown'}")
             if to:
-                run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
+                run([*CAMPAIGN, "--ledger", args.ledger, "mark", "--email", to,
                      "--state", "nodata", "--note",
                      "TDVMS: veri bulunmamaktadır (email, no link)"], args.dry_run)
                 # This answer ends the request, so the address is free again.
                 # Omitting the refill here is what drained the GCAM queue: five
                 # of these arrived, five slots emptied, nothing took their place.
                 if args.pump:
-                    run([str(CAMPAIGN), "--ledger", args.ledger, "next",
+                    run([*CAMPAIGN, "--ledger", args.ledger, "next",
                          "--email", to], args.dry_run)
             return False
         if to and "tdvms" in (msg.get("From") or "").lower():
@@ -267,7 +271,7 @@ def handle(m, uid, args):
             log(f"  already failed before, not re-fetching: {url.rsplit('/', 1)[-1]}")
             failures += 1
             continue
-        rc = run([str(CAMPAIGN), "--ledger", args.ledger, "paste",
+        rc = run([*CAMPAIGN, "--ledger", args.ledger, "paste",
                   "--url", url, "--out-dir", args.out_dir], args.dry_run)
         if rc == 0:
             pasted += 1
@@ -282,7 +286,7 @@ def handle(m, uid, args):
             # retire a window that was only ever a server-side hiccup.
             log("  empty archive — requeuing the window for another request")
             if to:
-                run([str(CAMPAIGN), "--ledger", args.ledger, "mark", "--email", to,
+                run([*CAMPAIGN, "--ledger", args.ledger, "mark", "--email", to,
                      "--state", "pending", "--note", "empty archive, requeued"],
                     args.dry_run)
             freed += 1
@@ -307,7 +311,7 @@ def handle(m, uid, args):
     # to zero: five windows retired as nodata, no refill fired for any of them,
     # and six idle addresses sat holding nothing.
     if freed and args.pump and to:
-        run([str(CAMPAIGN), "--ledger", args.ledger, "next", "--email", to], args.dry_run)
+        run([*CAMPAIGN, "--ledger", args.ledger, "next", "--email", to], args.dry_run)
     return failures == 0
 
 

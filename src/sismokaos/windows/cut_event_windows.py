@@ -29,7 +29,7 @@ and the season with the signal class. The detection work showed what happens
 when it does not: negatives mined from a different amplitude regime leave a hole
 the model extrapolates into.
 
-    python3 scripts/cut_event_windows.py \\
+    sk cut-events \\
         --zips 'afad_raw/MANT/*.zip' --station MANT \\
         --stations-csv catalogs/istasyon_katalog.csv \\
         --catalog catalogs/catalog_current.csv --snr-csv mant_range_full.csv \\

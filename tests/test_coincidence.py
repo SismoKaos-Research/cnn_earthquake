@@ -22,7 +22,7 @@ So each is pinned separately, on inputs small enough to check by hand.
 import numpy as np
 import pytest
 
-# These were reached by loading `scripts/continuous_false_alarms.py` from its
+# These were reached by loading `src/sismokaos/continuous/cli.py` from its
 # path, which was the only way to touch them while they lived in a script. They
 # are library functions now, so this is an ordinary import -- and the test no
 # longer drags torch and the whole detection package in to check interval

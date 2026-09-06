@@ -6,7 +6,7 @@ that has to be rewritten each time will not produce the same document twice.
 
 Run through uv, since neither dependency belongs in this package:
 
-    uv run --with markdown --with weasyprint python3 scripts/md2pdf.py in.md out.pdf
+    uv run --with markdown --with weasyprint sk pdf in.md out.pdf
     sk pdf in.md out.pdf                        # same thing, if both are installed
 
 The stylesheet is deliberately plain and is the point of the file: A4 with page

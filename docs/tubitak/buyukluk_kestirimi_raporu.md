@@ -206,4 +206,4 @@ Wang, Y., Li, X., Wang, Z., & Liu, J. (2023). Deep learning for magnitude predic
 
 ---
 
-*Ölçümler `scripts/magnitude_error_profile.py` ile yapılmıştır; eğitim kayıtları `logs/magreg_*.log` altındadır. Toplam değerler eğitim kayıtlarıyla dört ondalık basamağa kadar örtüşmektedir.*
+*Ölçümler `src/sismokaos/magnitude/magnitude_error_profile.py` ile yapılmıştır; eğitim kayıtları `logs/magreg_*.log` altındadır. Toplam değerler eğitim kayıtlarıyla dört ondalık basamağa kadar örtüşmektedir.*

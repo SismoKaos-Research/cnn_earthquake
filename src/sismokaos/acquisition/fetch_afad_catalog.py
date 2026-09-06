@@ -12,7 +12,7 @@ a single request, with date paging only as a fallback for a flaky connection.
 Writes the local catalogue schema (Date/Longitude/Latitude/Depth/Rms/Type/
 Magnitude/Location/EventID) so it is a drop-in for `catalog_current.csv`.
 
-    python3 scripts/fetch_afad_catalog.py --out catalog_afad_2026-08-30.csv
+    sk catalog --out catalog_afad_2026-08-30.csv
 
 Default floor is M>=1.5, which covers every use in this repo with margin: the
 forecasting work thresholds at M>=2.5 and the detection download list bottoms

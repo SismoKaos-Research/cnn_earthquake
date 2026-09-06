@@ -11,7 +11,7 @@ iasp91, measure RMS in a signal window against a pre-arrival noise window, and
 call the event recovered when that ratio clears a threshold. This measures the
 *data*, not a model -- no detector is involved.
 
-    python3 scripts/station_detection_range.py \
+    sk station-range \
         --zips 'afad_raw/MANT/*.zip' --station MANT --stations-csv istasyon_katalog.csv \
         --catalog catalog_current.csv --out mant_range.csv
 """

@@ -45,7 +45,7 @@ def test_the_cutter_builds_the_name_the_consumer_expects():
     """Reads the tag out of the source, so a change to it fails here."""
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
-           / "scripts" / "cut_event_windows.py").read_text()
+           / "src/sismokaos/windows/cut_event_windows.py").read_text()
     assert 'tag = f"event_{int(ev.EventID)}"' in src, (
         "cut_event_windows.py no longer builds `event_<id>`; if the station "
         "went back into the filename, seismic-cli cannot resolve the magnitude")
@@ -71,7 +71,7 @@ def test_the_cutter_anchors_on_cut_epoch_not_p_epoch():
     """
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
-           / "scripts" / "cut_event_windows.py").read_text()
+           / "src/sismokaos/windows/cut_event_windows.py").read_text()
     assert "cut(segs, comps, ev.cut_epoch - args.pre" in src
     assert "write_mseed(a, comps, ev.cut_epoch - args.pre" in src, (
         "the cut and the written start time must use the same anchor")
@@ -91,7 +91,7 @@ def test_anchor_csv_accepts_both_spellings_of_the_id_column():
     """
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
-           / "scripts" / "cut_event_windows.py").read_text()
+           / "src/sismokaos/windows/cut_event_windows.py").read_text()
     assert 'next((c for c in ("EventID", "event_id") if c in a.columns), None)' in src
     assert "has neither EventID nor event_id" in src, (
         "a missing id column must say what the file does have, not raise KeyError")
@@ -112,7 +112,7 @@ def test_fdsn_fetch_puts_the_station_in_the_path():
     """
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
-           / "scripts" / "fdsn_magnitude_pull.py").read_text()
+           / "src/sismokaos/acquisition/fdsn_magnitude_pull.py").read_text()
     assert 'dest = out / str(r.station) / f"event_{r.event_id}_raw.mseed"' in src
     assert consumer_parse("event_153534_raw") == "153534"
     assert 'legacy = out / f"event_{r.event_id}_{r.station}_raw.mseed"' in src, (

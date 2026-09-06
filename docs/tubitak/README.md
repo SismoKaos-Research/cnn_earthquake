@@ -15,7 +15,7 @@ directory, so the existing editing workflow is unchanged.
 | `rapor_sekiller/` | figures (3 PNGs) |
 
 `.docx` renders are **not** tracked — they are generated from the Markdown and
-would only churn the history. Regenerate with `scripts/md2docx.py`. They remain
+would only churn the history. Regenerate with `src/sismokaos/reporting/md2docx.py`. They remain
 on the Desktop where they were.
 
 ## Why the sources moved

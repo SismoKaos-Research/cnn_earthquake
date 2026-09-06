@@ -1309,7 +1309,7 @@ doğrudan karşılaştırılabilen tek büyüklüktür: NZ edge CNN 2 s, TransQu
    ~%29'unu içermemekteydi; eksiklik zamansal değil **uzamsaldır** (dosya
    12.08.2026'ya kadar günceldi, ancak Şubat 2025'te bölgedeki 1.256 olaydan
    yalnızca 51'ini tutuyordu). Katalog AFAD API'sinden yeniden kurulmuştur
-   (`scripts/fetch_afad_catalog.py`; tek istek, <30 s). **Tespit sonuçları
+   (`src/sismokaos/acquisition/fetch_afad_catalog.py`; tek istek, <30 s). **Tespit sonuçları
    etkilenmemektedir** (Bölüm 3.1'deki denetim: 55.595'te 3 pencere). Tahmin
    sonuçları etkilenmektedir ve Bölüm 6'da verilmiştir.
 

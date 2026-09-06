@@ -160,8 +160,8 @@ seeds, metrics, checkpoints. A run that crashes leaves a record saying
 ## Layout
 
 ```
-scripts/        20 command-line tools, all reachable as `sk <command>`
-src/            the trainers and the shared library
+src/sismokaos/  everything importable: the library, the trainers, and the 20
+                command-line tools, all reachable as `sk <command>`
 experiments/    reproduce/ (the exact runners for published results)
                 analyses/  (one-off analysis scripts)
 tests/          the suite; `pytest -q` from the repo root
@@ -190,9 +190,20 @@ Each family subpackage keeps its own README indexing what is inside.
 | [`groundmotion/`](src/sismokaos/groundmotion/) | 4 | peak ground acceleration and velocity |
 | [`features/`](src/sismokaos/features/) | 11 | feature engineering, RFE, dataset builders |
 | [`continuous/`](src/sismokaos/continuous/) | 12 | scoring an uninterrupted station record — chunks, spans, association, alarms, and the six `falsealarm` subcommands |
+| [`acquisition/`](src/sismokaos/acquisition/) | 6 | the TDVMS ledger and its mail poller, the FDSN pull, the AFAD catalogue rebuild |
+| [`stations/`](src/sismokaos/stations/) | 3 | coverage ranking, per-event SNR, what a station's catalogue misses |
+| [`windows/`](src/sismokaos/windows/) | 2 | cutting arrival-anchored windows, and re-cutting them to another length |
+| [`reporting/`](src/sismokaos/reporting/) | 3 | Markdown to .docx and .pdf, and the report figures |
+| [`tooling/`](src/sismokaos/tooling/) | 4 | `sk train`, `sk status`, `sk models`, `sk results` |
 
-Nothing manipulates `sys.path` to reach any of it, and a test fails if
-something starts to.
+The last five used to be `scripts/`, a directory that cannot be imported --
+which is why `cut_event_windows.py` reached for its own directory to borrow six
+functions from a sibling, and why the tools had a test suite of their own that
+had to load them from a file path. Nothing manipulates `sys.path` to reach any
+of this now, and a test fails if something starts to.
+
+**Source of truth for which waveform service to use:** FDSN (KOERI) for the KO
+network, TDVMS only for TU, which no FDSN node serves.
 
 ### The shared library
 

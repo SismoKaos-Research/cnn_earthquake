@@ -136,7 +136,7 @@ doğrulaması gerektirmeyen bir API üzerinden yayımlanmaktadır. 2000–günü
 kataloğunun tamamı **tek bir istekle, 30 saniyenin altında** alınmaktadır. Eksik
 bir kopya ile çalışmayı gerektiren teknik bir kısıt bulunmamaktaydı.
 
-`scripts/fetch_afad_catalog.py` ile yeniden kurulmuştur:
+`src/sismokaos/acquisition/fetch_afad_catalog.py` ile yeniden kurulmuştur:
 
 - **576.829 olay**, M≥0, 04.01.2000 – 29.08.2026
 - Önceki tüm dosyaların **kesin üst kümesi** olduğu doğrulanmıştır: hiçbir olay
@@ -222,4 +222,4 @@ depoda bir betiktir.
 
 *Kaynaklar: `docs/experiment_neural_forecasters_2026-08-30.md`,
 `docs/experiment_chaos_forecast_2026-08-27.md`,
-`scripts/fetch_afad_catalog.py`, `experiments/analyses/afad_audit.py`*
+`src/sismokaos/acquisition/fetch_afad_catalog.py`, `experiments/analyses/afad_audit.py`*

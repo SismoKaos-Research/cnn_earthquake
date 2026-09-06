@@ -433,7 +433,7 @@ it is the only positive finding in this file.
 Everything above was computed against `deprem_katalog_utc.csv`, which held 51 of
 1,256 February 2025 events in this region — almost none of the
 Santorini–Amorgos swarm, the largest seismic episode in the record window. The
-catalogue was rebuilt from AFAD's API (`scripts/fetch_afad_catalog.py`) and the
+catalogue was rebuilt from AFAD's API (`src/sismokaos/acquisition/fetch_afad_catalog.py`) and the
 whole suite re-run over the identical window, geometry and features. **Only the
 labels changed.** Original logs are kept as `logs/chaos_*.log`; the new ones are
 `logs/chaos_*_corrected.log`.

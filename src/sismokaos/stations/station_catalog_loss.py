@@ -6,7 +6,7 @@ uniform -- it depends entirely on where a station sits. A station inland loses
 almost nothing; one on the Aegean or Mediterranean coast loses most of what it
 would actually have recorded.
 
-    python3 scripts/station_catalog_loss.py --radius 100 --min-magnitude 2.5
+    sk station-loss --radius 100 --min-magnitude 2.5
 """
 import argparse
 import pathlib
