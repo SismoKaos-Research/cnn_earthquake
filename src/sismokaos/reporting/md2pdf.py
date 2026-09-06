@@ -1,6 +1,6 @@
 """Markdown -> PDF for the TÜBİTAK reports (no pandoc on this box).
 
-Lives in `scripts/` for the same reason `md2docx.py` does: the reports are
+Lives in the package for the same reason `md2docx.py` does: the reports are
 regenerated often, the scratchpad does not survive a session, and a renderer
 that has to be rewritten each time will not produce the same document twice.
 

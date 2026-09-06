@@ -22,7 +22,7 @@ not help, so the shipped model is the CNN alone.
 
 | | |
 |---|---|
-| Source | Kandilli (KOERI) regional catalogue + KOERI FDSN waveforms |
+| Source | AFAD event catalogue + KOERI FDSN waveforms |
 | Events | 33,795 across **181 stations** (Türkiye) |
 | Magnitude | median 2.30 (63.5% below M 2.5) |
 | Distance | median 38.6 km, capped at ~56 km |

@@ -25,8 +25,8 @@ disagree, the later one governs and the difference is marked.
 
 A compact dual-branch network (2D CNN over a spectrogram; 1D bidirectional
 LSTM + self-attention over the raw waveform) classifies 6 s, three-component, 100 Hz
-seismogram windows as earthquake or noise. The corpus is 33,795 KOERI-catalogue events
-recorded across 181 stations in Türkiye.
+seismogram windows as earthquake or noise. The corpus is 33,795 AFAD-catalogue events
+recorded across 181 stations in Türkiye, on KOERI FDSN waveforms.
 
 The headline is **ROC-AUC 0.9892 ± 0.0003** (three seeds) on the rebuilt benchmark, against a
 **conditional amplitude floor of 0.9049**, and **0.9971** on a magnitude- and distance-matched
@@ -55,7 +55,11 @@ spectrogram CNN, no LSTM branch, no auxiliary input, no fusion.
 
 ### 2.1 Catalogue and waveforms
 
-Events come from the Kandilli Observatory (KOERI) regional catalogue. Two catalogue files
+Events come from **AFAD's** event catalogue. (Both files below were long referred to in
+this repo as KOERI's; they are not. 100% of their EventIDs are AFAD eventIDs, and their
+magnitudes and coordinates match AFAD's API to the printed digit — see
+`katalog_kusuru_raporu.md`. The **waveforms** are genuinely KOERI KO.* , requested from
+the KOERI FDSN service; only the catalogue attribution was wrong.) Two catalogue files
 serve different purposes, and conflating them would break the noise screening:
 
 | File | Events | Use |

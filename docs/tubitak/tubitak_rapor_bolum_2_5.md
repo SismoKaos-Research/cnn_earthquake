@@ -97,8 +97,12 @@ kullanılarak hesaplanmaktadır.
 
 ## 3.1 Veri
 
-Olaylar, Kandilli Rasathanesi ve Deprem Araştırma Enstitüsü (KRDAE/KOERI)
-bölgesel kataloğundan alınmıştır. İki katalog dosyası farklı amaçlarla
+Olaylar **AFAD** deprem kataloğundan alınmıştır. (Bu dosyalar depoda uzun süre
+"KRDAE/KOERI kataloğu" olarak anılmıştır; bu hatalıdır. EventID'lerin %100'ü AFAD
+eventID'sidir, büyüklük ve koordinatlar AFAD API'siyle basılan basamağa kadar
+örtüşmektedir — bkz. `katalog_kusuru_raporu.md`. **Dalga formları** gerçekten
+KOERI'ye aittir ve KOERI FDSN servisinden alınmıştır; yalnızca katalog
+atfı yanlıştı.) İki katalog dosyası farklı amaçlarla
 kullanılmıştır: 93.690 olaylık dosya indirme listesi, 482.898 olaylık dosya ise
 yalnızca gürültü taraması için. Tarama kataloğunun çok daha küçük büyüklüklere
 kadar tam olması (medyan M 1,70; %32,9'u M 1,5 altında) gürültü sınıfının

@@ -41,7 +41,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+# python-docx is a dev dependency, not a runtime one: `sk docx` is a
+# reporting convenience, but leaving it uninstalled meant its tests skipped
+# everywhere, and that is how `sk docx` shipped unable to run at all and
+# with a loop that hung on the repo's own report.
+dev = ["pytest>=8.0", "python-docx>=1.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

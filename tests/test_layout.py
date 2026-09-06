@@ -110,6 +110,7 @@ def test_sk_registers_a_real_module_for_every_command():
     own way of being unreachable.
     """
     import importlib
+    import inspect
 
     from sismokaos.cli import COMMANDS, GROUPS
 
@@ -128,8 +129,21 @@ def test_sk_registers_a_real_module_for_every_command():
                 continue        # run through `uv run --with python-docx`
             broken.append(f"sk {name} -> {modname}: {e}")
             continue
-        if not callable(getattr(mod, "main", None)):
+        fn = getattr(mod, "main", None)
+        if not callable(fn):
             broken.append(f"sk {name} -> {modname} has no main()")
+            continue
+        # `sk` calls main() with NO arguments and passes the command line
+        # through sys.argv. `md2docx.main(src, dst)` took its paths positionally
+        # instead, so `sk docx` had never once run -- and nothing caught it,
+        # because the module is skipped wherever python-docx is absent, and the
+        # old check only asked whether `main` existed.
+        required = [p for p in inspect.signature(fn).parameters.values()
+                    if p.default is inspect.Parameter.empty
+                    and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        if required:
+            broken.append(f"sk {name} -> {modname}.main() requires "
+                          f"{[p.name for p in required]}; `sk` calls it with none")
     assert not broken, "\n".join(broken)
 
 

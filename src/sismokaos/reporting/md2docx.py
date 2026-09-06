@@ -1,6 +1,6 @@
 """Minimal Markdown -> .docx converter (no pandoc on this box).
 
-Lives in scripts/ rather than a scratchpad because the scratchpad has been
+Lives in the package rather than a scratchpad because the scratchpad has been
 cleared three times mid-session, and regenerating the TUBITAK report needs it.
 
 Handles ATX headings, pipe tables, fenced code, blockquotes, bullet/numbered
@@ -61,7 +61,7 @@ def split_row(line):
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
 
-def main(src, dst):
+def convert(src, dst):
     """Converts `src` Markdown to `dst` .docx."""
     lines = open(src, encoding="utf-8").read().splitlines()
     doc = Document()
@@ -160,11 +160,29 @@ def main(src, dst):
                 break
             buf.append(cur)
             i += 1
+        if not buf:
+            # Nothing matched, and the accumulator refused the line too: it
+            # opens a construct without being one. A table row orphaned from
+            # its header by a blank line does this -- `docs/report.md:1889`.
+            # Emit it as text and ADVANCE. Every branch of this loop must
+            # advance `i`; the heading branch once did not and hung, and this
+            # one silently did not either, spinning at 99% CPU for as long as
+            # it was given.
+            buf, i = [s], i + 1
         add_runs(doc.add_paragraph(), " ".join(buf))
 
     doc.save(dst)
     print(f"wrote {dst}")
 
 
+def main():
+    """Renders `argv[1]` to `argv[2]`."""
+    if len(sys.argv) != 3:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    convert(sys.argv[1], sys.argv[2])
+    return 0
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    sys.exit(main())
