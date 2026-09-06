@@ -47,7 +47,7 @@ grouped by what you are trying to do; each command keeps its own `--help`.
 
 ```
 acquire     campaign poll fdsn fdsn-noise plan-pull catalog
-stations    station-select station-range station-loss
+stations    station-select station-range station-loss distances
 windows     cut-events cut-length
 train       train
 evaluate    falsealarm magprofile
