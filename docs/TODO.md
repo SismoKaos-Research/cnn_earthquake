@@ -177,6 +177,55 @@ every default that differs between a writer and its reader (`--channels` was
 whose corpora are not provably identical. `sk models --spec` and the runlog
 records exist to make the last one checkable -- use them.
 
+**Pass 1 done 2026-09-06.** Six hazard classes scanned mechanically, every
+hit read by hand. Fixed: the duplicate-key join in `cmd_timing` and
+`cut_event_windows` (the `cmd_report` variant was fixed the day before); two
+silent skips now counted and reported (`station_detection_range`, whose row
+count is the denominator of every "% reach SNR 3" figure, and
+`pretrained_picker_baseline`, which was scoring a baseline on a different file
+set than the model); and `fdsn_magnitude_pull`'s filename, the non-greedy trap
+that cost a full 13,150-window encode.
+
+Verified clear, with the evidence, so these need not be re-checked:
+
+- **Merge keys.** 13 sites: 4 are ObsPy `Stream.merge`, 4 join on keys proven
+  unique in the data (catalogue EventID 576,829/576,829; manifest `filename`
+  unique in three datasets), 3 go through `load_snr`, 2 were fixed.
+- **pandas 3.** No `groupby.apply` or `.transform` anywhere, so the
+  grouping-column change cannot bite. The one occurrence was written and fixed
+  the same night.
+- **Length-mismatched column assignment.** The only ndarray-to-column writes
+  derive from their own frame; `best_prob` was the exception and is fixed.
+- **Reader/writer geometry defaults.** `cascade_eval`'s `--reg-hidden 64` /
+  `--reg-fusion-dim 128` correctly track the magnitude trainer rather than the
+  detector's 48/96. The `--window-seconds` divergence is a name collision, not a
+  bug: it selects a preset in trainers and a download length in pull tools.
+- **Derived denominators.** `alarms/day` divides by scored time, which is the
+  right base -- you can only alarm while scoring.
+- **`arr[0].time` vs `min(times)`.** `seismolib.arrivals` takes the first
+  arrival; the two private caches take the minimum. Checked over 60
+  distance/depth/phase-order combinations: obspy returns arrivals time-sorted,
+  so the idioms and both phase orderings are equivalent.
+- No mutable-default mutation, one `assert` outside tests, no float equality on
+  measurements.
+
+**Still open, deliberately not done blind:**
+
+1. **Two private taup caches** (`s_arrival_ablation.py`,
+   `verify_ponly_windows.py`) that `seismolib.arrivals` exists to replace. They
+   are NOT drop-in: they grid distance at 0.001 deg (~0.11 km) and depth at 1 km
+   against the shared 5 km/5 km. Consolidating would move their numbers
+   slightly, so it needs a before/after check, not a rename.
+2. **`cascade_eval` hardcodes `channels="2d+aux"`** for the magnitude stage, so
+   it cannot score the `all` or `2d` models every current result uses. It should
+   read `model.json` the way `magprofile` now does.
+3. **`ForecastTCN(num_channels=[64,64,64])`** is a mutable default. Never
+   mutated, so harmless today; left alone because the class was moved
+   byte-identical and changing the signature breaks that guarantee.
+4. **Pass 2 not started:** `src/forecasting/` and `src/features/` were scanned
+   mechanically but not read. The forecasting family is where the retracted
+   results came from, so it deserves the closest reading.
+
 ### 2.5 CNN-GRU waveform branch
 
 Swap the BiLSTM in `ConvSeqBranch` for a BiGRU, re-run the branch-1d grid as a
