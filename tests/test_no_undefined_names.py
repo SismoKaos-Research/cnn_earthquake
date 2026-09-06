@@ -26,7 +26,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = sorted((ROOT / "src").rglob("*.py")) + sorted((ROOT / "scripts").glob("*.py"))
+FILES = (sorted((ROOT / "src").rglob("*.py"))
+         + sorted((ROOT / "scripts").glob("*.py"))
+         + sorted((ROOT / "experiments").rglob("*.py"))
+         + sorted((ROOT / "tests").glob("*.py")))
 BUILTINS = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__package__"}
 
 
