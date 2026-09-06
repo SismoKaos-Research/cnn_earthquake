@@ -44,11 +44,9 @@ import numpy as np
 import pandas as pd
 from obspy import UTCDateTime
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-
-from continuous_false_alarms import (component_segments, haversine, load_snr,
-                                     pick_components, predicted_arrivals,
-                                     read_chunk)
+from seismolib.catalog import haversine_km as haversine
+from seismolib.continuous import (component_segments, load_snr, pick_components,
+                                  predicted_arrivals, read_chunk)
 
 
 def parse_args():
@@ -150,7 +148,8 @@ def main():
         nz.mkdir(parents=True, exist_ok=True)
         dirs[w] = (eq, nz)
 
-    cat, (slat, slon) = predicted_arrivals(args)
+    cat, (slat, slon) = predicted_arrivals(
+        args.station, args.stations_csv, args.catalog, args.max_distance)
     if args.snr_csv:
         # load_snr, not a raw read: a duplicated event_id expands `cat`, so the
         # same event is cut twice and its inclusion depends on which of its two

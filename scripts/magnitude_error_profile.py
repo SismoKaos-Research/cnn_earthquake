@@ -34,7 +34,6 @@ import pandas as pd
 import torch
 from sklearn.linear_model import Ridge
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from magnitude.cnn_lstm_regression import (DualChannelRegressionNet,
                                            DualMagnitudeDataset, resplit)
