@@ -31,6 +31,11 @@ depremlerin hatasıdır: M ≤ 2,5 için 0,1430, M > 3 için **0,4085**.
 bağlıdır.** 63 km aralıklı çiftte yanlış alarmlar bağımsızlık varsayımının
 öngördüğünün 29–58 katı örtüşmekte, 144 km'de varsayım geçerli olmaktadır.
 
+**(4b) Büyüklük kestirimini katalog yerine gerçek tespit alarmı üzerine
+çapalamak, göreli başarımdan pratikte hiçbir şey götürmemektedir.** Ham fark
++0,0071 OMH'dir, ancak alarm çapalı kurumun bütün tabanları daha yüksektir;
+her kurum kendi tabanına oranlandığında fark −0,004'e inmektedir.
+
 **(5) Kademeli sistem, tespit edilen olayların %62,7'sinde** (6 s büyüklük
 penceresi ile) hem tespiti hem büyüklük kestirimini S dalgası varmadan
 tamamlamaktadır. Belirleyici kısıt tespit edici değil, **büyüklük penceresinin
@@ -237,11 +242,47 @@ geçmektedir (0,1821'e karşı 0,2403). Bu, işletme açısından anlamlı olan
 karşılaştırmadır: alarm anında hiçbir bileşenin hiposantra erişimi
 bulunmamaktadır.
 
-Katalog çapalı denetim koşusu (`dataset_magreg_cont_10s`, aynı istasyon, aynı
-pencere boyu) bu raporun yazıldığı sırada sürmektedir; iki değer arasındaki
-fark **kademeli sistemin bedelini** verecektir.
+### 5.2 Kademeli sistemin bedeli
 
-### 5.2 Karşılaştırılabilirlik uyarısı
+Katalog çapalı denetim koşusu (`dataset_magreg_cont_10s`, aynı istasyon, aynı
+pencere boyu, aynı yapılandırma) tamamlanmıştır.
+
+**Çizelge 6.** Alarm çapalı ile katalog çapalı kurumun karşılaştırılması.
+
+| | OMH | `ridge(log_snr)` | `ridge(log_snr, log_distance)` | Sabit | n |
+|---|---|---|---|---|---|
+| Katalog çapalı | 0,1750 | 0,3184 | 0,2072 | 0,5426 | 1.953 |
+| Alarm çapalı | 0,1821 | 0,3338 | 0,2403 | 0,5626 | 1.150 |
+
+Ham fark **+0,0071 OMH (%+4,1)**'dir. Ancak bu iki kurum eşit zorlukta
+değildir: **alarm çapalı kurumun bütün tabanları daha yüksektir**, yani kurum
+daha zordur. Her kurum kendi tabanına oranlandığında:
+
+| Taban | Alarm çapalı | Katalog çapalı | Fark |
+|---|---|---|---|
+| `ridge(log_snr)` (bilgi eşleştirilmiş) | 0,546 | 0,550 | **−0,004** |
+| `ridge(log_snr, log_distance)` | 0,758 | 0,845 | −0,087 |
+| Sabit kestirici | 0,324 | 0,323 | +0,001 |
+
+**Kademeli sistemin bedeli, kurumun zorluğuyla açıklanmaktadır.** Model, alarm
+çapalı kurumda tam olarak kurumun zorlaştığı kadar kötüleşmektedir; kendi
+tabanına göre ölçüldüğünde beceri katkısı denetim koşusundan **ayırt
+edilememektedir** (0,546'ya karşı 0,550).
+
+İşletme açısından sonuç şudur: **büyüklük kestirimini katalog varışı yerine
+gerçek tespit alarmı üzerine çapalamak, göreli başarımdan pratikte hiçbir şey
+götürmemektedir.** Bu, kademeli sistemin dağıtılabilirliği açısından temel
+bulgudur, çünkü alarm anında katalog bulunmamaktadır.
+
+Bu, projenin yinelenen dersinin bir örneğidir: **oran değiştiğinde önce tabanın
+mı yoksa modelin mi hareket ettiği sorulmalıdır.** Burada hareket eden tabandır.
+
+**Uyarı.** İki koşu farklı sınama kümeleri üzerindedir (1.150'ye karşı 1.953) ve
+eşleştirilmiş bir karşılaştırma değildir; alarm çapalı kurum yalnızca tespit
+edilmiş olayları içermektedir. Her iki koşu tek tohumludur ve tek istasyona
+dayanmaktadır.
+
+### 5.3 Karşılaştırılabilirlik uyarısı
 
 0,1821 ile 0,4203 doğrudan karşılaştırılamaz. Üç fark bulunmaktadır:
 
@@ -262,7 +303,7 @@ görünmektedir.
 
 ## 6. İki istasyonla uyuşma
 
-**Çizelge 6.** Ölçülen uyuşma oranı ile bağımsızlık varsayımının öngördüğü oran.
+**Çizelge 7.** Ölçülen uyuşma oranı ile bağımsızlık varsayımının öngördüğü oran.
 
 | Çift | Uzaklık | Ölçülen 2/2 (gün) | Bağımsız olsaydı | Fazlalık | Duyarlılık |
 |---|---|---|---|---|---|
@@ -296,7 +337,7 @@ değil, büyüklük kestirimiyle birliktedir. `alarm_epoch` tespit penceresinin
 Kademeli sistem S dalgasını yalnızca `dt_vs_s + (W − P − L) < 0` koşulunda
 geçmektedir.
 
-**Çizelge 7.** 11.188 tespit edilen olay; tespit tek başına %69,5'inde S'den
+**Çizelge 8.** 11.188 tespit edilen olay; tespit tek başına %69,5'inde S'den
 öncedir.
 
 | Büyüklük penceresi | Eklenen gecikme | Kademeli sistem S'den önce | Başabaş uzaklık |
@@ -305,7 +346,7 @@ geçmektedir.
 | 10 s | +8,0 s | %45,0 | 100 km |
 | 20 s | +18,0 s | %4,6 | 200 km |
 
-**Çizelge 8.** Uzaklığa göre (tespit edilen olaylar içindeki oran).
+**Çizelge 9.** Uzaklığa göre (tespit edilen olaylar içindeki oran).
 
 | Uzaklık (km) | Olay | Yalnız tespit | W = 6 s | W = 10 s | W = 20 s |
 |---|---|---|---|---|---|
@@ -383,7 +424,8 @@ hesaplamaktadır, *ne kadar doğru olduğunu* değil.
 3. Büyüklük kestirimi fizik tabanını her protokolde geçmektedir, ancak toplam
    değer küçük depremlerin değeridir ve model doygunlaşmaktadır.
 4. Kademeli sistem MANT'ta **0,1821 OMH** ile uzaklık bilgisine sahip tabanı da
-   geçmektedir; bu tek istasyonluk bir sonuçtur.
+   geçmektedir; bu tek istasyonluk bir sonuçtur. **Alarm üzerine çapalamanın
+   bedeli, kendi tabanına oranlandığında −0,004'tür** — yani pratikte yoktur.
 5. İkinci istasyonun getirisi **uzaklığa bağlıdır**; ~100 km'nin altındaki
    çiftler için bağımsızlık varsayılmamalıdır.
 6. Kademeli sistem, 6 saniyelik büyüklük penceresiyle tespit edilen olayların
