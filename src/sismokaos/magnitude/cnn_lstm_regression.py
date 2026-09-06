@@ -53,6 +53,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+from sklearn.linear_model import Ridge
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -553,19 +554,45 @@ def main():
 
     ridge_mae = report_baselines(train_ds, test_ds, aux_names=AUX_COLUMNS)
 
-    # Two floors, in increasing order of difficulty. The constant-mean floor only
-    # shows the target has variance; the ridge-on-(amplitude, distance) floor is the
-    # physics formula local magnitude is actually built from, and is the one that
-    # matters -- beating a constant proves nothing about seismology.
-    print("\n--- Floors (test set) ---")
     y_tr = np.asarray([train_ds[i][2] for i in range(len(train_ds))], dtype=np.float64) \
         if not hasattr(train_ds, "targets") else np.asarray(train_ds.targets, dtype=np.float64)
     mean_floor = predict_mean_baseline(y_tr, yt)
+
+    # The INFORMATION-MATCHED floor, whenever aux is withheld from the model.
+    #
+    # `ridge(log_snr, log_distance)` is the floor this project quotes, and it is
+    # the right one for a model that gets the aux vector. A `--channels 1d+2d`
+    # model does not: it sees waveform and spectrogram only. log_snr is a
+    # waveform statistic, so it is information the model has by another route --
+    # but log_distance needs a hypocentre, and no single-station window carries
+    # one. Judging a waveform-only model against a baseline that is handed the
+    # distance prices it against a strictly larger information set and
+    # understates it. Both are printed, and which is which is said out loud.
+    matched_floor = None
+    if "aux" not in args.channels:
+        keep = [i for i, c in enumerate(AUX_COLUMNS) if c != "log_distance"]
+        if keep and len(keep) < len(AUX_COLUMNS):
+            try:
+                r = Ridge(alpha=1.0).fit(train_ds.aux[:, keep], train_ds.targets)
+                matched_floor = float(np.abs(
+                    r.predict(test_ds.aux[:, keep]) - test_ds.targets).mean())
+            except Exception as e:
+                print(f"  [WARN] matched floor failed: {e}")
+
+    print("\n--- Floors (test set) ---")
     print(f"  constant-mean            MAE {mean_floor['MAE']:.4f}  RMSE {mean_floor['RMSE']:.4f}  "
           f"R2 {mean_floor['R2']:+.4f}")
+    if matched_floor is not None:
+        names = ", ".join(c for c in AUX_COLUMNS if c != "log_distance")
+        print(f"  ridge({names})          MAE {matched_floor:.4f}   <- INFORMATION-MATCHED: "
+              f"the model has no distance either")
     if ridge_mae is not None:
-        print(f"  ridge(amplitude,distance) MAE {ridge_mae:.4f}   <- the physics floor")
+        tag = ("   <- the physics floor" if matched_floor is None else
+               "   <- the physics floor, but it SEES log_distance and "
+               f"--channels {args.channels} does not")
+        print(f"  ridge({', '.join(AUX_COLUMNS)}) MAE {ridge_mae:.4f}{tag}")
     runlog.finish(metrics=dict(tm, ridge_floor=ridge_mae,
+                               matched_floor=matched_floor,
                                mean_floor=mean_floor["MAE"]),
                   checkpoints=[save_path])
     print(f"  provenance -> {runlog.path}")
@@ -575,6 +602,10 @@ def main():
 
     print(f"\n  vs constant-mean floor:  {mean_floor['MAE'] - tm['MAE']:+.4f} MAE "
           f"({100 * (mean_floor['MAE'] - tm['MAE']) / mean_floor['MAE']:+.1f}%)")
+    if matched_floor is not None:
+        d = matched_floor - tm["MAE"]
+        print(f"  vs matched floor:        {d:+.4f} MAE ({100 * d / matched_floor:+.1f}%)"
+              f"  ->  {'adds information beyond amplitude' if d > 0.01 else 'NO measurable gain over amplitude alone'}")
     if ridge_mae is not None:
         delta = ridge_mae - tm["MAE"]
         verdict = ("adds information beyond amplitude+distance"
