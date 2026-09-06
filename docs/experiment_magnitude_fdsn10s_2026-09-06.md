@@ -86,3 +86,18 @@ reproduced the generator's own values on 99.4% of rows to within 1 km (median
 that held. It also **corrected 72 rows across 4 stations** the generator had
 wrong — `KO.KIZT` by 14.4 km. `distance_km` is now 100% present, with the
 original manifest kept as `manifest.csv.pre-distance-repair`.
+
+## cascade_eval, exercised
+
+`cascade_eval` hardcoded stage 2 as `channels="2d+aux"`. It reads `model.json`
+now, and that path has been run rather than only type-checked: it loads
+`trained_model_magreg_fdsn10s_nonaux_p0`, builds `channels=1d+2d` from the
+saved spec, `load_state_dict` succeeds, and a forward pass returns M 4.74
+against a true 4.50.
+
+Worth stating precisely, because I had put it more darkly: for **this** pair
+the old hardcoded geometry raises `RuntimeError` on `load_state_dict` rather
+than reporting a wrong number. So the defect here was that `cascade_eval` could
+not score a non-aux checkpoint *at all*. The silent-wrong-number risk is real
+but needs the shapes to coincide -- a differing `hidden` or `fusion_dim` under
+the same channel set -- which is not this case.
