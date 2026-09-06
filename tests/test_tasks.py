@@ -15,8 +15,8 @@ import sys
 
 import pytest
 
-from seismolib.model.registry import FAMILIES, REGISTRY, by_family
-from seismolib.tasks import PREDICTS, TASKS, Task, by_prediction
+from sismokaos.model.registry import FAMILIES, REGISTRY, by_family
+from sismokaos.tasks import PREDICTS, TASKS, Task, by_prediction
 
 
 @pytest.mark.parametrize("key", sorted(TASKS))
@@ -81,7 +81,7 @@ def test_choosable_tasks_actually_accept_model_flags(key):
     assert "--model" in flags, (
         f"sk train lists {key} as taking --model, but {t.module}'s parser has "
         f"no such flag -- either wire add_model_args into it or drop the "
-        f"family/models entry from seismolib/tasks.py")
+        f"family/models entry from sismokaos/tasks.py")
     offers_branch = any(REGISTRY[m].branches for m in
                         (t.models or [a.key for a in by_family(t.family)]))
     if offers_branch:

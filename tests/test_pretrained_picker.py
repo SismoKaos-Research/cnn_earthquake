@@ -14,7 +14,7 @@ AUC. Nothing raises. So it is pinned here.
 import numpy as np
 import pytest
 
-from detection.pretrained_picker_baseline import (NOISE_STEP, P_SAMPLE,
+from sismokaos.detection.pretrained_picker_baseline import (NOISE_STEP, P_SAMPLE,
                                                   WINDOW_SAMPLES, prepare,
                                                   window_start)
 

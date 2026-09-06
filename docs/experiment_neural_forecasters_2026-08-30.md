@@ -48,7 +48,7 @@ would have been.
 
 ### 2a. They had never actually run
 
-`seismolib.catalog.load_hourly_features` read `Zaman_Dk` as minutes since the
+`sismokaos.catalog.load_hourly_features` read `Zaman_Dk` as minutes since the
 Unix epoch. That is the Rust engine's convention; Sismokaos-featureExtract
 writes minutes **within the containing hour** (range 3.33–62.5), with the date
 in `Pencere_ID`. All 1,238,672 windows therefore mapped into one hour of

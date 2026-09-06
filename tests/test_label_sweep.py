@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from forecasting.label_sweep import auc, sweep, sweep_cell, worth_modelling
-from seismolib.metrics import safe_auc
+from sismokaos.forecasting.label_sweep import auc, sweep, sweep_cell, worth_modelling
+from sismokaos.metrics import safe_auc
 
 HOUR = 3600
 

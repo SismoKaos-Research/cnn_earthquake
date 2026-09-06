@@ -27,7 +27,7 @@ import pytest
 # are library functions now, so this is an ordinary import -- and the test no
 # longer drags torch and the whole detection package in to check interval
 # arithmetic.
-from seismolib import continuous as cfa
+from sismokaos import continuous as cfa
 
 
 # --- coverage -------------------------------------------------------------

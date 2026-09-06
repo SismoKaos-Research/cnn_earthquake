@@ -1,7 +1,7 @@
 # GPD on our windows: the first comparable number
 
 **Date:** 2026-08-27
-**Script:** `src/detection/pretrained_picker_baseline.py`
+**Script:** `src/sismokaos/detection/pretrained_picker_baseline.py`
 **Runner:** `experiments/reproduce/run_picker_baseline.sh`
 **Tests:** `tests/test_pretrained_picker.py`
 

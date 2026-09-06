@@ -15,7 +15,7 @@ that have nothing to do with seismology.
 import numpy as np
 import pytest
 
-from forecasting.chaos_dataset import SHAPE_AGGS, _shape_block
+from sismokaos.forecasting.chaos_dataset import SHAPE_AGGS, _shape_block
 
 N = 72          # windows per hour at 200 s / 50 s step
 F = 3           # features
@@ -109,7 +109,7 @@ def test_output_length_matches_the_declared_statistics():
 
 import pandas as pd
 
-from forecasting.chaos_dataset import LAG_HOURS, add_lags
+from sismokaos.forecasting.chaos_dataset import LAG_HOURS, add_lags
 
 
 def frame(n=48, start="2024-05-01"):

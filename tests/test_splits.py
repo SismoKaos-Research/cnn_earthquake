@@ -8,7 +8,7 @@ an embargo that actually removes the rows adjacent to a boundary.
 
 import numpy as np
 
-from seismolib.splits import walk_forward_splits
+from sismokaos.splits import walk_forward_splits
 
 IDX = np.arange(100)
 

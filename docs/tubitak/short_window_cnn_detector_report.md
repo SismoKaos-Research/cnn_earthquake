@@ -16,7 +16,7 @@ needed to produce one and what it would likely show.
 
 Two prior documents are consolidated here, with their measured numbers reproduced rather than
 restated from memory: `docs/report.md` §§2–6 (the original dual-channel investigation) and
-`src/detection/REPORT_event_noise_detector.md` (the rebuilt benchmark, 14 Aug). Where the two
+`src/sismokaos/detection/REPORT_event_noise_detector.md` (the rebuilt benchmark, 14 Aug). Where the two
 disagree, the later one governs and the difference is marked.
 
 ---
@@ -297,7 +297,7 @@ tensors with no learning, on the held-out test split (n = 9,548):
 
 Baseline AUC is reported **oriented**, as `max(a, 1−a)`, since an anti-predictive rule is
 equally exploitable. This is implemented as `safe_auc(..., oriented=True)` in
-`seismolib/metrics.py` and computed at run time by `trivial_amplitude_floor()` in
+`sismokaos/metrics.py` and computed at run time by `trivial_amplitude_floor()` in
 `detection/cnn_lstm_classify.py`, so the floor travels with every result rather than being
 looked up.
 
@@ -385,7 +385,7 @@ the low-SNR ones on which a learned detector's value would actually be demonstra
 
 ### 5.1 Catalogue-derived arrival anchoring
 
-Arrivals are **predicted, not picked** (`src/arrival_from_catalog.py`). For each
+Arrivals are **predicted, not picked** (`seismic_cli/src/arrival_from_catalog.py`). For each
 (event, station) pair, epicentral distance is computed from the catalogue hypocentre and the
 station coordinates — retrieved once from the KOERI FDSN station service, all 181 stations
 resolved — and the first-arriving P phase (`p`, `P`, `Pg`, `Pn`) is computed with TauP using
@@ -482,8 +482,8 @@ harder while the negatives stayed curated-quiet. Only mining the negatives moved
 
 ## 6. Model architecture
 
-Source: `seismolib/model/dual_channel.py` (`DualChannelTrunk`, `DualChannelNet`) and
-`seismolib/model/blocks.py` (`CNNBranch`, `LSTMAttentionBranch`, `GatedFusion`). The binary
+Source: `sismokaos/model/dual_channel.py` (`DualChannelTrunk`, `DualChannelNet`) and
+`sismokaos/model/blocks.py` (`CNNBranch`, `LSTMAttentionBranch`, `GatedFusion`). The binary
 detector is `DualChannelBinaryNet` in `detection/cnn_lstm_classify.py`.
 
 ### 6.1 The 2D branch — `CNNBranch`
@@ -848,13 +848,13 @@ the edge against it, rather than against the majority class.
 
 | Step | Command / script |
 |---|---|
-| Catalogue-anchored windows | `src/arrival_from_catalog.py` |
+| Catalogue-anchored windows | `seismic_cli/src/arrival_from_catalog.py` |
 | Dataset (random noise) | `seismic-cli generate-spec-dual-dataset --window-seconds 6 --fs 100 --max --baseline` |
 | Dataset (hard negatives) | as above, plus `--hard-negatives --hard-negative-band 0.75 0.99` |
-| STEAD dataset | `src/stead_anchor_dataset.py --pre-arrival-seconds 2.0` (add `--min-magnitude 2.0 --max-distance-km 56` for the matched subset) |
-| Training (headline) | `python src/detection/cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --channels 2d --batch-size 32 --ensemble-seeds 42,43,44` |
+| STEAD dataset | `seismic_cli/src/stead_anchor_dataset.py --pre-arrival-seconds 2.0` (add `--min-magnitude 2.0 --max-distance-km 56` for the matched subset) |
+| Training (headline) | `python src/sismokaos/detection/cnn_lstm_classify.py --dataset-dir dataset_specdual_6s --channels 2d --batch-size 32 --ensemble-seeds 42,43,44` |
 | Gated fusion variant | `... --channels all --fusion gate` |
-| Cross-corpus evaluation | `python src/detection/evaluate_cross_corpus.py` |
+| Cross-corpus evaluation | `python src/sismokaos/detection/evaluate_cross_corpus.py` |
 | STA/LTA baseline | `seismic-cli eval-sta-lta --sta-seconds 0.03 --lta-seconds 0.3` |
 
 Window geometry: 6.0 s at 100 Hz, 2.0 s pre-arrival, bandpass 1–45 Hz. Generation is

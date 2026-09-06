@@ -34,7 +34,7 @@ mkdir -p "$SAVE" logs
 launch () {
   local name=$1; shift
   local LOG=logs/norm_${name}.log
-  local CMD=(python3 src/detection/cnn_lstm_classify.py
+  local CMD=(python3 src/sismokaos/detection/cnn_lstm_classify.py
              --dataset-dir "$DATA" --save-dir "$SAVE"
              --seq-transform asinh --ensemble-seeds 42,43,44 --num-workers 2 "$@")
   { echo "# ${CMD[*]}"; echo "# started $(date -Is)"; } > "$LOG"

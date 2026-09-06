@@ -12,8 +12,8 @@ import pathlib
 import numpy as np
 import pytest
 
-from forecasting.chaos_dataset import RADIUS_KM, load_events
-from seismolib.catalog import STATION_COORDS, haversine_km
+from sismokaos.forecasting.chaos_dataset import RADIUS_KM, load_events
+from sismokaos.catalog import STATION_COORDS, haversine_km
 
 # The catalogue lives in a sibling checkout whose name is not stable: it has
 # been `data_downloader` and is now `seismic_cli`, under a parent that is

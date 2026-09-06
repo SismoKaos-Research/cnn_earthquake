@@ -106,7 +106,7 @@ incrementally would be the real fix if full-archive runs become routine.
 232 distinct events over the quarter batch, 25% positive rate, oriented
 persistence floor 0.543, minimum detectable edge ±0.064 at 95%.
 
-Chosen by `src/forecasting/label_sweep.py` (catalogue-only, runs in seconds),
+Chosen by `src/sismokaos/forecasting/label_sweep.py` (catalogue-only, runs in seconds),
 which grids 140 (magnitude × radius × horizon) cells and reports distinct
 events, positive rate and the oriented floor for each.
 
@@ -225,7 +225,7 @@ The steps below are kept as the record of what was planned and executed.
    and left nothing behind.
 
 1. **Within-sequence variance check** — the gate on the whole idea. Run
-   `src/forecasting/sequence_variance_check.py` against the new parquet.
+   `src/sismokaos/forecasting/sequence_variance_check.py` against the new parquet.
 
    The ruled-out GRU/CNN degenerated because its catalog inputs had within-24 h
    std of only **1.2–9.3%** of overall std, making a 24-step sequence ~24
@@ -304,11 +304,11 @@ cargo run --release --example chaos_bench                     # per-function tim
 
 # Label design reproduces
 cd ~/Projects/Sismokaos/cnn_earthquake
-python3 src/forecasting/label_sweep.py --catalog <path-to-catalogue>
+python3 src/sismokaos/forecasting/label_sweep.py --catalog <path-to-catalogue>
 # -> M>=2.5/400km/6h should show 232 events, pos_rate 0.253, floor 0.5426
 
 # Floors are oriented everywhere
-grep -c "pers_auc = max(pers_raw" src/forecasting/*.py       # -> 6 sites
+grep -c "pers_auc = max(pers_raw" src/sismokaos/forecasting/*.py       # -> 6 sites
 ```
 
 **Unvalidated dependency:** `chaos.rs` says it was ported from

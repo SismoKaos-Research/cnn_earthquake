@@ -5,7 +5,7 @@ or a too-long window, but not a chunk that arrived short, misaligned, or with
 one component missing -- all of which look like a valid zip. This reads every
 archive and reports actual coverage.
 
-    python3 scripts/afad_audit.py --dir afad_raw/MANT
+    python3 experiments/analyses/afad_audit.py --dir afad_raw/MANT
 """
 import argparse
 import pathlib

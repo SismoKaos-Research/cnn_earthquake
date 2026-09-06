@@ -122,7 +122,7 @@ the earlier run was not using asinh.
 ## Operating envelope (added after the grid, `cnn-lstm` ensemble)
 
 Recall stratified by source parameters, threshold 0.5. Produced by
-`src/detection/operating_envelope.py`, which re-scores the test set from the
+`src/sismokaos/detection/operating_envelope.py`, which re-scores the test set from the
 saved checkpoints and joins to the magnitude manifest by filename — a 7,906 /
 7,906 join. It reproduces the ensemble ROC-AUC of 0.9896 exactly, which is the
 check that the scoring path matches training.
@@ -205,7 +205,7 @@ numbers under a correct asinh path.
 ## Reproduce
 
 ```
-python3 src/detection/cnn_lstm_classify.py \
+python3 src/sismokaos/detection/cnn_lstm_classify.py \
   --dataset-dir .../dataset_specdual_catalog_6s_matched_hard \
   --save-dir trained_model_branch1d_asinh \
   --channels 1d --branch-1d {lstm,cnn-lstm,cnn} \

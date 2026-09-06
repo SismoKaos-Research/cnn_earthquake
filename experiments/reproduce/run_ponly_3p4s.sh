@@ -9,7 +9,7 @@ for arm in "1d cnn-lstm" "2d cnn-lstm"; do
     set -- $arm
     ch=$1; br=$2
     echo "=== channels=$ch branch-1d=$br ==="
-    .venv/bin/python src/detection/cnn_lstm_classify.py \
+    .venv/bin/python src/sismokaos/detection/cnn_lstm_classify.py \
         --dataset-dir "$D" --save-dir "$S" \
         --channels "$ch" --branch-1d "$br" --fusion linear \
         --seq-transform asinh --batch-size 32 \

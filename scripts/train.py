@@ -2,7 +2,7 @@
 
 Twenty-five trainers live under `src/`, named after their architecture rather
 than their target, in five packages. Finding the one that learns a given label
-meant knowing the naming history. `seismolib.tasks` is the index; this runs it.
+meant knowing the naming history. `sismokaos.tasks` is the index; this runs it.
 
     sk train                          # every task, grouped by what it predicts
     sk train --predicts forecast      # just the forecasting targets
@@ -24,9 +24,9 @@ import argparse
 import importlib
 import sys
 
-from seismolib.model.registry import REGISTRY, by_family
-from seismolib.runlog import RunLog
-from seismolib.tasks import PREDICTS, TASKS, by_prediction
+from sismokaos.model.registry import REGISTRY, by_family
+from sismokaos.runlog import RunLog
+from sismokaos.tasks import PREDICTS, TASKS, by_prediction
 
 BOLD, DIM, OFF = "\033[1m", "\033[2m", "\033[0m"
 
@@ -130,7 +130,7 @@ def main():
     # trainers by hand is a mechanical edit to files that produce published
     # numbers, which is how a typo gets into one; opening it around the
     # dispatch costs nothing and covers every task at once. The trainer does
-    # not need to know: `seismolib.metrics.print_report` files its numbers into
+    # not need to know: `sismokaos.metrics.print_report` files its numbers into
     # the ambient run, and `RunLog.__exit__` marks a crash as failed.
     out_dir = _save_dir(argv[1:])
     with RunLog(f"sk train {name}", out_dir, {"argv": argv[1:]}) as log:

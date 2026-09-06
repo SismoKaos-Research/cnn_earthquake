@@ -8,7 +8,7 @@ distance calculation -- in the middle of a plan over tens of thousands of events
 A syntax check said clean. Importing the module is what catches it.
 
 The `main()` check exists because `sk` dispatches by calling it: a tool that
-imports fine but has no `main` is registered in `seismolib.cli` and broken only
+imports fine but has no `main` is registered in `sismokaos.cli` and broken only
 when someone runs it.
 
 `md2docx` is skipped when python-docx is absent -- it is a reporting convenience
@@ -65,12 +65,12 @@ def test_tool_has_main(name):
             pytest.skip(f"{name} needs {OPTIONAL_DEPS[name]}: {e.name} missing")
         raise
     assert callable(getattr(mod, "main", None)), (
-        f"{name}.py has no callable main(); seismolib.cli dispatches by calling it")
+        f"{name}.py has no callable main(); sismokaos.cli dispatches by calling it")
 
 
 def test_cli_registry_matches_disk():
     """Every `sk` command points at a file that exists, and vice versa."""
-    from seismolib.cli import COMMANDS, GROUPS
+    from sismokaos.cli import COMMANDS, GROUPS
 
     for cmd, (script, _desc) in COMMANDS.items():
         assert (SCRIPTS / script).exists(), (
@@ -86,7 +86,7 @@ def test_cli_registry_matches_disk():
     unregistered = on_disk - registered
     assert not unregistered, (
         f"scripts/ holds {sorted(unregistered)} which `sk` does not expose -- "
-        f"either register them in seismolib.cli or move them to experiments/")
+        f"either register them in sismokaos.cli or move them to experiments/")
 
 
 def test_runlog_tags_are_glob_safe():
@@ -99,7 +99,7 @@ def test_runlog_tags_are_glob_safe():
     """
     import tempfile
 
-    from seismolib.runlog import RunLog
+    from sismokaos.runlog import RunLog
 
     with tempfile.TemporaryDirectory() as d:
         for task in ("sk train magnitude", "detection/cnn_lstm_classify",
@@ -123,7 +123,7 @@ def test_runlog_never_overwrites_an_earlier_record():
     """
     import tempfile
 
-    from seismolib.runlog import RunLog
+    from sismokaos.runlog import RunLog
 
     with tempfile.TemporaryDirectory() as d:
         logs = [RunLog("sk train magnitude", d, runs_dir=d) for _ in range(4)]

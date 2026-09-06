@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from forecasting.chaos_config_sweep import context_features
+from sismokaos.forecasting.chaos_config_sweep import context_features
 
 
 def hourly(n=200, start="2024-05-01"):

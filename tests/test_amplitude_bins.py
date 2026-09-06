@@ -11,7 +11,7 @@ actually made; the width tag is what stops it, so it is tested.
 import numpy as np
 import pytest
 
-from detection.within_amplitude_auc import NARROW_RATIO, amplitude_bins
+from sismokaos.detection.within_amplitude_auc import NARROW_RATIO, amplitude_bins
 
 
 def alternating(n):

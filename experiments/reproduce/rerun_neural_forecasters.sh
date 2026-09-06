@@ -50,16 +50,16 @@ pair () {   # pair <name> <script> <args...>
 }
 
 # 1. The headline: catalog-only MLP, the 0.5886 configuration
-pair catalog_mlp src/forecasting/cnn_lstm_catalog_waveform_fusion.py \
+pair catalog_mlp src/sismokaos/forecasting/cnn_lstm_catalog_waveform_fusion.py \
     --channels catalog --catalog-span 2000-01-01 2026-08-12 \
     --horizon-days 14 --cv-folds 2 --bg-min-mag 3.0 --batch-size 128 \
     --keep-features log1p_dsp mean_mag_30d cv_interevent_90d mag_deficit_90d \
     --ensemble-seeds $SEEDS
 
 # 2/3. Hand-feature sequence models on the BODT continuous archive
-pair feature_lstm src/forecasting/feature_lstm_forecast.py \
+pair feature_lstm src/sismokaos/forecasting/feature_lstm_forecast.py \
     --features-csv $FE/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy --cv-folds 5
-pair feature_gru_tcn src/forecasting/feature_gru_tcn.py \
+pair feature_gru_tcn src/sismokaos/forecasting/feature_gru_tcn.py \
     --features-csv $FE/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy --cv-folds 5
 
 echo "=== all done $(date +%H:%M:%S) ==="

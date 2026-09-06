@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from seismolib.catalog import load_hourly_features
+from sismokaos.catalog import load_hourly_features
 
 
 def _npy(tmp_path, rows):

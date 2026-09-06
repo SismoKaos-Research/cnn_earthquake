@@ -59,7 +59,7 @@ standardize against the station baseline), applied to whole blocks of windows at
 a time instead of one at a time. `verify` checks that claim against real dataset
 tensors rather than asserting it.
 """
-from seismolib.continuous.cli import main as _main
+from sismokaos.continuous.cli import main as _main
 
 
 def main():

@@ -1,4 +1,4 @@
-"""The waveform path of `seismolib.continuous`, which nothing else exercised.
+"""The waveform path of `sismokaos.continuous`, which nothing else exercised.
 
 `test_coincidence.py` covers the span algebra and the alarm matching -- the
 parts that read scored `.npz` files. Everything upstream of a score, from the
@@ -13,8 +13,8 @@ a second rather than by a two-day rescan.
 import numpy as np
 import pytest
 
-from seismolib import continuous as C
-from seismolib.continuous.chunks import reference_clean
+from sismokaos import continuous as C
+from sismokaos.continuous.chunks import reference_clean
 
 
 class _Trace:

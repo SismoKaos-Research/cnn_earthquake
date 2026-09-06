@@ -278,7 +278,7 @@ package of the `data_downloader` repository (`core.py`, `anchor.py`,
 `eval_baseline.py`, `cli.py`). It is described here as it currently stands,
 after the corrections in Section 12.
 
-### 3.1 Acquisition (`src/download.py`)
+### 3.1 Acquisition (`seismic_cli/src/download.py`)
 
 For each catalog event, stations within `SEARCH_RADIUS_DEG = 0.5°`
 (approximately 55 km) are resolved via FDSN (KOERI), with lookups cached on
@@ -386,7 +386,7 @@ comprehensively, rather than introducing pieces as results are reported.
 ### 4.1 `ImprovedSeismicCNN`: The Base Detector
 
 A ResNet-style CNN with Squeeze-and-Excitation blocks and a single-logit
-binary output (`src/model/cnn_train.py`).
+binary output (`src/sismokaos/detection/cnn_train.py`).
 
 **Residual block.** For input $u$:
 
@@ -1889,7 +1889,7 @@ losing model look like a winning one.
 | 15 | Stuck-instrument windows entering the risk dataset as valid "quiet noise" | `6G.MADM`'s traces span ~58 counts on a ~5.38-million-count DC offset with ~50 unique values across 30,001 samples; gap rejection catches telemetry gaps but not a digitizer stuck at a constant | 199 windows at log SNR ≈ −6, far outside the training range, supplied 58% of one class's test errors and created a 24-point validation/test gap. Corrected by `--min-log-snr` (Section 8.4a); the gap closes to ~1 point |
 | 16 | Multi-class baseline crashed silently *past* the model's own numbers | `LogisticRegression(multi_class=...)` was removed in scikit-learn 1.9; the exception was caught by a broad `except` that printed a warning and returned `None`, after which the reporting code skipped the comparison line | The 3-class run reported the CNN's 71.71% accuracy with **no floor beneath it**. The floor, once computed, was 90.37% — the model was losing to two scalars, and the output as printed suggested the opposite |
 | 17 | `distance_km` undefined for noise leaks the noise class | There is no event to measure distance from for a noise window, so "distance is missing" identifies the noise class by construction in a flat multi-class model | Worth ~10 accuracy points of pure inflation (91.72% vs 81.55%). Corrected structurally by the two-stage split (Section 8.5). The equivalent check on the Section 7 binary task was negative, so reusing that task's reasoning would not have caught it |
-| 18 | Ground-motion label window entirely contained the model's input window | `groundmotion.py` originally took the peak over `[record_start + 3 s, end]`. The arrival lands ~10–12 s into a 60 s record and the input window sits at `[arrival − 0.6 s, arrival + 2.4 s]`, so the target interval enclosed the input interval completely | The model could have read its own target off its own input, with nothing to signal it. Corrected by replaying `anchor.py`'s deterministic STA/LTA pick to recover the arrival — verified to reproduce the stored anchored corpus bit-exactly on 532 stations, worst absolute sample difference 0 — and opening the label at `arrival + 2.4 s`, where the input closes |
+| 18 | Ground-motion label window entirely contained the model's input window | `sismokaos.groundmotion.py` originally took the peak over `[record_start + 3 s, end]`. The arrival lands ~10–12 s into a 60 s record and the input window sits at `[arrival − 0.6 s, arrival + 2.4 s]`, so the target interval enclosed the input interval completely | The model could have read its own target off its own input, with nothing to signal it. Corrected by replaying `anchor.py`'s deterministic STA/LTA pick to recover the arrival — verified to reproduce the stored anchored corpus bit-exactly on 532 stations, worst absolute sample difference 0 — and opening the label at `arrival + 2.4 s`, where the input closes |
 | 19 | `remove_response` silently rejected every station on a placeholder timestamp | StationXML responses carry validity epochs. Traces were stamped `UTCDateTime(0)`, which falls outside every epoch, so `remove_response` refused the correction and raised nothing | First smoke test returned `response_ok=False` for 13 of 13 stations with no error. Had the flag not existed, the result would have been an all-NaN dataset resembling a data problem rather than a code one. Corrected by threading the real trace `starttime` through; it is now a required argument that raises on `None` |
 | 20 | Instrument responses whose stage gains contradict their reported sensitivity | Across 828 cached channel-epochs the disagreement between the reported overall sensitivity and the product of stage gains is cleanly bimodal: 97.1 % agree to within 0.01 %, and 2.9 % disagree by a factor of ~690,000. All of the latter are 6G stations (ATIM, BOZM, BUYM, GBZM, IGDM, KMRM, MADM, YNKM). obspy emits a warning and continues | An amplitude wrong by six orders of magnitude would enter the dataset as a plausible number. Surfaced as a `sens_mismatch` column with an explicit tolerance rather than left to appear downstream as an inexplicable R² |
 | 21 | Quality flags computed over the survivors of their own filter | Windows without a usable response produce no input tensor and were skipped with a bare `continue`, before the manifest was written. The manifest then reported `response_ok` 100.0 % and `sens_mismatch` 0.0 % | Both rates were true by construction and conveyed nothing. Worse, the 6G stations carrying defect 20's sensitivity error are largely the same ones failing the response lookup, so the flag built to expose them read a clean 0 % *because they had already been removed*. Found by reconciling the manifest's 49,680 rows against the 51,408 the anchored corpus should yield; the 1,728-row gap is entirely 6G and IJ. Corrected by counting drops per station and reporting them by network ahead of the flag table. Data was unaffected — the defect was purely in what the report claimed |
@@ -2208,7 +2208,7 @@ seismic-cli generate-dataset \
     --window-seconds 6 --overlap 0.5 --max --max-windows-per-station 20
 
 # 3. Train (short preset auto-selected by --window-seconds)
-python src/model/cnn_train.py --dataset-dir dataset_6s_max \
+python src/sismokaos/detection/cnn_train.py --dataset-dir dataset_6s_max \
     --save-dir trained_model_6s --window-seconds 6
 
 # 4. STA/LTA baseline on the identical test windows (parameters auto-derived --
@@ -2405,7 +2405,7 @@ python riskclass_scalar.py --dataset-dir ../../data_downloader/data/dataset_risk
 
 To reproduce the fetch reality of Section 8.2, target only the M ≥ 4 events
 that have no downloaded waveform (`catalogs/target_missing_m4plus.csv`,
-committed) and run `src/download.py` against it; expect roughly one in ten
+committed) and run `seismic_cli/src/download.py` against it; expect roughly one in ten
 to return data.
 
 Full CLI option reference: `data_downloader/README.md`.

@@ -11,8 +11,8 @@ into a finding.
 import numpy as np
 import pandas as pd
 
-from forecasting.chaos_univariate_screen import best_under_null
-from seismolib.metrics import safe_auc
+from sismokaos.forecasting.chaos_univariate_screen import best_under_null
+from sismokaos.metrics import safe_auc
 
 
 def ranked(mat):

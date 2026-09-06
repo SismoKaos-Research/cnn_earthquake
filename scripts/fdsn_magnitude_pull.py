@@ -49,8 +49,8 @@ import pandas as pd
 from obspy import UTCDateTime
 from obspy.clients.fdsn import Client
 
-from seismolib.arrivals import ArrivalTimes
-from seismolib.catalog import haversine_km as haversine
+from sismokaos.arrivals import ArrivalTimes
+from sismokaos.catalog import haversine_km as haversine
 
 warnings.filterwarnings("ignore")
 
@@ -157,7 +157,7 @@ def cmd_plan(args):
     print(f"[plan] {len(cat):,} events after capping each 0.5-band at {args.per_band}")
 
     # 10 km grid, the resolution this planner was written with; see
-    # seismolib.arrivals for why it is stated rather than defaulted.
+    # sismokaos.arrivals for why it is stated rather than defaulted.
     taup = ArrivalTimes(grid_km=10.0)
 
     def p_travel(dist_km, depth_km):

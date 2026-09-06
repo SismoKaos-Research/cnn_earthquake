@@ -5,7 +5,7 @@
 set -u
 D=/home/hogib/Projects/Sismokaos/seismic_cli/dataset_specdual_ponly_3p4s_matched
 S=trained_model_ponly_matched
-.venv/bin/python src/detection/cnn_lstm_classify.py \
+.venv/bin/python src/sismokaos/detection/cnn_lstm_classify.py \
     --dataset-dir "$D" --save-dir "$S" \
     --channels all --branch-1d cnn-lstm --fusion linear \
     --seq-transform asinh --batch-size 32 \

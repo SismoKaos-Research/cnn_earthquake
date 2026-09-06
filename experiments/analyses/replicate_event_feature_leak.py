@@ -20,7 +20,7 @@ This runs their method on our data, changing one thing at a time:
 If B is far above A and C, the performance comes from the fill, not the
 features -- and both teams' results are reconciled rather than contradictory.
 
-    python3 scripts/replicate_event_feature_leak.py --epochs 40
+    python3 experiments/analyses/replicate_event_feature_leak.py --epochs 40
 """
 import argparse
 
@@ -30,9 +30,9 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import average_precision_score, precision_score, recall_score
 
-from forecasting import chaos_dataset as cd
-from seismolib.catalog import STATION_COORDS, haversine_km
-from seismolib.metrics import safe_auc
+from sismokaos.forecasting import chaos_dataset as cd
+from sismokaos.catalog import STATION_COORDS, haversine_km
+from sismokaos.metrics import safe_auc
 
 EVENT_COLS = ["Latitude", "Longitude", "Mesafe_Derecesi", "Deprem_Sayisi"]
 

@@ -40,7 +40,7 @@ for which in old new; do
     for seed in 42 43 44; do
         log="logs/zone_forecast_${which}_seed${seed}.log"
         echo "=== train $which seed $seed  $(date +%H:%M:%S) ==="
-        uv run python src/forecasting/cnn_lstm_forecast.py \
+        uv run python src/sismokaos/forecasting/cnn_lstm_forecast.py \
             --dataset-dir "$out" --catalog-path "$cat" --seed $seed \
             --data-downloader-root "$DD" > "$log" 2>&1
         rc=$?

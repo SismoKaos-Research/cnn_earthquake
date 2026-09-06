@@ -46,7 +46,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-from seismolib.catalog import haversine_km as haversine
+from sismokaos.catalog import haversine_km as haversine
 
 EARTH_KM = 6371.0
 # S-P slowness for crustal Vp=6.0, Vs=3.46 km/s: (1/Vs - 1/Vp) s/km.

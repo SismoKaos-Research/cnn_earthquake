@@ -5,7 +5,7 @@ re-derived when questioned -- the continuous-detection figures sat in
 `docs/TODO.md` for a day as first-195-day values next to a finished 728-day run,
 and nobody could tell from the numbers which they were.
 
-`seismolib.runlog` writes one JSON per run and `sk train` opens one around every
+`sismokaos.runlog` writes one JSON per run and `sk train` opens one around every
 task, so the records exist. This reads them back.
 
     sk results                        # every run, newest first
@@ -22,7 +22,7 @@ import json
 import sys
 from pathlib import Path
 
-from seismolib.runlog import load_runs
+from sismokaos.runlog import load_runs
 
 BOLD, DIM, OFF = "\033[1m", "\033[2m", "\033[0m"
 # Metric names seen in this repo's reports, best-first by convention.

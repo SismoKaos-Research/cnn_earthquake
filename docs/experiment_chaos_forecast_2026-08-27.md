@@ -1,7 +1,7 @@
 # Chaotic features as a forecaster: a negative result, and why more data will not fix it
 
 **Date:** 2026-08-27
-**Scripts:** `src/forecasting/chaos_dataset.py`, `chaos_univariate_screen.py`,
+**Scripts:** `src/sismokaos/forecasting/chaos_dataset.py`, `chaos_univariate_screen.py`,
 `chaos_forecast.py`
 **Tests:** `tests/test_chaos_dataset.py`, `tests/test_chaos_screen.py`
 **Data:** `sismokaos-cli/dataset_features_chaos_q1_5hz/bodt_q1_chaos_5hz_features.parquet`
@@ -244,7 +244,7 @@ does not appear to be.
 
 # Follow-up 2: sweeping context length, so the question closes
 
-**Script:** `src/forecasting/chaos_config_sweep.py`
+**Script:** `src/sismokaos/forecasting/chaos_config_sweep.py`
 **Tests:** `tests/test_chaos_context.py`
 **Output:** `logs/chaos_config_sweep.csv`
 
@@ -320,7 +320,7 @@ label family, and this much data — which is what a reader is entitled to ask f
 # Follow-up 3: a second station, and what replicates
 
 **Date:** 2026-08-28
-**Script:** `src/forecasting/chaos_station_replication.py`
+**Script:** `src/sismokaos/forecasting/chaos_station_replication.py`
 **Tests:** `tests/test_chaos_station.py`
 **Data:** `dat_q1_chaos_5hz_features.parquet` (266,641 windows, DAT,
 2024-05-02 → 2024-10-28, date-matched to BODT, identical config)

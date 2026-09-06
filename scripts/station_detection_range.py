@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 from obspy import read, UTCDateTime
 
-from seismolib.arrivals import ArrivalTimes
-from seismolib.catalog import haversine_km as haversine
+from sismokaos.arrivals import ArrivalTimes
+from sismokaos.catalog import haversine_km as haversine
 
 EARTH_KM = 6371.0
 NOISE_WIN = (-60.0, -10.0)   # seconds relative to predicted P

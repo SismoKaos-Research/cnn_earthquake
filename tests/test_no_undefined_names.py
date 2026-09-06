@@ -2,7 +2,7 @@
 
 This exists because of a bug the rest of the suite could not see. Moving the
 continuous-scan machinery out of `scripts/continuous_false_alarms.py` into
-`seismolib.continuous` carried the function bodies over verbatim but not three
+`sismokaos.continuous` carried the function bodies over verbatim but not three
 things they depended on: `import math`, `from scipy import signal`, and the
 `COMPONENT_ROLES` constant. A function's globals are its *defining* module's,
 not its caller's, so the script's own copies did not rescue them.

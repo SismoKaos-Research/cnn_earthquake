@@ -10,7 +10,7 @@ has been circling.
 Scores are recomputed from the parquets rather than parsed out of a log, so this
 does not depend on a log format that has already changed once.
 
-NOTE: `seismolib.catalog.label_hours` was corrected on 2026-09-06 to open its
+NOTE: `sismokaos.catalog.label_hours` was corrected on 2026-09-06 to open its
 horizon at the END of the feature window. At the 6-hour chaos horizon that moved
 29% of the positive class, so any number produced by this file before that date
 is not comparable with one produced after.
@@ -22,11 +22,11 @@ from scipy.stats import spearmanr
 # split by component. (A `parse()` stub used to sit here whose docstring said it
 # read the log's top-15 block and whose body was `return None` -- it never did
 # that, and a caller would have got None without a word.)
-from forecasting.chaos_dataset import build
+from sismokaos.forecasting.chaos_dataset import build
 import pandas as pd
 CAT="/home/hogib/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv"
 CLI="/home/hogib/Projects/Sismokaos/sismokaos-cli/dataset_features_chaos_q1_5hz/"
-from seismolib.metrics import safe_auc
+from sismokaos.metrics import safe_auc
 res={}
 for st,pq in (("BODT",CLI+"bodt_q1_chaos_5hz_features.parquet"),
               ("DAT",CLI+"dat_q1_chaos_5hz_features.parquet")):

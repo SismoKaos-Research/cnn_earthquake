@@ -34,7 +34,7 @@ source .venv/bin/activate
 ```
 
 `uv sync` installs the repo itself in editable mode, which is what puts `sk` on
-your path and lets `import seismolib` resolve from any directory. A CUDA GPU is
+your path and lets `import sismokaos` resolve from any directory. A CUDA GPU is
 strongly recommended: several forecasters train directly on continuous raw
 waveform and are VRAM-heavy at archive scale.
 
@@ -150,7 +150,7 @@ sk status --host vegs      # the box the jobs are actually on
 
 Three sections: running jobs with the argument that tells them apart, recent
 runs from `runs/*.json` with their headline metric, and free disk. Every
-registry-wired trainer writes a run record through `seismolib.runlog` —
+registry-wired trainer writes a run record through `sismokaos.runlog` —
 argv, git commit **and whether the tree was dirty**, dataset identity, split,
 seeds, metrics, checkpoints. A run that crashes leaves a record saying
 `started` rather than no record at all.
@@ -160,7 +160,7 @@ seeds, metrics, checkpoints. A run that crashes leaves a record saying
 ## Layout
 
 ```
-scripts/        17 command-line tools, all reachable as `sk <command>`
+scripts/        20 command-line tools, all reachable as `sk <command>`
 src/            the trainers and the shared library
 experiments/    reproduce/ (the exact runners for published results)
                 analyses/  (one-off analysis scripts)
@@ -174,24 +174,27 @@ catalogs/       event and station catalogues
 Not checked in (gitignored, regenerate or point at your own): `dataset*/`,
 `data/`, `raw/`, `trained_model*/`, `results/`, `.env*`.
 
-### `src/` — one package per target
+### `src/sismokaos/` — one package
 
-Each has its own README indexing what is inside.
+Everything is one installed namespace. There used to be six top-level names —
+`seismolib` plus one per family — which made `detection` and `features`
+importable names owned by this repo, and made a cross-family import
+(`from detection.cnn_lstm_classify import ...`) read like a third-party one.
+Each family subpackage keeps its own README indexing what is inside.
 
 | | files | |
 |---|---|---|
-| [`src/detection/`](src/detection/) | 23 | event vs noise, stacking, cross-corpus and cross-station evaluation, published-picker baselines |
-| [`src/magnitude/`](src/magnitude/) | 6 | magnitude regression and classification, risk classes |
-| [`src/forecasting/`](src/forecasting/) | 26 | catalogue and raw-waveform forecasting, fusion, chaos features, LOEO |
-| [`src/groundmotion/`](src/groundmotion/) | 4 | peak ground acceleration and velocity |
-| [`src/features/`](src/features/) | 11 | feature engineering, RFE, dataset builders |
-| [`src/seismolib/`](src/seismolib/) | 14 | the shared library — everything two packages would otherwise each copy |
+| [`detection/`](src/sismokaos/detection/) | 23 | event vs noise, stacking, cross-corpus and cross-station evaluation, published-picker baselines |
+| [`magnitude/`](src/sismokaos/magnitude/) | 6 | magnitude regression and classification, risk classes |
+| [`forecasting/`](src/sismokaos/forecasting/) | 26 | catalogue and raw-waveform forecasting, fusion, chaos features, LOEO |
+| [`groundmotion/`](src/sismokaos/groundmotion/) | 4 | peak ground acceleration and velocity |
+| [`features/`](src/sismokaos/features/) | 11 | feature engineering, RFE, dataset builders |
+| [`continuous/`](src/sismokaos/continuous/) | 12 | scoring an uninterrupted station record — chunks, spans, association, alarms, and the six `falsealarm` subcommands |
 
-The family packages are installed by name, so the handful of legitimate
-cross-family imports (`from detection.cnn_lstm_classify import ...`) resolve
-regardless of which directory a script was launched from.
+Nothing manipulates `sys.path` to reach any of it, and a test fails if
+something starts to.
 
-### `src/seismolib/` — the shared library
+### The shared library
 
 | module | |
 |---|---|
@@ -209,6 +212,7 @@ regardless of which directory a script was launched from.
 | `rust_io.py` | reading everything `sismokaos-cli` writes |
 | `logging.py` | stdout tee for long-running training scripts |
 | `data/` | the dataset classes |
+| `continuous/` | continuous-record scanning; see its own docstring |
 
 `checkpoints.py` earns its place: `run_ponly_natural.sh` writes three
 architectures into one `--save-dir`, so a bare `glob("*.pth")` averages over a
@@ -216,7 +220,7 @@ mixture of models answering different questions. That has already cost two sets
 of checkpoints and one seed reported at 0.2480 — an inverted model read as a
 training outcome.
 
-### `src/seismolib/model/` — the networks
+### `src/sismokaos/model/` — the networks
 
 | module | |
 |---|---|

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from seismolib.catalog import (count_events_in_window, days_since_prev_major,
+from sismokaos.catalog import (count_events_in_window, days_since_prev_major,
                                days_until_next_major, haversine_km, label_hours,
                                parse_hour_start, station_distance_mask)
 

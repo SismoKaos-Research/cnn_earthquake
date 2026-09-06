@@ -21,7 +21,7 @@ no early-warning value at that site.
 
 Stratifying recall by S-present cannot answer this — at fixed distance S−P
 varies only through depth, so "S is present" and "the event is close" are
-nearly the same statement. `src/detection/s_arrival_ablation.py` intervenes
+nearly the same statement. `src/sismokaos/detection/s_arrival_ablation.py` intervenes
 instead: zero every sample from the predicted S arrival, re-score with the
 existing weights, and control for the fact that removing a tail removes signal
 whether or not that signal is S.
@@ -191,7 +191,7 @@ at 6 s. See "Open" below.
 
 Four negative regimes were built over the **same** P-only event windows —
 verified identical: same 35 test stations, same 7,908 event windows — so
-negative selection is the only variable. `src/detection/negative_regime_transfer.py`.
+negative selection is the only variable. `src/sismokaos/detection/negative_regime_transfer.py`.
 
 | regime | monotone floor | non-monotone | gap |
 |---|---|---|---|
@@ -286,7 +286,7 @@ Two design points matter:
 
 ### Result
 
-`src/detection/within_amplitude_auc.py`
+`src/sismokaos/detection/within_amplitude_auc.py`
 
 **matched test set, matched-trained fusion** — pooled 0.8763, floor 0.6679:
 
@@ -399,7 +399,7 @@ synthetic arrays — no GPU, no dataset, safe to run mid-experiment.
 
 Three latent defects surfaced while writing them, each fixed in the same pass:
 
-1. `seismolib/catalog.py` used `re.match` without importing `re`, so
+1. `sismokaos/catalog.py` used `re.match` without importing `re`, so
    `parse_hour_start` raised `NameError` on every call. Its last caller had
    moved to `Zaman_Dk`, so nothing noticed.
 2. `label_sweep.sweep_cell` raised `IndexError` on a cell with zero qualifying

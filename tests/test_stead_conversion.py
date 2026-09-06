@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from obspy import UTCDateTime
 
-from detection.stead_to_ponly_mseed import (FS, PRE_P_SAMPLES, STEAD_COMPONENTS,
+from sismokaos.detection.stead_to_ponly_mseed import (FS, PRE_P_SAMPLES, STEAD_COMPONENTS,
                                             WINDOW_SAMPLES, to_stream)
 
 

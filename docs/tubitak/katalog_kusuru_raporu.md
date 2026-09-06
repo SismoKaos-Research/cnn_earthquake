@@ -112,8 +112,8 @@ sonuç kritiktir: dosya **farklı bir katalog değil, eksik bir alt kümedir**.
 
 `deprem_katalog_utc.csv` dosyasını okuyan bileşenler:
 
-- `src/forecasting/label_sweep.py` (varsayılan)
-- `src/forecasting/cnn_lstm_forecast.py`
+- `src/sismokaos/forecasting/label_sweep.py` (varsayılan)
+- `src/sismokaos/forecasting/cnn_lstm_forecast.py`
 - Kaotik öznitelik çalışmasının dört betiği (`chaos_univariate_screen`,
   `chaos_forecast`, `chaos_config_sweep`, `chaos_station_replication`)
 

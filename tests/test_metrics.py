@@ -11,8 +11,8 @@ gain.
 import numpy as np
 import pytest
 
-from seismolib.baselines import rate_persistence_auc
-from seismolib.metrics import (binary_report, majority_class_baseline,
+from sismokaos.baselines import rate_persistence_auc
+from sismokaos.metrics import (binary_report, majority_class_baseline,
                                persistence_baseline, predict_mean_baseline,
                                regression_report, safe_auc, safe_mcc)
 

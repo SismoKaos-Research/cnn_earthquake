@@ -44,8 +44,8 @@ import numpy as np
 import pandas as pd
 from obspy import UTCDateTime
 
-from seismolib.catalog import haversine_km as haversine
-from seismolib.continuous import (component_segments, load_snr, pick_components,
+from sismokaos.catalog import haversine_km as haversine
+from sismokaos.continuous import (component_segments, load_snr, pick_components,
                                   predicted_arrivals, read_chunk)
 
 

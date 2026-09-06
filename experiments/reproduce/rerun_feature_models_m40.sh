@@ -6,7 +6,7 @@
 # stopping has no signal and two AUCs are undefined. See
 # docs/experiment_neural_forecasters_2026-08-30.md.
 #
-# scripts/probe_forecast_horizons.py swept magnitude x horizon on label
+# experiments/analyses/probe_forecast_horizons.py swept magnitude x horizon on label
 # composition alone. M>=4.0 gives 5/5 evaluable folds at 3, 7 and 14 days and
 # lifts independent episodes from 31 to 70. Lower thresholds overshoot: M>=3.0
 # at 7 d has a base rate of 0.991, degenerate in the other direction.
@@ -21,7 +21,7 @@ mkdir -p logs
 for s in feature_lstm_forecast feature_gru_tcn; do
     log="logs/${s}_m40_h14.log"
     echo "=== $s  M>=4.0 14d  $(date +%H:%M:%S) ==="
-    uv run python "src/forecasting/$s.py" --features-csv "$FEAT" --catalog-path "$CAT" \
+    uv run python "src/sismokaos/forecasting/$s.py" --features-csv "$FEAT" --catalog-path "$CAT" \
         --threshold 4.0 --horizon-days 14 --cv-folds 5 > "$log" 2>&1
     rc=$?
     if [ $rc -ne 0 ] || grep -q "\[ERROR\]" "$log"; then

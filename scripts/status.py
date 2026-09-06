@@ -11,7 +11,7 @@ Three sections, in the order the question is usually asked:
 `afad_imap` processes are identical in `ps` until you can see which ledger each
 holds; that single field is most of the value here.
 
-**Recent runs** -- from `runs/*.json` (`seismolib.runlog`), so a finished
+**Recent runs** -- from `runs/*.json` (`sismokaos.runlog`), so a finished
 training run reports its own headline metric and whether it succeeded, instead
 of requiring a grep through a log whose name encodes the config.
 

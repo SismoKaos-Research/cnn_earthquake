@@ -21,7 +21,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 # Flat scripts that run their work at module level, by design and by docstring.
 EXECUTES_ON_IMPORT = {
     # Unpickles a full model object at import; documented as never-importable.
-    "detection.cnn_run",
+    "sismokaos.detection.cnn_run",
 }
 
 

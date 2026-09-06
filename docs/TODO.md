@@ -202,7 +202,7 @@ Verified clear, with the evidence, so these need not be re-checked:
   bug: it selects a preset in trainers and a download length in pull tools.
 - **Derived denominators.** `alarms/day` divides by scored time, which is the
   right base -- you can only alarm while scoring.
-- **`arr[0].time` vs `min(times)`.** `seismolib.arrivals` takes the first
+- **`arr[0].time` vs `min(times)`.** `sismokaos.arrivals` takes the first
   arrival; the two private caches take the minimum. Checked over 60
   distance/depth/phase-order combinations: obspy returns arrivals time-sorted,
   so the idioms and both phase orderings are equivalent.
@@ -212,7 +212,7 @@ Verified clear, with the evidence, so these need not be re-checked:
 **Still open, deliberately not done blind:**
 
 1. **Two private taup caches** (`s_arrival_ablation.py`,
-   `verify_ponly_windows.py`) that `seismolib.arrivals` exists to replace. They
+   `verify_ponly_windows.py`) that `sismokaos.arrivals` exists to replace. They
    are NOT drop-in: they grid distance at 0.001 deg (~0.11 km) and depth at 1 km
    against the shared 5 km/5 km. Consolidating would move their numbers
    slightly, so it needs a before/after check, not a rename.
@@ -222,7 +222,7 @@ Verified clear, with the evidence, so these need not be re-checked:
 3. **`ForecastTCN(num_channels=[64,64,64])`** is a mutable default. Never
    mutated, so harmless today; left alone because the class was moved
    byte-identical and changing the signature breaks that guarantee.
-4. **Pass 2 not started:** `src/forecasting/` and `src/features/` were scanned
+4. **Pass 2 not started:** `src/sismokaos/forecasting/` and `src/sismokaos/features/` were scanned
    mechanically but not read. The forecasting family is where the retracted
    results came from, so it deserves the closest reading.
 
@@ -238,7 +238,7 @@ so recurrence is load-bearing here rather than decorative. Cheap.
 Stage 2 consumes `aux = (log_snr, log_distance)`, and `log_distance` needs a
 catalogued hypocentre a false positive does not have. Options: a `--channels 2d`
 stage 2, a waveform-derived distance estimate, or propagated uncertainty. See
-`src/detection/cascade_eval.py`'s module docstring.
+`src/sismokaos/detection/cascade_eval.py`'s module docstring.
 
 ### 2.7 Retrain with continuous-background negatives
 

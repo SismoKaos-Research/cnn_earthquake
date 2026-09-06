@@ -1,7 +1,7 @@
 """Chaos-feature labelling and aggregation.
 
 One bug here would invalidate every downstream number silently: the chosen cell
-has a 6 HOUR horizon, and `seismolib.catalog.label_hours` truncates fractional
+has a 6 HOUR horizon, and `sismokaos.catalog.label_hours` truncates fractional
 days to zero. Calling it with 0.25 returns an all-negative label array with no
 error, no warning, and a perfectly plausible shape. `chaos_dataset` uses
 `count_events_in_window` instead, and this is what keeps it that way.
@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from forecasting.chaos_dataset import (HORIZON_HOURS, MIN_MAGNITUDE, RADIUS_KM,
+from sismokaos.forecasting.chaos_dataset import (HORIZON_HOURS, MIN_MAGNITUDE, RADIUS_KM,
                                        persistence_scores)
-from seismolib.catalog import count_events_in_window, label_hours
+from sismokaos.catalog import count_events_in_window, label_hours
 
 
 def hours(start, n):
@@ -97,7 +97,7 @@ def test_band_selection_boundaries():
     not an open tail, so a distant great earthquake is not a positive for a
     station that would barely register it above its own noise.
     """
-    from forecasting.chaos_dataset import MAGNITUDE_BANDS, band_selection
+    from sismokaos.forecasting.chaos_dataset import MAGNITUDE_BANDS, band_selection
 
     dist = np.array([0.0, 100.0, 100.1, 100.1, 300.0, 300.1, 300.1,
                      500.1, 500.1, 1000.0, 1000.1])
@@ -116,7 +116,7 @@ def test_band_selection_is_stricter_than_flat_far_out():
     strictly tighter than M>=2.5. Both directions matter: the first is why the
     positive count can rise, the second is why it can fall.
     """
-    from forecasting.chaos_dataset import MAGNITUDE_BANDS, band_selection
+    from sismokaos.forecasting.chaos_dataset import MAGNITUDE_BANDS, band_selection
 
     near = band_selection(np.array([50.0]), np.array([1.0]), MAGNITUDE_BANDS)
     assert near[0], "a nearby M1.0 qualifies under grading but not under M>=2.5"

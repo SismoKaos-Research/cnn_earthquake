@@ -18,7 +18,7 @@ fused model in every clean comparison run to date.
 ## 2. Architecture
 
 `CatalogMLPBranch`, part of `CatalogWaveformFusionNet`
-(`src/cnn_lstm_catalog_waveform_fusion.py`), used standalone via `--channels catalog`.
+(`src/sismokaos/forecasting/cnn_lstm_catalog_waveform_fusion.py`), used standalone via `--channels catalog`.
 
 - **Input:** one hour's catalog-feature vector — not a sequence. An LSTM was tried first and
   sat at chance, because catalog features barely change within a 24-hour window; a plain MLP
@@ -75,7 +75,7 @@ confound out.
 - **Persistence floor:** `max(0.5, base_rate_auc, max(pers_auc, 1 - pers_auc))`. The
   orientation term matters — an anti-predictive rule is as exploitable as a predictive one.
   See §6.
-- **Features** — best subset via LightGBM RFE (`src/catalog_feature_rfe.py`), 4 of 13:
+- **Features** — best subset via LightGBM RFE (`src/sismokaos/features/catalog_feature_rfe.py`), 4 of 13:
   1. `log1p(days since previous M≥4.5 event)`
   2. 30-day mean background-catalog magnitude
   3. coefficient of variation of inter-event times (90-day window)
@@ -169,7 +169,7 @@ attributable to neither version. Record the code state with each result.
 
 - **Raw 10 Hz CNN** — 0.3068, all seeds inverted.
 
-- **Next-event regression** (`src/next_event_regression.py`) — predict days until the next
+- **Next-event regression** (`src/sismokaos/forecasting/next_event_regression.py`) — predict days until the next
   M≥threshold event. In the well-powered arm (M≥3.0, 75–968 events/fold, no censoring) the
   model was **worse than a constant predictor in 3/3 folds**: −16.9% MAE with a log1p target,
   −46.9% raw, negative R² throughout. The M≥4.5 arm looked better (2/3) but its test folds

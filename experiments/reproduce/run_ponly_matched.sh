@@ -17,7 +17,7 @@ S=trained_model_ponly_matched
 mkdir -p "$S" logs
 for ch in 1d 2d; do
     echo "=== channels=$ch branch-1d=cnn-lstm ==="
-    .venv/bin/python src/detection/cnn_lstm_classify.py \
+    .venv/bin/python src/sismokaos/detection/cnn_lstm_classify.py \
         --dataset-dir "$D" --save-dir "$S" \
         --channels "$ch" --branch-1d cnn-lstm --fusion linear \
         --seq-transform asinh --batch-size 32 \

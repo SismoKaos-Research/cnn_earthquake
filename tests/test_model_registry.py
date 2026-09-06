@@ -1,7 +1,7 @@
 """Every registered architecture builds, runs, and agrees with its own class.
 
 The registry exists to stop the model's knobs and the task's flags from
-drifting apart (`seismolib/model/registry.py` explains what that drift cost).
+drifting apart (`sismokaos/model/registry.py` explains what that drift cost).
 A registry that itself drifts from the classes it describes would be worse than
 no registry, so the checks here are deliberately about agreement with the code
 rather than about the registry's internal consistency:
@@ -30,7 +30,7 @@ import sys
 import pytest
 import torch
 
-from seismolib.model.registry import (ARCHITECTURES, FAMILIES, REGISTRY,
+from sismokaos.model.registry import (ARCHITECTURES, FAMILIES, REGISTRY,
                                       ModelSpec, add_model_args, by_family,
                                       disagreements, spec_from_args)
 
@@ -123,7 +123,7 @@ def test_registry_defaults_match_constructor_defaults():
 
 def test_dual_channel_matches_the_hand_built_detector():
     """Registry-built == DualChannelBinaryNet, so existing checkpoints load."""
-    from detection.cnn_lstm_classify import DualChannelBinaryNet
+    from sismokaos.detection.cnn_lstm_classify import DualChannelBinaryNet
 
     kw = dict(hidden=48, fusion_dim=96, dropout=0.4, channels="all",
               fusion="linear", branch1d="cnn-lstm")
@@ -265,7 +265,7 @@ def test_detector_still_accepts_its_historical_flags_and_tag():
     """Every `--channels/--fusion/--branch-1d ...` in experiments/reproduce runs."""
     import os
 
-    from detection.cnn_lstm_classify import parse_args
+    from sismokaos.detection.cnn_lstm_classify import parse_args
 
     argv = ["--dataset-dir", "ds", "--channels", "all", "--fusion", "linear",
             "--branch-1d", "cnn-lstm", "--seq-transform", "asinh",
@@ -277,7 +277,7 @@ def test_detector_still_accepts_its_historical_flags_and_tag():
     finally:
         sys.argv = old_argv
     spec = spec_from_args(args)
-    # `seismolib.checkpoints` matches on this string, and quarantined
+    # `sismokaos.checkpoints` matches on this string, and quarantined
     # checkpoints are the cost of it changing.
     tag = f"{args.channels}_{args.fusion}_{spec.branch}_{args.seq_transform}"
     assert tag == "all_linear_cnn-lstm_asinh"
@@ -286,7 +286,7 @@ def test_detector_still_accepts_its_historical_flags_and_tag():
 
 def test_detector_withholds_aux_channels_it_cannot_honour():
     """--channels 1d+aux would build the 1d network under a different name."""
-    from detection.cnn_lstm_classify import parse_args
+    from sismokaos.detection.cnn_lstm_classify import parse_args
 
     old_argv = sys.argv
     try:
@@ -300,7 +300,7 @@ def test_detector_withholds_aux_channels_it_cannot_honour():
 
 def test_magnitude_keeps_its_checkpoint_names_and_gains_the_new_flags():
     """Default runs name files exactly as before; new arms get a segment."""
-    from magnitude.cnn_lstm_regression import parse_args
+    from sismokaos.magnitude.cnn_lstm_regression import parse_args
 
     def spec_for(extra):
         old_argv = sys.argv

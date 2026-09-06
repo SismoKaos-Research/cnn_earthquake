@@ -1,6 +1,6 @@
 """Magnitude x horizon: which cells give evaluable folds AND enough episodes?"""
 import numpy as np, pandas as pd
-from seismolib.catalog import load_hourly_features, load_aegean_events, label_hours
+from sismokaos.catalog import load_hourly_features, load_aegean_events, label_hours
 C="/home/hogib/Projects/Sismokaos/seismic_cli/catalogs/catalog_current.csv"
 FE="/home/hogib/Projects/Sismokaos/feature-extract/results/BODT/BODT_2024_05_01-2026_08_10_ENZ_features.npy"
 h=load_hourly_features(FE); idx=pd.DatetimeIndex(h.index)

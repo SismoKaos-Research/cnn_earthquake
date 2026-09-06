@@ -1,8 +1,8 @@
 """What networks exist, what they consume, and what their flags are.
 
-Twelve model classes are spread across `seismolib/model/` and five trainers,
+Twelve model classes are spread across `sismokaos/model/` and five trainers,
 and the only way to find out what any of them takes was to read its
-constructor. `seismolib.model.registry` is the table; this prints it.
+constructor. `sismokaos.model.registry` is the table; this prints it.
 
     sk models                       # every architecture, grouped by input kind
     sk models --family dual         # just the ones a dual-tensor task can train
@@ -18,7 +18,7 @@ write a `model.json` can be read back instead of remembered.
 import argparse
 import sys
 
-from seismolib.model.registry import (ARCHITECTURES, FAMILIES, REGISTRY,
+from sismokaos.model.registry import (ARCHITECTURES, FAMILIES, REGISTRY,
                                       ModelSpec, by_family)
 
 BOLD, DIM, OFF = "\033[1m", "\033[2m", "\033[0m"

@@ -9,7 +9,7 @@ tolerance for old tag layouts, and the refusal to average across runs.
 
 import pytest
 
-from seismolib.checkpoints import find_checkpoints, run_identity
+from sismokaos.checkpoints import find_checkpoints, run_identity
 
 # The tag as `cnn_lstm_classify.py` writes it today.
 NEW = "best_cnnlstm_classify_{ch}_{fu}_{br}_{tf}_{ds}_pid{pid}_seed{seed}.pth"

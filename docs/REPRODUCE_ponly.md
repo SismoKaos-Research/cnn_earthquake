@@ -59,7 +59,7 @@ export MC=~/Projects/Sismokaos/cnn_earthquake
 
 ```bash
 cd $DD
-.venv/bin/python src/arrival_from_catalog.py \
+.venv/bin/python seismic_cli/src/arrival_from_catalog.py \
     --window-seconds 3.4 --pre-arrival-seconds 2.0 \
     --out-name window_post_3.4s_ponly
 ```
@@ -80,7 +80,7 @@ generation time checks whether S landed inside the cut.
 
 ```bash
 cd $MC
-.venv/bin/python src/detection/verify_ponly_windows.py \
+.venv/bin/python src/sismokaos/detection/verify_ponly_windows.py \
     --metadata $DD/raw/data/batched_waveforms/window_post_3.4s_ponly/window_metadata.csv \
     --window-seconds 3.4 --pre-arrival-seconds 2.0
 ```
@@ -140,7 +140,7 @@ into same-named directories silently overwrite each other.
 
 ```bash
 cd $MC
-.venv/bin/python src/detection/negative_regime_transfer.py \
+.venv/bin/python src/sismokaos/detection/negative_regime_transfer.py \
     --ckpt-dir trained_model_ponly_matched \
     --datasets matched=$DD/dataset_specdual_ponly_3p4s_matched \
                band=$DD/dataset_specdual_ponly_3p4s_hard \
@@ -205,7 +205,7 @@ captured, `(AUC − floor) / (1 − floor)`.
 ### Transfer matrix — every arm against every regime
 
 ```bash
-.venv/bin/python src/detection/negative_regime_transfer.py \
+.venv/bin/python src/sismokaos/detection/negative_regime_transfer.py \
     --ckpt-dir trained_model_ponly_matched \
     --datasets matched=... band=... wideband=... natural=...
 ```
@@ -225,7 +225,7 @@ can.
 ### Operating envelope — what the detector finds and misses
 
 ```bash
-.venv/bin/python src/detection/operating_envelope.py \
+.venv/bin/python src/sismokaos/detection/operating_envelope.py \
     --detector-dir $DD/dataset_specdual_ponly_3p4s_matched \
     --magnitude-dir $DD/dataset_magreg_catalog_6s \
     --ckpt-dir trained_model_ponly_matched \
@@ -240,7 +240,7 @@ configuration where it ran 0.977 / 0.942 / 0.939. Recall by SNR rises
 ### Calibration and threshold
 
 ```bash
-.venv/bin/python src/detection/calibrate.py \
+.venv/bin/python src/sismokaos/detection/calibrate.py \
     --dataset-dir $DD/dataset_specdual_ponly_3p4s_matched \
     --ckpt-dir trained_model_ponly_matched \
     --channels 1d --branch-1d cnn-lstm --fusion linear --seq-transform asinh
@@ -258,7 +258,7 @@ This holds amplitude nearly constant and checks whether discrimination
 survives.
 
 ```bash
-.venv/bin/python src/detection/within_amplitude_auc.py \
+.venv/bin/python src/sismokaos/detection/within_amplitude_auc.py \
     --dataset-dir $DD/dataset_specdual_ponly_3p4s_matched \
     --ckpt-dir trained_model_ponly_matched --channels all
 ```
@@ -279,7 +279,7 @@ that the model fails at low SNR. It is not evidence of anything.
 ### S-dependence of the 6 s detector (separate experiment)
 
 ```bash
-.venv/bin/python src/detection/s_arrival_ablation.py \
+.venv/bin/python src/sismokaos/detection/s_arrival_ablation.py \
     --detector-dir $DD/dataset_specdual_catalog_6s_matched_hard \
     --magnitude-dir $DD/dataset_magreg_catalog_6s \
     --catalog $DD/catalogs/archive_superseded_2026-08-30/extracted_earthquakes.csv \

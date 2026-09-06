@@ -21,12 +21,12 @@ A test that only says "this runs" would pass on a sign error.
 import numpy as np
 import pytest
 
-from seismolib.arrivals import P_PHASES, S_PHASES, ArrivalTimes
-from seismolib.catalog import haversine_km
-from seismolib.metrics import (binary_report, majority_class_baseline,
+from sismokaos.arrivals import P_PHASES, S_PHASES, ArrivalTimes
+from sismokaos.catalog import haversine_km
+from sismokaos.metrics import (binary_report, majority_class_baseline,
                                predict_mean_baseline, regression_report,
                                safe_auc)
-from seismolib.splits import walk_forward_splits
+from sismokaos.splits import walk_forward_splits
 
 
 # --- distance -------------------------------------------------------------
@@ -171,7 +171,7 @@ def test_auto_split_picks_station_disjoint_when_it_can():
     """
     import pandas as pd
 
-    from magnitude.cnn_lstm_regression import resplit
+    from sismokaos.magnitude.cnn_lstm_regression import resplit
 
     many = pd.DataFrame({
         "split": ["train"] * 40,
@@ -203,7 +203,7 @@ def test_an_event_inside_the_feature_window_does_not_make_a_positive_label():
     """
     import pandas as pd
 
-    from seismolib.catalog import label_hours
+    from sismokaos.catalog import label_hours
 
     idx = pd.DatetimeIndex(["2026-01-01 00:00", "2026-01-01 01:00", "2026-01-01 02:00"])
     inside = np.array([np.datetime64("2026-01-01T00:30")])   # inside hour 0's features
@@ -225,7 +225,7 @@ def test_sub_day_horizons_are_not_truncated_to_zero():
     """`np.timedelta64(int(0.5), "D")` is ZERO days -- every label comes out 0."""
     import pandas as pd
 
-    from seismolib.catalog import label_hours
+    from sismokaos.catalog import label_hours
 
     idx = pd.DatetimeIndex(["2026-01-01 00:00"])
     # event 3 h after the feature window closes

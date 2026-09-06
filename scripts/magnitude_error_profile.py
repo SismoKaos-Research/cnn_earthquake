@@ -35,10 +35,10 @@ import torch
 from sklearn.linear_model import Ridge
 
 
-from magnitude.cnn_lstm_regression import (DualChannelRegressionNet,
+from sismokaos.magnitude.cnn_lstm_regression import (DualChannelRegressionNet,
                                            DualMagnitudeDataset, resplit)
-from magnitude.cnn_regression import AUX_COLUMNS
-from seismolib.model.registry import ModelSpec
+from sismokaos.magnitude.cnn_regression import AUX_COLUMNS
+from sismokaos.model.registry import ModelSpec
 
 
 def parse_args():

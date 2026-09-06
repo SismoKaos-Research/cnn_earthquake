@@ -28,18 +28,18 @@ run () {   # run <logname> <args...>
     fi
 }
 
-run chaos_screen      src/forecasting/chaos_univariate_screen.py \
+run chaos_screen      src/sismokaos/forecasting/chaos_univariate_screen.py \
                           --parquet "$BODT" --catalog "$CAT"
-run chaos_shape       src/forecasting/chaos_univariate_screen.py \
+run chaos_shape       src/sismokaos/forecasting/chaos_univariate_screen.py \
                           --parquet "$BODT" --catalog "$CAT" --shape
-run chaos_lags        src/forecasting/chaos_univariate_screen.py \
+run chaos_lags        src/sismokaos/forecasting/chaos_univariate_screen.py \
                           --parquet "$BODT" --catalog "$CAT" --lags
-run chaos_replication src/forecasting/chaos_station_replication.py \
+run chaos_replication src/sismokaos/forecasting/chaos_station_replication.py \
                           --catalog "$CAT" \
                           --station "BODT=$BODT" --station "DAT=$DAT"
-run chaos_forecast    src/forecasting/chaos_forecast.py \
+run chaos_forecast    src/sismokaos/forecasting/chaos_forecast.py \
                           --parquet "$BODT" --catalog "$CAT"
-run chaos_config_sweep src/forecasting/chaos_config_sweep.py \
+run chaos_config_sweep src/sismokaos/forecasting/chaos_config_sweep.py \
                           --parquet "$BODT" --catalog "$CAT" \
                           --out-csv logs/chaos_config_sweep_corrected.csv
 

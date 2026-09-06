@@ -181,7 +181,7 @@ model vs. 0.24–0.25 floor, 3-seed confirmed), the same pattern Task 3 already
 found. **Recommended system: the network above for "when," `ridge(max_mag,
 mean_mag, b_value, log_rate)` for "how big"** — two tools for two
 sub-questions, not a compromise. Combined prediction:
-`src/catalog_forecast_predict.py`.
+`src/sismokaos/forecasting/catalog_forecast_predict.py`.
 
 **Waveform features do not help (2026-08-30).** `catalog_forecast_report.md`
 listed folding in `Sismokaos-featureExtract`'s continuous features as future

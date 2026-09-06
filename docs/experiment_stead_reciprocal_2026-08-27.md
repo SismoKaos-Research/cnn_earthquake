@@ -1,7 +1,7 @@
 # The reciprocal: our detector on STEAD
 
 **Date:** 2026-08-27
-**Scripts:** `src/detection/stead_to_ponly_mseed.py`, `experiments/reproduce/build_stead_ponly.sh`,
+**Scripts:** `src/sismokaos/detection/stead_to_ponly_mseed.py`, `experiments/reproduce/build_stead_ponly.sh`,
 `experiments/reproduce/run_stead_reciprocal.sh`
 **Tests:** `tests/test_stead_conversion.py`
 
