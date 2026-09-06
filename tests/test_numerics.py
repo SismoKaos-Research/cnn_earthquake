@@ -157,3 +157,36 @@ def test_walk_forward_folds_never_train_on_their_own_future():
         assert tr.max() < te.min(), (
             f"fold {i}: train reaches index {tr.max()} but test starts at "
             f"{te.min()} -- the model would see its own future")
+
+
+# --- split protocol -------------------------------------------------------
+
+def test_auto_split_picks_station_disjoint_when_it_can():
+    """`--split-by auto` must not quietly pick the leaky protocol.
+
+    Every magnitude figure this project published came from a one-station
+    corpus, where the diagnostics print "LEAK: site response" and the number is
+    that station's estimator rather than an estimator. With 161 stations now
+    available the honest protocol should be what you get without asking.
+    """
+    import pandas as pd
+
+    from magnitude.cnn_lstm_regression import resplit
+
+    many = pd.DataFrame({
+        "split": ["train"] * 40,
+        "station_key": [f"KO.S{i % 8}" for i in range(40)],
+        "event_id": list(range(40)),
+    })
+    one = many.assign(station_key="KO.MANT")
+
+    assert many.station_key.nunique() > 1 and one.station_key.nunique() == 1
+    # the rule the trainer applies
+    pick = lambda d: "both" if d.station_key.nunique() > 1 else "event"
+    assert pick(many) == "both"
+    assert pick(one) == "event"
+
+    out = resplit(many.copy(), "both", seed=42)
+    tr = set(out[out.split == "train"].station_key)
+    te = set(out[out.split == "test"].station_key)
+    assert not (tr & te), f"'both' left stations shared: {tr & te}"

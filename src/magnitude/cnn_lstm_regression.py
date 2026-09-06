@@ -306,8 +306,8 @@ def parse_args():
     p.add_argument("--huber-delta", type=float, default=0.0,
                   help="If > 0 use SmoothL1 with this beta instead of plain L1 (MAE), "
                        "matching cnn_regression.py's convention.")
-    p.add_argument("--split-by", default="event",
-                  choices=["event", "station", "both", "detector"],
+    p.add_argument("--split-by", default="auto",
+                  choices=["auto", "event", "station", "both", "detector"],
                   help="event: the generator's own split, unchanged (default). station: "
                        "re-partition in memory so stations are disjoint (site response "
                        "cannot leak, but a shared event can). both: station-disjoint AND "
@@ -366,6 +366,22 @@ def main():
     if missing:
         raise ValueError(f"manifest.csv is missing {missing}. Regenerate with "
                          f"`seismic-cli generate-regression-dataset --dual`.")
+
+    if args.split_by == "auto":
+        # Station-disjoint whenever the corpus can support it. A single-station
+        # corpus cannot -- and every magnitude figure this project has published
+        # came from one, with the split diagnostics printing "LEAK: site
+        # response" underneath. Making the honest protocol the default, and the
+        # single-station case say so out loud, is the difference between "a
+        # magnitude estimator" and "this station's magnitude estimator".
+        n_st = manifest.station_key.nunique()
+        args.split_by = "both" if n_st > 1 else "event"
+        print(f"[split] --split-by auto -> {args.split_by!r} "
+              f"({n_st} station(s) in the corpus)")
+        if n_st == 1:
+            print("[split]   a one-station corpus cannot be split station-disjoint. "
+                  "Whatever this run reports is THIS STATION's estimator, and does "
+                  "not transfer -- say so wherever the number is quoted.")
 
     manifest = resplit(manifest, args.split_by, seed=args.seed_split,
                        detector_manifest=args.detector_manifest)
@@ -457,7 +473,12 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    spec.save(args.save_dir)
+    # The protocol travels with the weights, not just the geometry: a
+    # checkpoint scored under a different split is scored on a different test
+    # set, and the number that comes back is for a question nobody asked.
+    spec.save(args.save_dir,
+              protocol={"split_by": args.split_by, "seed_split": args.seed_split,
+                        "detector_manifest": args.detector_manifest})
     # The checkpoint name must identify the RUN, not just the task. A fixed
     # filename means two runs sharing --save-dir overwrite each other, and the
     # second silently reloads the first's weights at the end of training. That

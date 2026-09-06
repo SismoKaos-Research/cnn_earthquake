@@ -47,7 +47,7 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset-dir", required=True)
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--split-by", default="both",
+    p.add_argument("--split-by", default=None,
                    choices=["event", "station", "both", "detector"])
     p.add_argument("--seed-split", type=int, default=42)
     p.add_argument("--detector-manifest", default=None)
@@ -88,6 +88,25 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     root = Path(args.dataset_dir)
+
+    # The protocol comes from the checkpoint's own record when it has one.
+    # This defaulted to "both" while the trainer defaulted to "event", so
+    # scoring a checkpoint without repeating the flag re-derived a DIFFERENT
+    # test set than the training run reported on -- same model, same weights, a
+    # number for a question nobody asked.
+    proto = ModelSpec.load_extra(Path(args.ckpt).parent, "protocol") or {}
+    if args.split_by is None:
+        args.split_by = proto.get("split_by") or "event"
+        src = "model.json" if proto.get("split_by") else "fallback"
+        print(f"  [split] --split-by {args.split_by!r} (from {src})")
+    elif proto.get("split_by") and proto["split_by"] != args.split_by:
+        print(f"  [split] ** you passed --split-by {args.split_by!r} but this "
+              f"checkpoint was trained with {proto['split_by']!r}; the test set "
+              f"below is NOT the one its training log reported on **")
+    if proto.get("seed_split") is not None and args.seed_split != proto["seed_split"]:
+        print(f"  [split] ** --seed-split {args.seed_split} != the checkpoint's "
+              f"{proto['seed_split']}; a different partition is being scored **")
+
 
     man = pd.read_csv(root / "manifest.csv")
     # log_distance is derived at load time by the training script, not stored

@@ -496,20 +496,37 @@ class ModelSpec:
         return {"model": self.model, "branch": self.branch,
                 "params": dict(self.params)}
 
-    def save(self, out_dir, filename=SPEC_FILENAME):
+    def save(self, out_dir, filename=SPEC_FILENAME, **extra):
         """Writes the spec next to the checkpoints, so evaluation can read it.
 
         Args:
             out_dir: The `--save-dir` the run writes weights into.
             filename: Name to write; the default is what `load` looks for.
+            **extra: Further top-level fields, for things that are part of
+                reproducing a checkpoint but not part of the model -- the split
+                protocol above all. `magnitude_error_profile` defaulted to
+                `--split-by both` while the trainer defaulted to `event`, so
+                scoring a checkpoint without repeating the flag re-derived a
+                DIFFERENT test set than the training run had reported on.
 
         Returns:
             The `Path` written.
         """
         p = Path(out_dir) / filename
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(self.to_dict(), indent=2))
+        p.write_text(json.dumps({**self.to_dict(), **extra}, indent=2))
         return p
+
+    @staticmethod
+    def load_extra(out_dir, key, filename=SPEC_FILENAME):
+        """One non-model field written by `save`, or None."""
+        p = Path(out_dir) / filename
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text()).get(key)
+        except (OSError, ValueError):
+            return None
 
     @classmethod
     def load(cls, out_dir, filename=SPEC_FILENAME):

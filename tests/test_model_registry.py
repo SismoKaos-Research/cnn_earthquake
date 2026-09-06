@@ -356,3 +356,23 @@ def test_1d_2d_ignores_the_aux_vector_entirely():
         a = m(seq, img, torch.zeros(2, 2))
         b = m(seq, img, torch.full((2, 2), 99.0))
     assert torch.equal(a, b), "aux changed the output of a --channels 1d+2d model"
+
+
+def test_spec_carries_the_split_protocol_beside_the_weights(tmp_path):
+    """Geometry is not enough to reproduce a checkpoint's number.
+
+    magnitude_error_profile defaulted to `--split-by both` while the trainer
+    defaulted to `event`, so scoring a checkpoint without repeating the flag
+    re-derived a DIFFERENT test set than the training run had reported on --
+    same weights, same model, a number answering a question nobody asked. The
+    protocol now travels in the same file.
+    """
+    spec = ModelSpec(model="dual-channel", branch="lstm", params={"channels": "all"})
+    spec.save(tmp_path, protocol={"split_by": "both", "seed_split": 7,
+                                  "detector_manifest": None})
+
+    assert ModelSpec.load(tmp_path) == spec, "extra fields must not disturb the spec"
+    proto = ModelSpec.load_extra(tmp_path, "protocol")
+    assert proto["split_by"] == "both" and proto["seed_split"] == 7
+    assert ModelSpec.load_extra(tmp_path, "nope") is None
+    assert ModelSpec.load_extra(tmp_path / "absent", "protocol") is None
