@@ -53,6 +53,7 @@ from sklearn.metrics import roc_auc_score
 from sismokaos.detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 from sismokaos.magnitude import cnn_lstm_regression as reg
 from sismokaos.checkpoints import find_checkpoints, run_identity
+from sismokaos.model.registry import ModelSpec
 
 # Stage 1 is the spectrogram branch by design (see the module docstring), so the
 # checkpoint filter and the model constructor must agree on it. Naming it once
@@ -87,6 +88,16 @@ def parse_args():
     p.add_argument("--fusion-dim", type=int, default=96)
     p.add_argument("--reg-hidden", type=int, default=64)
     p.add_argument("--reg-fusion-dim", type=int, default=128)
+    p.add_argument("--reg-channels", default="2d+aux",
+                   choices=["all", "1d", "2d", "aux", "1d+aux", "2d+aux", "1d+2d"],
+                   help="Stage 2's branch configuration, used ONLY when the "
+                        "checkpoint has no model.json beside it. It stays "
+                        "'2d+aux' because that is what the spec-less "
+                        "checkpoints on disk actually are -- this is a "
+                        "compatibility fallback, not a recommendation. The "
+                        "trainer's default is the deployable '1d+2d', and "
+                        "anything trained since writes model.json, which wins "
+                        "over this flag.")
     return p.parse_args()
 
 
@@ -135,10 +146,36 @@ def stage2_predict(rows, root, aux_stats, ckpt, args, device):
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=False,
                                          num_workers=args.num_workers)
     seq0, img0, aux0, _ = ds[0]
-    model = reg.DualChannelRegressionNet(seq0.shape[-1], img0.shape[0], aux0.numel(),
-                                         hidden=args.reg_hidden,
-                                         fusion_dim=args.reg_fusion_dim,
-                                         channels="2d+aux").to(device)
+    # The saved spec wins over the flags, exactly as `magnitude_error_profile`
+    # does. Stage 2's geometry was hardcoded here as `channels="2d+aux"`, which
+    # is not even the default the trainer uses any more: scoring a checkpoint
+    # trained any other way then either raises on load_state_dict or, if the
+    # shapes happen to line up, quietly reports a different model's numbers.
+    spec = ModelSpec.load(Path(ckpt).parent)
+    if spec is None:
+        print(f"  [spec] no model.json beside {ckpt} -- falling back to "
+              f"channels={args.reg_channels!r}, hidden={args.reg_hidden}, "
+              f"fusion_dim={args.reg_fusion_dim}; check they match the run")
+        spec = ModelSpec(model="dual-channel", branch="lstm",
+                         params={"channels": args.reg_channels,
+                                 "hidden": args.reg_hidden,
+                                 "fusion_dim": args.reg_fusion_dim,
+                                 "fusion": "linear", "dropout": 0.3,
+                                 "lstm_layers": 1, "lstm_heads": 4})
+    else:
+        print(f"  [spec] stage 2: {spec.describe()}   (from model.json)")
+        asked = {"channels": args.reg_channels, "hidden": args.reg_hidden,
+                 "fusion_dim": args.reg_fusion_dim}
+        clash = {k: (v, spec.params.get(k)) for k, v in asked.items()
+                 if k in spec.params and v != spec.params[k]}
+        if clash:
+            print("  [spec] flags disagree with the saved spec; the SPEC is used:")
+            for k, (was, now) in clash.items():
+                print(f"           --reg-{k.replace('_', '-')} {was!r} ignored, "
+                      f"{now!r} used")
+
+    model = spec.build(seq_dim=seq0.shape[-1], img_channels=img0.shape[0],
+                       aux_dim=aux0.numel(), squeeze_output=True).to(device)
     model.load_state_dict(torch.load(ckpt, weights_only=True))
     model.eval()
 

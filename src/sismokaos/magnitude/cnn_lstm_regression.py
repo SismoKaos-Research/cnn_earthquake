@@ -295,7 +295,12 @@ def parse_args():
     # gains is --fusion and --model-branch: DualChannelNet has had a gated
     # fusion and a convolutional 1D front end all along, and only the detection
     # scripts ever exposed them. Magnitude has never been tried with either.
-    add_model_args(p, family="dual")
+    # Non-aux by default. The aux vector is (log_snr, log_distance), and
+    # log_distance needs a catalogued hypocentre -- which a fresh detection does
+    # not have. `all` trains a model that cannot be deployed on the thing it
+    # exists for, so the honest default is both waveform branches with aux
+    # withheld; pass --channels all to put the aux vector back for an ablation.
+    add_model_args(p, family="dual", defaults={"channels": "1d+2d"})
     p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
