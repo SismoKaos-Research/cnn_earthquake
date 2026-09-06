@@ -1,6 +1,6 @@
-"""Does this file's own scoring path still reproduce the benchmark?
+"""Does `scan`'s own scoring path still reproduce the benchmark?
 
-The scan path standardizes, asinh-compresses and batches windows itself rather
+That path standardizes, asinh-compresses and batches windows itself rather
 than loading dataset tensors, so it can drift from the training pipeline
 silently. Two checks: the vectorized filter must equal the per-window one it
 replaces, and real dataset tensors pushed through `score_block` must recover
@@ -40,7 +40,7 @@ def reference_clean(x, fs, freqmin, freqmax):
     """`seismic_cli.core.clean_and_filter_1d`, transcribed for one window.
 
     Kept here so the equivalence check runs anywhere -- the real function lives
-    in the data_downloader project, which is not on the machine that scans.
+    in the seismic_cli project, which is not on the machine that scans.
     """
     x = signal.detrend(x, type="linear")
     x = signal.detrend(x, type="constant")
@@ -72,9 +72,9 @@ def check_filter_equivalence(win=600, fs=100.0, freqmin=1.0, freqmax=45.0, n=64)
 
 
 def run(args):
-    """Reproduces the benchmark score through this file's own scoring path.
+    """Reproduces the benchmark score through `scan`'s own scoring path.
 
-    The scan path standardizes, asinh-compresses and batches windows itself
+    That path standardizes, asinh-compresses and batches windows itself
     rather than loading dataset tensors, so it can drift from the training
     pipeline silently. Two checks: the vectorized filter must equal the
     per-window one it replaces, and real dataset tensors pushed through
