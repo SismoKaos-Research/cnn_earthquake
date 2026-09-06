@@ -37,8 +37,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 from seismolib.checkpoints import find_checkpoints

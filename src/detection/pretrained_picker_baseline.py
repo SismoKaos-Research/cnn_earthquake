@@ -51,8 +51,6 @@ import pandas as pd
 import torch
 from scipy import signal
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from seismolib.metrics import safe_auc
 

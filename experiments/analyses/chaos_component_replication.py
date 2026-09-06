@@ -16,7 +16,6 @@ horizon at the END of the feature window. At the 6-hour chaos horizon that moved
 is not comparable with one produced after.
 """
 import re, sys, numpy as np
-sys.path.insert(0,"src")
 from scipy.stats import spearmanr
 
 # Recomputed directly rather than parsed out of a log: score both stations,

@@ -25,14 +25,10 @@ Usage:
 """
 
 import argparse
-import sys
-from pathlib import Path
 
 import numpy as np
 import torch
 from sklearn.metrics import brier_score_loss, matthews_corrcoef, roc_auc_score
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 from seismolib.checkpoints import find_checkpoints

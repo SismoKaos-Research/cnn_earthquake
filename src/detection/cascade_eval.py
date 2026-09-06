@@ -43,15 +43,12 @@ Usage:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.metrics import roc_auc_score
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.cnn_lstm_classify import DualChannelBinaryNet, RamDualTensorDataset
 from magnitude import cnn_lstm_regression as reg

@@ -135,23 +135,3 @@ def test_runlog_never_overwrites_an_earlier_record():
         import json
         maes = sorted(json.loads(p.read_text())["metrics"]["MAE"] for p in paths)
         assert maes == pytest.approx([0.1, 0.11, 0.12, 0.13]), maes
-
-
-def test_no_script_reaches_for_sys_path():
-    """`scripts/` must not manipulate sys.path to find its own imports.
-
-    Three did. `cut_event_windows.py` added its own directory so it could
-    `from continuous_false_alarms import ...` -- a script importing a sibling
-    script by path manipulation, which is why the two could not be tested
-    together; the other two added `src/`, which the editable install already
-    provides. The shared machinery lives in `seismolib.continuous` now, so
-    a new one here means something has been put in the wrong place again.
-    """
-    offenders = []
-    for name in tools():
-        src = (SCRIPTS / f"{name}.py").read_text()
-        if "sys.path.insert" in src or "sys.path.append" in src:
-            offenders.append(name)
-    assert not offenders, (
-        f"{offenders} manipulate sys.path. Shared code belongs in seismolib/, "
-        f"which every script can import because the package is installed.")

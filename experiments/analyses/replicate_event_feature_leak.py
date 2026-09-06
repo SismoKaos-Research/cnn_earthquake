@@ -23,7 +23,6 @@ features -- and both teams' results are reconciled rather than contradictory.
     python3 scripts/replicate_event_feature_leak.py --epochs 40
 """
 import argparse
-import sys
 
 import numpy as np
 import pandas as pd
@@ -31,7 +30,6 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import average_precision_score, precision_score, recall_score
 
-sys.path.insert(0, "src")
 from forecasting import chaos_dataset as cd
 from seismolib.catalog import STATION_COORDS, haversine_km
 from seismolib.metrics import safe_auc
