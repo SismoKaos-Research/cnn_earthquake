@@ -1429,8 +1429,12 @@ def cmd_timing(args):
     cat, _ = predicted_arrivals(args)
     ev = cat[(cat.p_epoch >= t.min() - 300) & (cat.p_epoch <= t.max() + 300)].copy()
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        ev = ev.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        # load_snr, not a raw read: a duplicated event_id expands `ev` on this
+        # join, and here that does not raise -- the loops below simply score the
+        # duplicated events twice, inflating the detection counts and the
+        # before-S fractions. DEMI's table carries 269 such ids.
+        ev = ev.merge(load_snr(args.snr_csv), left_on="EventID",
+                      right_on="event_id", how="left")
         n_all = len(ev)
         ev = ev[ev.snr >= args.snr_min].copy()
         print(f"  {len(ev):,} of {n_all:,} events reach SNR {args.snr_min:g}; "

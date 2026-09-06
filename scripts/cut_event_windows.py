@@ -46,7 +46,7 @@ from obspy import UTCDateTime
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from continuous_false_alarms import (component_segments, haversine,
+from continuous_false_alarms import (component_segments, haversine, load_snr,
                                      pick_components, predicted_arrivals,
                                      read_chunk)
 
@@ -152,8 +152,11 @@ def main():
 
     cat, (slat, slon) = predicted_arrivals(args)
     if args.snr_csv:
-        snr = pd.read_csv(args.snr_csv)[["event_id", "snr"]]
-        cat = cat.merge(snr, left_on="EventID", right_on="event_id", how="left")
+        # load_snr, not a raw read: a duplicated event_id expands `cat`, so the
+        # same event is cut twice and its inclusion depends on which of its two
+        # SNR readings the join happened to put first. load_snr keeps the larger.
+        cat = cat.merge(load_snr(args.snr_csv), left_on="EventID",
+                        right_on="event_id", how="left")
         before = len(cat)
         cat = cat[cat.snr >= args.snr_min]
         print(f"[events] {len(cat):,} of {before:,} reach SNR {args.snr_min:g}")

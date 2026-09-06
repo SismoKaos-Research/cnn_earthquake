@@ -241,13 +241,21 @@ def cmd_fetch(args):
 
     todo, skipped = [], 0
     for r in req.itertuples():
-        dest = out / f"event_{r.event_id}_{r.station}_raw.mseed"
-        if dest.exists():
+        # Station in the PATH, not the name. seismic-cli parses
+        # `^(?:noise_)?event_(.+?)_raw$` non-greedily, so `event_153534_TASB_raw`
+        # yields the event id "153534_TASB", matches no catalogue row, and the
+        # dataset build ends with "No labelled windows" after the whole encode.
+        # Flat files written before this are still honoured on resume, so an
+        # existing pull is not re-downloaded.
+        dest = out / str(r.station) / f"event_{r.event_id}_raw.mseed"
+        legacy = out / f"event_{r.event_id}_{r.station}_raw.mseed"
+        if dest.exists() or legacy.exists():
             continue
-        if dest.name in misses:
+        key = f"{r.station}/{dest.name}"
+        if key in misses:
             skipped += 1
             continue
-        todo.append((r, dest))
+        todo.append((r, dest, key))
     print(f"[fetch] {len(todo):,} to fetch, "
           f"{len(req) - len(todo) - skipped:,} already present, "
           f"{skipped:,} known-empty skipped"
@@ -259,7 +267,7 @@ def cmd_fetch(args):
     for i in range(0, len(todo), args.batch):
         chunk = todo[i:i + args.batch]
         bulk = [(r.network, r.station, "*", "HH*",
-                 UTCDateTime(r.start), UTCDateTime(r.end)) for r, _ in chunk]
+                 UTCDateTime(r.start), UTCDateTime(r.end)) for r, _, _ in chunk]
         try:
             st = client.get_waveforms_bulk(bulk)
         except Exception as e:
@@ -268,7 +276,7 @@ def cmd_fetch(args):
             st = None
             if "No data" not in str(e):
                 print(f"  bulk failed ({type(e).__name__}), falling back", flush=True)
-        for r, dest in chunk:
+        for r, dest, key in chunk:
             # Trim to THIS row's window. A bulk response is one Stream for the
             # whole batch, so selecting by station alone also picks up the same
             # station's traces from other rows -- which silently wrote 112 s of
@@ -284,7 +292,7 @@ def cmd_fetch(args):
                 except Exception:
                     miss += 1
                     if miss_fh:
-                        miss_fh.write(dest.name + "\n"); miss_fh.flush()
+                        miss_fh.write(key + "\n"); miss_fh.flush()
                     continue
             sel = sel.copy()
             sel.merge(method=1, fill_value=None)
@@ -299,9 +307,10 @@ def cmd_fetch(args):
             if len(keep) < 3:
                 miss += 1
                 if miss_fh:
-                    miss_fh.write(dest.name + "\n"); miss_fh.flush()
+                    miss_fh.write(key + "\n"); miss_fh.flush()
                 continue
             from obspy import Stream
+            dest.parent.mkdir(parents=True, exist_ok=True)
             Stream(keep).write(str(dest), format="MSEED")
             got += 1
         done = i + len(chunk)

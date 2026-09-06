@@ -97,3 +97,28 @@ def test_anchor_csv_accepts_both_spellings_of_the_id_column():
         "a missing id column must say what the file does have, not raise KeyError")
     assert "has no column" in src, (
         "a missing anchor column must be reported before the archive read")
+
+
+# ---------------------------------------------------------------------------
+# The FDSN fetcher writes into the same layout
+# ---------------------------------------------------------------------------
+
+def test_fdsn_fetch_puts_the_station_in_the_path():
+    """Same non-greedy trap, same fix, different producer.
+
+    `fdsn_magnitude_pull.py` wrote `event_153534_TASB_raw.mseed`, which
+    `parse_event_id` reads as the event id `153534_TASB`. The whole 13,150-window
+    corpus built from it ended with "No labelled windows" after a full encode.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "scripts" / "fdsn_magnitude_pull.py").read_text()
+    assert 'dest = out / str(r.station) / f"event_{r.event_id}_raw.mseed"' in src
+    assert consumer_parse("event_153534_raw") == "153534"
+    assert 'legacy = out / f"event_{r.event_id}_{r.station}_raw.mseed"' in src, (
+        "flat files from an earlier pull must still be honoured on resume, or a "
+        "completed 13,000-window pull is re-downloaded")
+    assert 'key = f"{r.station}/{dest.name}"' in src, (
+        "the miss log must be station-qualified: event_<id>_raw.mseed is now the "
+        "same name at every station, so keying on it alone would mark one "
+        "station's empty window as empty everywhere")
