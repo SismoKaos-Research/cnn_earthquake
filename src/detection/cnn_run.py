@@ -4,19 +4,27 @@ pickled model object (`trained_model/full_model.pth`), as saved by
 `training.run_training` via `torch.save(model, ...)` -- not from a
 state-dict checkpoint (see `cnn_run_from_state.py` for that variant).
 
-`torch.load(..., weights_only=False)` below unpickles the saved object by
-walking its exact module path, `training.ImprovedSeismicCNN`, and from
-there into `model.trunk2d.SETrunk2D` and `model/blocks.py`'s `ResBlock`/
-`SEBlock` via the class's MRO. That resolution is by qualified name, not by
-structural shape, so `ImprovedSeismicCNN`, `ResBlock`, and `SEBlock` must
-stay defined at exactly the module paths they're imported from below --
-renaming, moving, or re-defining any of them (here or in `training.py`)
-would make `full_model.pth` fail to unpickle. The `ResBlock, SEBlock`
-import is otherwise unused in this script; it is kept (with the
-`# noqa: F401` below) as the same backward-compatibility re-export
-`cnn_train.py`'s own docstring describes -- older checkpoints pickled
-before the `training.py` refactor may reference the legacy
-`cnn_train.ImprovedSeismicCNN` module path rather than `training`'s.
+`torch.load(..., weights_only=False)` unpickles by qualified name rather
+than by structural shape -- but **the name it asks for is `__main__`, not
+`training`.** The object was saved from a script, so the pickle references
+`__main__.ImprovedSeismicCNN`, `__main__.ResBlock` and `__main__.SEBlock`,
+which is why the imports below are into THIS module and why this file only
+works when run as a script (`tests/test_imports.py` skips it for that
+reason).
+
+**Corrected 2026-09-06.** This docstring used to say the classes "must stay
+defined at exactly the module paths they're imported from" and that moving
+them "would make `full_model.pth` fail to unpickle". That is not so, and it
+was checked: loading fails with `Can't get attribute 'ImprovedSeismicCNN' on
+<module '__main__'>` no matter where the class lives, and succeeds as soon as
+the three names are bound into `__main__` from wherever they now are. The
+constraint is on the imports in this file, not on the package layout -- and
+the claim had been shaping that layout.
+
+Converting the file to a state dict removes even that: verified to
+round-trip into a fresh `ImprovedSeismicCNN` and reproduce identical outputs
+on the same input (1,249,297 parameters, 90 state-dict keys). See
+`cnn_run_from_state.py`, which already takes that path.
 
 Loads the ImageFolder test split from `./dataset/test`, runs inference, and
 prints a confusion matrix, classification report, and ROC-AUC/MCC/Brier

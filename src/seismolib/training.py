@@ -6,9 +6,10 @@ Not a runnable script -- imported only. Both entry points use this:
 (spectrogram .pt tensors) import `ImprovedSeismicCNN`, `PRESETS`,
 `build_arg_parser`, `resolve_preset`, `print_config`, and `run_training`.
 `seed_everything` is imported by nearly every other training script in
-src/. `cnn_run.py` unpickles a full saved `ImprovedSeismicCNN` object by
-its qualified class path (`training.ImprovedSeismicCNN`), so that class
-must stay defined at this name and module path.
+src/. `cnn_run.py` unpickles a full saved `ImprovedSeismicCNN` object -- but the
+pickle references `__main__.ImprovedSeismicCNN`, not this module's path,
+because it was saved from a script. This class is NOT pinned here by that;
+see `cnn_run.py`'s docstring, where the claim is corrected and checked.
 
 Keeping the loop in one place is deliberate -- the two entry-point scripts
 had drifted apart, so fixes landed in one and not the other (the val/test
@@ -44,9 +45,15 @@ class ImprovedSeismicCNN(SETrunk2D):
     non-square spectrograms (e.g. 129x94) without modification.
 
     num_stages=4 keeps the original layer1..layer4 state-dict keys, so
-    existing checkpoints load unchanged. Stays defined at this name/module
-    path (rather than moving to model/trunk2d.py) because cnn_run.py unpickles
-    a full saved model object by qualified class path.
+    existing checkpoints load unchanged -- that constraint is real and is
+    about state-dict KEYS, which is what every checkpoint here actually
+    carries.
+
+    It used to say this class also had to stay at this module path because
+    cnn_run.py unpickles a full saved object by qualified name. Checked
+    2026-09-06: the pickle names `__main__`, not `training`, so the path is
+    not pinned. It could move to model/trunk2d.py alongside its own base
+    class; nothing but inertia keeps it here.
     """
     def __init__(self, dropout1=0.5, dropout2=0.3, hidden_dim=64, num_stages=4, in_channels=3):
         """Initializes the trunk with no auxiliary input and a single-logit output.
