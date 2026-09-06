@@ -6,7 +6,14 @@ ignored, N stations cost one slot instead of N and every plan involving more
 than a couple of stations divides by N.
 
 The payload's parallel-array shape (stations / location / device_codes /
-components) suggests it is supported, and nothing has ever tested it.
+components) suggests it is supported.
+
+**ANSWERED 2026-09-06: no.** A request for `[MANT, DEMI]` on a day both
+stations demonstrably recorded came back with one member, MANT, and a mail
+saying the data for "the station(s) you requested" was ready. N stations cost N
+slots. See `docs/experiment_tdvms_multistation_2026-09-06.md`; this script is
+kept because the reversed-order case is still open and because a service can
+change.
 
 **It had not been tested when this was rewritten (2026-09-06), despite two
 scripts existing that said they did.** `multistation_probe.py` requested
