@@ -1,0 +1,37 @@
+TU.ELBA (İstanbul)  41.1469 28.4307
+33 station(s) within 50-150 km, of 1,732 rows / 1,729 stations
+
+    # station            km  src      place
+    1 TU.IMRA         65.35  istasyon Bursa
+    2 TU.VIZE         68.80  istasyon Kırklareli
+    3 TU.SNCT         73.21  istasyon İstanbul
+    4 TU.SATE         73.21  istasyon İstanbul
+    5 TU.ESNK         73.68  istasyon Yalova
+    6 TU.TDAG         77.13  istasyon Tekirdağ
+    7 TU.MURA         79.12  istasyon Tekirdağ
+    8 TU.TRML         86.44  istasyon Yalova
+    9 TU.KURT         90.07  istasyon Yalova
+   10 TU.SFRN         90.92  istasyon Yalova
+   11 TU.BAND         92.34  istasyon Balıkesir
+   12 TU.ISIL         96.27  istasyon İstanbul
+   13 TU.MADA         96.33  istasyon Balıkesir
+   14 TU.AVCA         96.64  istasyon Kırklareli
+   15 TU.YYLC         99.25  istasyon Bursa
+   16 TU.KLC          99.38  istasyon Yalova
+   17 TU.KRSK        108.34  istasyon Bursa
+   18 TU.AVDN        113.29  istasyon Bursa
+   19 TU.SEMS        113.99  istasyon Kocaeli
+   20 TU.ARMN        115.39  istasyon Kırklareli
+   21 TU.SART        117.02  istasyon Tekirdağ
+   22 TU.TKOY        117.24  istasyon Tekirdağ
+   23 TU.UNCK        117.26  istasyon Bursa
+   24 TU.YGTL        118.96  istasyon Bursa
+   25 TU.TMAL        121.71  istasyon Tekirdağ
+   26 TU.ULDT        126.62  istasyon Bursa
+   27 TU.ERE         128.52  istasyon Bursa
+   28 TU.STBT        130.65  istasyon Bursa
+   29 TU.KIRK        131.64  istasyon Kırklareli
+   30 TU.CMH         132.10  istasyon Balıkesir
+   31 TU.HISA        146.56  istasyon Bilecik
+   32 TU.BLKS        146.78  istasyon Balıkesir
+   33 TU.KAND        147.67  istasyon Kocaeli
