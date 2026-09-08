@@ -39,6 +39,7 @@ COMMANDS = {
     "station-select": ("sismokaos.stations.select_afad_stations", "rank stations by catalogue coverage"),
     "station-range":  ("sismokaos.stations.station_detection_range", "per-event SNR at one station"),
     "station-loss":   ("sismokaos.stations.station_catalog_loss", "what a station's catalogue misses"),
+    "station-neighbors": ("sismokaos.stations.station_neighbors", "which stations sit within N km of one station"),
     "distances":      ("sismokaos.stations.manifest_distances", "recompute a manifest's distance_km from station coordinates"),
     # windowing
     "cut-events": ("sismokaos.windows.cut_event_windows", "cut arrival-anchored windows from continuous record"),
@@ -60,7 +61,7 @@ COMMANDS = {
 
 GROUPS = [
     ("acquire", ["campaign", "poll", "fdsn", "fdsn-noise", "plan-pull", "catalog"]),
-    ("stations", ["station-select", "station-range", "station-loss", "distances"]),
+    ("stations", ["station-select", "station-range", "station-loss", "station-neighbors", "distances"]),
     ("windows", ["cut-events", "cut-length"]),
     ("train", ["train"]),
     ("evaluate", ["falsealarm", "magprofile"]),
@@ -76,7 +77,7 @@ def usage():
     for group, names in GROUPS:
         print(f"  {group}")
         for n in names:
-            print(f"    {n:<16} {COMMANDS[n][1]}")
+            print(f"    {n:<18} {COMMANDS[n][1]}")
         print()
     print("Reproduction runners for published results live in experiments/reproduce/;")
     print("they are deliberately not commands here -- their value is being the exact")

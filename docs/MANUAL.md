@@ -13,7 +13,7 @@ inside a script or under `nohup`.
 - [2. FDSN pull — `sk fdsn`, `sk fdsn-noise`](#2-fdsn-pull)
 - [3. TDVMS campaign — `sk campaign`, `sk poll`](#3-tdvms-campaign)
 - [4. Catalogue — `sk catalog`](#4-catalogue)
-- [5. Stations — `sk station-select`, `station-range`, `station-loss`](#5-stations)
+- [5. Stations — `sk station-select`, `station-range`, `station-loss`, `station-neighbors`](#5-stations)
 - [6. Windows — `sk cut-events`, `sk cut-length`](#6-windows)
 - [7. Manifest repair — `sk distances`](#7-manifest-repair)
 - [8. Training — `sk train`, `sk models`](#8-training)
@@ -231,6 +231,43 @@ sk station-loss --stations CSV --broken CSV --truth CSV
 ```
 
 What a station's catalogue misses relative to a truth catalogue.
+
+### `sk station-neighbors`
+
+```
+sk station-neighbors --station S --radius R
+                     [--stations CSV] [--station-coords CSV]
+                     [--min-km M] [--top N] [--network N]
+                     [--near LAT,LON] [--out-csv OUT]
+```
+
+Which stations sit within N km of one station — the station-to-station query.
+Everything else in this repo measures event-to-station.
+
+**Pass both catalogues.** Neither is sufficient alone, and they disagree.
+`istasyon_katalog.csv` has 1,576 stations but carries a position for KO.KIZT
+that is 14.4 km wrong; `station_coords.csv` has the FDSN-checked positions
+(§7) but only 334 stations. Given both, coords wins the 179 keys they share
+and istasyon supplies the rest:
+
+```
+sk station-neighbors --station MANT --radius 200 --min-km 20 \
+    --stations catalogs/istasyon_katalog.csv \
+    --station-coords ../data_downloader/catalogs/station_coords.csv
+```
+
+**Use `--min-km` when you are picking a coincidence partner.** 189 pairs of
+distinct station keys in these catalogues are within 50 m of each other — the
+same site under two network codes. MANT's nearest neighbour is MANS, 8.7 m
+away. A co-located pair is fully common-mode, so it confirms nothing, which is
+the failure `sk falsealarm coincidence` exists to avoid.
+
+**An ambiguous station is refused, not guessed at.** 15 bare codes name two
+different places (TOKT is Balıkesir *or* Tokat, 727 km apart) and three keys
+collide even with the network on. The command exits 2 and lists the candidates
+rather than answering a different question silently. Give `NET.STA` or
+`--network` to disambiguate — except for TU.ERCT, TU.ERZM and TU.KOCA, which
+are two stations under one key and need `--near LAT,LON`.
 
 ---
 
