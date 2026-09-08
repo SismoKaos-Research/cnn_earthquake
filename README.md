@@ -48,7 +48,7 @@ grouped by what you are trying to do; each command keeps its own `--help`.
 
 ```
 acquire     campaign poll fdsn fdsn-noise plan-pull catalog
-stations    station-select station-range station-loss distances
+stations    station-select station-range station-loss station-neighbors distances
 windows     cut-events cut-length
 train       train
 evaluate    falsealarm magprofile
@@ -119,7 +119,6 @@ rather than a choice of script:
 sk train detect            --dataset-dir ds --model-branch cnn-lstm
 sk train magnitude         --dataset-dir ds --model-branch cnn-lstm --fusion gate
 sk train forecast-features --features-csv f.npy --catalog-path c.csv --model tcn
-sk train groundmotion      --dataset-dir ds --model-branch cnn
 ```
 
 `forecast-features` is the clearest case: one task, one set of labels and one
@@ -189,11 +188,10 @@ Each family subpackage keeps its own README indexing what is inside.
 | [`detection/`](src/sismokaos/detection/) | 23 | event vs noise, stacking, cross-corpus and cross-station evaluation, published-picker baselines |
 | [`magnitude/`](src/sismokaos/magnitude/) | 6 | magnitude regression and classification, risk classes |
 | [`forecasting/`](src/sismokaos/forecasting/) | 26 | catalogue and raw-waveform forecasting, fusion, chaos features, LOEO |
-| [`groundmotion/`](src/sismokaos/groundmotion/) | 4 | peak ground acceleration and velocity |
 | [`features/`](src/sismokaos/features/) | 11 | feature engineering, RFE, dataset builders |
 | [`continuous/`](src/sismokaos/continuous/) | 12 | scoring an uninterrupted station record — chunks, spans, association, alarms, and the six `falsealarm` subcommands |
 | [`acquisition/`](src/sismokaos/acquisition/) | 6 | the TDVMS ledger and its mail poller, the FDSN pull, the AFAD catalogue rebuild |
-| [`stations/`](src/sismokaos/stations/) | 3 | coverage ranking, per-event SNR, what a station's catalogue misses |
+| [`stations/`](src/sismokaos/stations/) | 6 | coverage ranking, per-event SNR, what a station's catalogue misses, station-radius queries, manifest distance repair |
 | [`windows/`](src/sismokaos/windows/) | 2 | cutting arrival-anchored windows, and re-cutting them to another length |
 | [`reporting/`](src/sismokaos/reporting/) | 3 | Markdown to .docx and .pdf, and the report figures |
 | [`tooling/`](src/sismokaos/tooling/) | 4 | `sk train`, `sk status`, `sk models`, `sk results` |
@@ -261,7 +259,7 @@ interpreter.
 
 ```bash
 experiments/reproduce/run_ponly_natural.sh
-experiments/reproduce/run_groundmotion_experiments.sh
+experiments/reproduce/run_stead_reciprocal.sh
 ```
 
 `docs/report.md`'s **Appendix: Reproduction Instructions** walks every number

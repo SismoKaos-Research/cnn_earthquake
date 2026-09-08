@@ -182,15 +182,6 @@ def _build_tcn(branch, p, shapes):
                        kernel_size=p["kernel_size"], dropout=p["dropout"])
 
 
-def _build_groundmotion(branch, p, shapes):
-    """GroundMotionNet; the branch is its `arch` argument."""
-    from sismokaos.groundmotion.cnn_groundmotion import GroundMotionNet
-    return GroundMotionNet(arch="cnn_lstm" if branch == "cnn-lstm" else "cnn",
-                           n_aux=shapes.get("aux_dim", 0), width=p["width"],
-                           hidden=p["hidden"], dropout=p["dropout"],
-                           heads=p["heads"])
-
-
 def _build_cnn_proximity(branch, p, shapes):
     """CNNProximityClassifier."""
     from sismokaos.forecasting.cnn_proximity_classify import CNNProximityClassifier
@@ -343,25 +334,6 @@ ARCHITECTURES = (
                   "Dilated blocks; dilation doubles at each, so the receptive "
                   "field grows as 2**levels."),
             Param("kernel_size", int, 3, "Convolution kernel width."),
-        ),
-    ),
-    Architecture(
-        key="groundmotion", family="window",
-        summary="Conv1D trunk over one window, optional BiLSTM+attention, aux head",
-        inputs="seq (B,3,300), aux (B,A)",
-        source="sismokaos.groundmotion.cnn_groundmotion:GroundMotionNet",
-        build=_build_groundmotion,
-        branches=("cnn-lstm", "cnn"), default_branch="cnn-lstm",
-        branch_aliases=("--arch",),
-        branch_help=("cnn-lstm is the paper's stack; cnn pools the trunk directly "
-                     "and is the ablation that says whether the recurrent part "
-                     "earns its parameters. `cnn_lstm` is accepted as a spelling "
-                     "of `cnn-lstm`, matching the old --arch flag."),
-        params=(
-            Param("width", int, 32, "Base channel width of the Conv1D trunk."),
-            Param("hidden", int, 64, "LSTM hidden size, per direction, and head width."),
-            Param("dropout", float, 0.2, _DROPOUT),
-            Param("heads", int, 4, "Attention heads, when the branch has an LSTM."),
         ),
     ),
     Architecture(

@@ -70,11 +70,12 @@ from sismokaos.model.dual_channel import DualChannelNet
 from sismokaos.training import seed_everything
 
 # ---------------------------------------------------------------------------
-# Splits -- mirrors cnn_groundmotion.py's respilt/report_split (report.md
-# 13.8), applied here to check whether this task's event-disjoint headline
-# numbers (7.5-7.8) are inflated by site memorisation: 175/181 (3s) and
-# 148/152 (6s) stations appear in more than one split under the generator's
-# default event-disjoint grouping.
+# Splits -- re-split the corpus by event, by station, or by both, and report
+# which protocol produced a number (the pattern report.md 13.8 used for the
+# ground-motion task). Applied here to check whether this task's
+# event-disjoint headline numbers (7.5-7.8) are inflated by site memorisation:
+# 175/181 (3s) and 148/152 (6s) stations appear in more than one split under
+# the generator's default event-disjoint grouping.
 # ---------------------------------------------------------------------------
 
 def resplit(d, how, seed=42, ratios=(0.70, 0.15, 0.15), detector_manifest=None):

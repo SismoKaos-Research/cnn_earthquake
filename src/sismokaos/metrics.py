@@ -5,8 +5,7 @@ console format instead of a bespoke print block per script.
 
 Not a runnable script -- imported only. Callers: every training/eval script
 in src/ (cnn_lstm*.py, cnn_regression.py, cnn_riskclass.py, cnn_magclass.py,
-cnn_ram_aux.py, cnn_groundmotion.py, groundmotion_baselines.py,
-feature_lstm_forecast.py, raw_cnn_lstm_forecast.py,
+cnn_ram_aux.py, feature_lstm_forecast.py, raw_cnn_lstm_forecast.py,
 raw100hz_cnn_lstm_forecast.py, riskclass_scalar.py, lgbm_cluster.py).
 """
 

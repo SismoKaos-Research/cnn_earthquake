@@ -28,7 +28,6 @@ PREDICTS = {
     "detect": "is there an earthquake in this window",
     "magnitude": "how big the earthquake in this window is",
     "forecast": "whether an earthquake is coming, and when",
-    "shaking": "how hard the ground will move",
 }
 
 
@@ -139,12 +138,6 @@ TASKS = {t.key: t for t in (
     Task("chaos", "forecast", "sismokaos.forecasting.chaos_forecast",
          "forecasting from nonlinear-dynamics features",
          "as `forecast-features`, from chaos features instead"),
-
-    # ---- how hard will it shake -------------------------------------------
-    Task("groundmotion", "shaking", "sismokaos.groundmotion.cnn_groundmotion",
-         "Conv1D trunk, optional BiLSTM+attention, predicting PGA/PGV",
-         "the peak ground acceleration or velocity measured on the window",
-         models=("groundmotion",)),
 )}
 
 

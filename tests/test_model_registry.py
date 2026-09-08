@@ -50,8 +50,6 @@ CASES = {
                       lambda: (torch.randn(2, 20, 11),), (2,)),
     "gru": (dict(feat_dim=11), lambda: (torch.randn(2, 20, 11),), (2,)),
     "tcn": (dict(feat_dim=11), lambda: (torch.randn(2, 20, 11),), (2,)),
-    "groundmotion": (dict(aux_dim=2),
-                     lambda: (torch.randn(2, 3, 300), torch.randn(2, 2)), (2,)),
     "cnn-proximity": (dict(), lambda: (torch.randn(2, 3, HOUR),), (2,)),
     "day-3class": (dict(), lambda: (torch.randn(2, 4, 3, HOUR),), (2, 3)),
     "multiweek": (dict(), lambda: (torch.randn(2, 2, 7, 3, HOUR),), (2, 3)),
@@ -192,9 +190,14 @@ def test_model_branch_and_its_alias_are_the_same_flag():
 
 
 def test_underscored_branch_spelling_is_accepted():
-    """`--arch cnn_lstm` was the groundmotion flag; it must keep working."""
-    args = _parser(family="window").parse_args(["--model", "groundmotion",
-                                                "--arch", "cnn_lstm"])
+    """A branch named with underscores resolves to its hyphenated spelling.
+
+    This was pinned on the ground-motion model's `--arch cnn_lstm`, which is
+    how the flag had always been typed. That model is gone; the normalisation
+    is not, and every branch name in the registry is hyphenated, so a run
+    recorded with underscores must still build the same network.
+    """
+    args = _parser(family="dual").parse_args(["--branch-1d", "cnn_lstm"])
     assert spec_from_args(args).branch == "cnn-lstm"
 
 

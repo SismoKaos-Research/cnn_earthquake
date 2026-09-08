@@ -30,8 +30,7 @@ Usage:
 Also imported (not just run standalone): cnn_lstm_loeo.py imports
 `DualChannelRiskNet` and `risk_classes_from_manifest` from this module (same
 architecture and label-ordering logic, leave-one-earthquake-out split
-instead of chronological); cnn_groundmotion.py imports `LSTMAttentionBranch`
-re-exported here from model/blocks.py.
+instead of chronological).
 """
 
 import argparse
@@ -50,8 +49,6 @@ from sklearn.metrics import (balanced_accuracy_score, classification_report,
 from torch.utils.data import DataLoader, Dataset
 
 from sismokaos.metrics import multiclass_report, print_report
-from sismokaos.model.blocks import \
-    LSTMAttentionBranch  # noqa: F401 (re-exported; cnn_groundmotion.py etc. import it from here)
 from sismokaos.model.dual_channel import DualChannelNet
 from sismokaos.model.registry import add_model_args, spec_from_args
 from sismokaos.training import seed_everything

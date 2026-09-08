@@ -2,10 +2,11 @@
 dual-channel / sequence models (model/dual_channel.py, model/sequence.py).
 
 Not a runnable script -- imported only. Callers: training.py (ResBlock,
-SEBlock), cnn_lstm.py (LSTMAttentionBranch, re-exported for
-cnn_groundmotion.py, feature_lstm_forecast.py, raw_cnn_lstm_forecast.py),
-model/trunk2d.py (ResBlock), model/dual_channel.py (CNNBranch, GatedFusion,
-LSTMAttentionBranch), model/sequence.py (LSTMAttentionBranch).
+SEBlock), model/trunk2d.py (ResBlock), model/dual_channel.py (CNNBranch,
+GatedFusion, LSTMAttentionBranch), model/sequence.py (LSTMAttentionBranch),
+and the hierarchical forecasters (cnn_lstm_daily_3class.py,
+cnn_lstm_lstm_multiweek.py, cnn_lstm_catalog_waveform_fusion.py) which import
+LSTMAttentionBranch directly.
 """
 
 import torch
