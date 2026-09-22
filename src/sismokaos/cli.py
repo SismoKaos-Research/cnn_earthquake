@@ -25,6 +25,8 @@ diverge. Each tool also still runs standalone as
 import importlib
 import sys
 
+from sismokaos.runlog import RunLog
+
 # name -> (module, one-line description). Grouped below by what you are trying
 # to do, which is how a tool actually gets looked for.
 COMMANDS = {
@@ -105,7 +107,35 @@ def main():
     if fn is None:
         print(f"sk: {COMMANDS[name][0]} has no main()", file=sys.stderr)
         return 2
-    return fn() or 0
+    args = sys.argv[1:]
+    if name not in RECORDED or any(a in ("-h", "--help") for a in args):
+        return fn() or 0
+    # The commands that write data get the same run record as `sk train`
+    # (which opens its own). The FDSN pull and the distance repair behind the
+    # magnitude corpus left none, so that corpus could only be traced through
+    # shell history.
+    with RunLog(f"sk {name}", _out_dir(args), {"argv": args}) as log:
+        rc = fn() or 0
+        log.note(exit_code=rc)
+        if rc != 0:
+            log.finish(status="failed")
+    return rc
+
+
+# Commands that write data a later step trains or evaluates on.
+RECORDED = {"fdsn", "fdsn-noise", "catalog", "plan-pull", "station-range",
+            "distances", "cut-events", "cut-length"}
+
+
+def _out_dir(args):
+    """The output path named on a command line, or "" when there is none."""
+    for flag in ("--out-dir", "--output-dir", "--out", "--manifest"):
+        for i, a in enumerate(args):
+            if a == flag and i + 1 < len(args):
+                return args[i + 1]
+            if a.startswith(flag + "="):
+                return a.split("=", 1)[1]
+    return ""
 
 
 if __name__ == "__main__":

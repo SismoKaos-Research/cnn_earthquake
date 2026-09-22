@@ -137,6 +137,8 @@ def main():
         log.note(task_key=name, module=task.module, predicts=task.predicts)
         rc = fn() or 0
         log.note(exit_code=rc)
+        if rc != 0:
+            log.finish(status="failed")
     return rc
 
 
